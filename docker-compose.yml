@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: dayplan-app
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - NODE_ENV=production
+    # Remove the comment below to pass build-time args to Vite if needed in the Dockerfile
+    # build:
+    #   context: .
+    #   args:
+    #     - VITE_AI_API_KEY=${VITE_AI_API_KEY}
