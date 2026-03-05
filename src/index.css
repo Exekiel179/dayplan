@@ -1,29 +1,80 @@
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;900&family=ZCOOL+XiaoWei&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Oswald:wght@500;700&display=swap");
 @import "tailwindcss";
 
 :root {
-  --font-ui: "Outfit", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-display: "ZCOOL XiaoWei", "STKaiti", serif;
+  --font-ui: "Inter", "system-ui", "-apple-system", sans-serif;
+  --font-display: "Oswald", "Inter", sans-serif;
 }
 
 body {
   margin: 0;
   font-family: var(--font-ui);
-  background: linear-gradient(145deg, #f4f8f8 0%, #eef5f2 55%, #fef7ed 100%);
-  color: #0f172a;
+  background:
+    radial-gradient(circle at 15% 18%, rgba(125, 211, 252, 0.14), transparent 42%),
+    radial-gradient(circle at 86% 78%, rgba(45, 212, 191, 0.16), transparent 40%),
+    linear-gradient(135deg, #0b1f3a 0%, #10344f 45%, #135e69 100%);
+  color: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
   min-height: 100vh;
 }
 
-.quadrant-grid {
-  background-image:
-    linear-gradient(to right, rgba(148, 163, 184, 0.1) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(148, 163, 184, 0.1) 1px, transparent 1px);
-  background-size: 36px 36px;
+/* Glassmorphism Utilities */
+.glass-panel {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.52), rgba(8, 47, 73, 0.42));
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 16px 42px rgba(8, 47, 73, 0.28);
 }
 
+.glass-modal {
+  background: linear-gradient(180deg, rgba(8, 47, 73, 0.78), rgba(15, 23, 42, 0.84));
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 30px 65px -20px rgba(2, 6, 23, 0.72);
+}
+
+/* Custom Typography Headers */
 h1 {
   font-family: var(--font-display);
+}
+
+/* Glowing text utility */
+.text-glow {
+  text-shadow: 0 0 24px rgba(186, 230, 253, 0.38);
+}
+
+/* Quadrant Styles */
+.quadrant-grid {
+  background-color: rgba(8, 47, 73, 0.16);
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.2) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.2) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* Custom Scrollbar for sleekness */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Remove default blue outline on modal inputs */
+input:focus, textarea:focus {
+  outline: none;
 }

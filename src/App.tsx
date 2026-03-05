@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Plus, 
-  X, 
-  CheckCircle2, 
-  Circle, 
-  Sparkles, 
-  ChevronRight, 
-  ListTodo, 
+import {
+  Plus,
+  X,
+  CheckCircle2,
+  Circle,
+  Sparkles,
+  ChevronRight,
+  ListTodo,
   LayoutGrid,
   Trash2,
   Save,
@@ -128,7 +128,7 @@ async function requestAIPlan(task: Task) {
 }
 
 async function loadTasksFromApi() {
-  const response = await fetch('/api/tasks', {cache: 'no-store'});
+  const response = await fetch('/api/tasks', { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`load tasks failed: ${response.status}`);
   }
@@ -139,7 +139,7 @@ async function loadTasksFromApi() {
 async function persistTasksToApi(tasks: Task[]) {
   const response = await fetch('/api/tasks', {
     method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(tasks),
   });
   if (!response.ok) {
@@ -160,7 +160,7 @@ export default function App() {
   const [aiError, setAiError] = useState('');
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
   const [storageError, setStorageError] = useState('');
-  
+
   const quadrantRef = useRef<HTMLDivElement>(null);
   const hasHydratedRef = useRef(false);
 
@@ -210,7 +210,7 @@ export default function App() {
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    
+
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
 
@@ -273,11 +273,11 @@ export default function App() {
 
   const handleQuadrantClick = (e: React.MouseEvent) => {
     if (!isPlacementMode || !quadrantRef.current) return;
-    
+
     const rect = quadrantRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
-    
+
     const newTask: Task = {
       id: Math.random().toString(36).substr(2, 9),
       title: '',
@@ -288,7 +288,7 @@ export default function App() {
       steps: [],
       created_at: Date.now()
     };
-    
+
     setSelectedTask(newTask);
     setIsPlacementMode(false);
   };
@@ -326,12 +326,12 @@ export default function App() {
         completed: false
       }));
 
-      const updatedTask = { 
-        ...task, 
-        ai_plan: result.plan || '### 执行建议\n请按以下步骤推进，并在每个步骤完成后更新进度。', 
-        steps: newSteps 
+      const updatedTask = {
+        ...task,
+        ai_plan: result.plan || '### 执行建议\n请按以下步骤推进，并在每个步骤完成后更新进度。',
+        steps: newSteps
       };
-      
+
       setSelectedTask(updatedTask);
       saveTask(updatedTask);
     } catch (err) {
@@ -347,46 +347,60 @@ export default function App() {
   };
 
   return (
-    <div className="relative isolate min-h-screen flex flex-col overflow-hidden bg-[#f4f8f8] text-slate-900">
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -left-20 -top-28 h-96 w-96 rounded-full bg-[radial-gradient(circle,rgba(20,184,166,0.24),transparent_68%)]" />
-        <div className="absolute bottom-0 right-0 h-[34rem] w-[34rem] rounded-full bg-[radial-gradient(circle,rgba(251,146,60,0.17),transparent_70%)]" />
+    <div className="relative isolate min-h-screen flex flex-col overflow-hidden bg-[linear-gradient(135deg,#0b1f3a_0%,#10344f_45%,#135e69_100%)] text-slate-100 font-sans selection:bg-teal-500/30">
+      {/* Dynamic Ambient Background Elements */}
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <motion.div
+          animate={{ scale: [1, 1.12, 1], opacity: [0.18, 0.25, 0.18] }}
+          transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute -left-40 -top-40 h-[620px] w-[620px] rounded-full bg-[radial-gradient(circle,rgba(125,211,252,0.24),transparent_72%)] blur-[84px]"
+        />
+        <motion.div
+          animate={{ scale: [1, 1.18, 1], opacity: [0.12, 0.2, 0.12] }}
+          transition={{ duration: 15, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+          className="absolute right-0 bottom-0 h-[820px] w-[820px] rounded-full bg-[radial-gradient(circle,rgba(45,212,191,0.2),transparent_74%)] blur-[108px]"
+        />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[radial-gradient(circle_at_center,rgba(224,242,254,0.1)_0%,rgba(8,47,73,0.3)_56%,rgba(2,6,23,0.75)_100%)] opacity-85" />
       </div>
+
       {/* Header */}
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/70 bg-white/75 px-4 backdrop-blur-xl sm:px-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-600 shadow-lg shadow-teal-200">
-            <LayoutGrid className="text-white w-5 h-5" />
+      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/[0.05] glass-panel px-4 sm:px-6">
+        <div className="flex items-center gap-3 rounded-2xl border border-white/15 bg-white/[0.06] px-3 py-2 shadow-[0_10px_30px_rgba(8,47,73,0.28)] backdrop-blur-xl">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 via-teal-400 to-emerald-500 shadow-lg shadow-cyan-500/20 ring-1 ring-white/25">
+            <LayoutGrid className="text-white w-5 h-5 stroke-[2.5]" />
           </div>
-          <div>
-            <h1 className="text-base font-black tracking-tight leading-none sm:text-lg">Quadrant Master</h1>
-            <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">Eisenhower Matrix</p>
+          <div className="leading-none">
+            <h1 className="text-lg font-bold tracking-tight text-glow sm:text-xl bg-gradient-to-r from-cyan-100 via-white to-teal-100 bg-clip-text text-transparent">
+              Quadrant Master
+            </h1>
+            <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-100/80">Eisenhower Matrix</p>
           </div>
         </div>
-        
-        <div className="flex items-center gap-2 sm:gap-4">
-          <button 
+
+        <div className="flex items-center gap-3 sm:gap-4">
+          <button
             onClick={() => setIsTaskListOpen(true)}
-            className="relative rounded-xl p-2.5 transition-all hover:bg-slate-100 group"
+            className="relative rounded-xl p-2.5 transition-all hover:bg-white/5 active:scale-95 group border border-transparent hover:border-white/10"
           >
-            <ListTodo className="h-5 w-5 text-slate-600 group-hover:text-teal-600" />
+            <ListTodo className="h-5 w-5 text-slate-300 group-hover:text-teal-400 transition-colors" />
             {tasks.length > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-teal-500 text-[10px] font-bold text-white">
+              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-teal-500 text-[9px] font-bold text-white shadow-[0_0_10px_rgba(20,184,166,0.5)]">
                 {tasks.length}
               </span>
             )}
           </button>
-          <button 
+          <button
             onClick={handleAddTask}
             disabled={isPlacementMode}
             className={cn(
-              "rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition-all sm:flex sm:items-center sm:gap-2 sm:px-5 sm:py-2.5",
-              isPlacementMode 
-                ? "bg-slate-100 text-slate-400 cursor-not-allowed" 
-                : "bg-teal-600 text-white shadow-teal-100 hover:bg-teal-700"
+              "group relative overflow-hidden rounded-xl px-4 py-2 text-sm font-semibold transition-all sm:flex sm:items-center sm:gap-2 sm:px-5",
+              isPlacementMode
+                ? "bg-white/5 text-slate-500 cursor-not-allowed border border-white/5"
+                : "bg-white/10 text-white hover:bg-white/20 active:scale-95 border border-white/10"
             )}
           >
-            <Plus className="h-5 w-5 hidden sm:block" />
+            <div className="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-teal-500/10 to-teal-500/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+            <Plus className="h-4 w-4 hidden sm:block transition-transform group-hover:rotate-90" />
             <span>新建任务</span>
           </button>
         </div>
@@ -403,74 +417,85 @@ export default function App() {
 
       <main className="relative flex flex-1 overflow-hidden">
         {/* Left Collapsible Sidebar */}
-        <motion.div 
+        <motion.div
           animate={{ width: isSideNavOpen ? sideNavWidth : 0 }}
-          className="absolute inset-y-0 left-0 z-10 flex flex-col border-r border-white/80 bg-white/70 backdrop-blur-sm lg:relative shrink-0 overflow-hidden"
+          className="absolute inset-y-0 left-0 z-10 flex flex-col border-r border-white/[0.05] glass-panel lg:relative shrink-0 overflow-hidden"
         >
           {/* Resize Handle */}
-          <div 
+          <div
             onMouseDown={(e) => {
               e.preventDefault();
               setIsResizing(true);
             }}
             className={cn(
-              "absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/30 transition-colors z-20",
-              isResizing ? "bg-teal-500/50" : ""
+              "absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/20 transition-colors z-20 group",
+              isResizing ? "bg-teal-500/40" : ""
             )}
-          />
+          >
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 bg-white/20 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+          </div>
 
-          <div className="p-6 border-b flex items-center justify-between shrink-0">
-            <h2 className="text-sm font-black uppercase tracking-widest text-slate-400">任务目录</h2>
-            <button 
+          <div className="p-6 border-b border-white/[0.05] flex items-center justify-between shrink-0">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+              <ListTodo className="w-4 h-4 opacity-70" />
+              任务目录
+            </h2>
+            <button
               onClick={() => setIsSideNavOpen(false)}
-              className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors"
+              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-white"
             >
               <ChevronRight className="w-4 h-4 rotate-180" />
             </button>
           </div>
-          
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
             {sortedTasks.length === 0 ? (
-              <div className="text-center py-10 text-slate-300">
-                <p className="text-xs font-bold uppercase tracking-widest">暂无任务</p>
+              <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-60">
+                <ListTodo className="w-8 h-8 mb-3 opacity-20" />
+                <p className="text-xs font-medium uppercase tracking-widest">暂无进行中的任务</p>
               </div>
             ) : (
               sortedTasks.map(task => (
-                <div 
+                <div
                   key={task.id}
                   onClick={() => setSelectedTask(task)}
                   className={cn(
-                    "p-4 rounded-2xl border transition-all cursor-pointer group",
-                    selectedTask?.id === task.id 
-                      ? "bg-teal-600 border-teal-600 text-white shadow-lg shadow-teal-200" 
-                      : "bg-white border-slate-100 hover:border-teal-300 hover:shadow-md"
+                    "p-4 rounded-2xl border transition-all duration-300 cursor-pointer group relative overflow-hidden backdrop-blur-md",
+                    selectedTask?.id === task.id
+                      ? "bg-teal-500/10 border-teal-500/50 shadow-[0_0_20px_rgba(20,184,166,0.1)]"
+                      : "bg-white/[0.02] border-white/[0.05] hover:border-white/20 hover:bg-white/[0.05]"
                   )}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-bold text-sm line-clamp-2">{task.title || '未命名任务'}</h3>
+                  {/* Subtle hover gradient */}
+                  <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                  <div className="relative flex items-start justify-between gap-3">
+                    <h3 className={cn(
+                      "font-semibold text-sm leading-snug line-clamp-2 transition-colors",
+                      selectedTask?.id === task.id ? "text-teal-50" : "text-slate-200 group-hover:text-white"
+                    )}>
+                      {task.title || '未命名任务'}
+                    </h3>
                     <div className={cn(
-                      "w-2 h-2 rounded-full shrink-0 mt-1.5",
-                      task.x > 50 ? (100 - task.y > 50 ? "bg-red-400" : "bg-amber-400") : (100 - task.y > 50 ? "bg-blue-400" : "bg-slate-300")
+                      "w-2 h-2 rounded-full shrink-0 shadow-[0_0_8px_currentColor]",
+                      task.x > 50 ? (100 - task.y > 50 ? "bg-rose-400 text-rose-400" : "bg-amber-400 text-amber-400") : (100 - task.y > 50 ? "bg-sky-400 text-sky-400" : "bg-slate-400 text-slate-400")
                     )} />
                   </div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <div className={cn(
-                        "h-1 w-12 rounded-full overflow-hidden",
-                        selectedTask?.id === task.id ? "bg-white/20" : "bg-slate-100"
-                      )}>
-                        <div 
-                          className={cn("h-full transition-all duration-500", selectedTask?.id === task.id ? "bg-white" : "bg-teal-500")}
+                  <div className="relative mt-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 h-1 bg-white/10 rounded-full overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all duration-500 ease-out shadow-[0_0_10px_currentColor]",
+                            selectedTask?.id === task.id ? "bg-teal-400 text-teal-400" : "bg-slate-400 text-slate-400"
+                          )}
                           style={{ width: `${task.steps.length > 0 ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100 : 0}%` }}
                         />
                       </div>
-                      <span className={cn("text-[9px] font-black", selectedTask?.id === task.id ? "text-white/60" : "text-slate-400")}>
+                      <span className="text-[10px] font-bold text-slate-400">
                         {task.steps.filter(s => s.completed).length}/{task.steps.length}
                       </span>
                     </div>
-                    <span className={cn("text-[8px] font-black uppercase tracking-wider", selectedTask?.id === task.id ? "text-white/40" : "text-slate-300")}>
-                      Imp: {Math.round(task.x)}
-                    </span>
                   </div>
                 </div>
               ))
@@ -480,96 +505,96 @@ export default function App() {
 
         {/* Sidebar Toggle Button (when closed) */}
         {!isSideNavOpen && (
-          <button 
+          <button
             onClick={() => setIsSideNavOpen(true)}
-            className="absolute left-4 top-4 z-20 rounded-xl border border-slate-100 bg-white p-2 shadow-lg transition-all hover:bg-slate-50"
+            className="absolute left-4 top-4 z-20 rounded-xl border border-white/10 glass-panel p-2 shadow-2xl transition-all hover:bg-white/10 group"
           >
-            <ChevronRight className="w-5 h-5 text-slate-400" />
+            <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-white" />
           </button>
         )}
 
         <div className="relative flex flex-1 flex-col overflow-hidden">
           {/* Placement Mode Banner */}
-        <AnimatePresence>
-          {isPlacementMode && (
-            <motion.div 
-              initial={{ y: -50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: -50, opacity: 0 }}
-              className="absolute left-1/2 top-4 z-30 flex w-[calc(100%-1.5rem)] max-w-xl -translate-x-1/2 items-center gap-2 rounded-2xl bg-teal-600 px-4 py-3 text-white shadow-xl sm:gap-3 sm:px-6"
-            >
-              <MousePointer2 className="h-5 w-5 animate-bounce shrink-0" />
-              <span className="text-sm font-bold sm:text-base">请在象限中点击一个位置来放置任务</span>
-              <button 
-                onClick={() => setIsPlacementMode(false)}
-                className="ml-auto rounded-full p-1 hover:bg-white/20"
+          <AnimatePresence>
+            {isPlacementMode && (
+              <motion.div
+                initial={{ y: -50, opacity: 0, scale: 0.9 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: -50, opacity: 0, scale: 0.9 }}
+                className="absolute left-1/2 top-4 z-30 flex w-[calc(100%-1.5rem)] max-w-xl -translate-x-1/2 items-center gap-3 rounded-2xl bg-teal-500/20 px-4 py-3 text-teal-100 backdrop-blur-xl border border-teal-500/30 shadow-[0_0_30px_rgba(20,184,166,0.2)] sm:px-6"
               >
-                <X className="w-4 h-4" />
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                <MousePointer2 className="h-5 w-5 animate-bounce shrink-0 text-teal-300" />
+                <span className="text-sm font-semibold sm:text-base">请在象限中点击一个位置来放置任务</span>
+                <button
+                  onClick={() => setIsPlacementMode(false)}
+                  className="ml-auto rounded-full p-1.5 hover:bg-white/10 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-        {/* Quadrant Labels */}
-        <div className="pointer-events-none absolute inset-0 hidden grid-cols-2 grid-rows-2 md:grid">
-          {/* Q2: Top Left */}
-          <div className="border-r border-b border-slate-100 flex items-start justify-start p-8">
-            <span className="text-xs font-black text-slate-200 uppercase tracking-[0.2em]">Q2: 紧急但不重要</span>
-          </div>
-          {/* Q1: Top Right */}
-          <div className="border-b border-slate-100 flex items-start justify-end p-8 text-right">
-            <span className="text-xs font-black text-slate-200 uppercase tracking-[0.2em]">Q1: 重要且紧急</span>
-          </div>
-          {/* Q3: Bottom Left */}
-          <div className="border-r border-slate-100 flex items-end justify-start p-8">
-            <span className="text-xs font-black text-slate-200 uppercase tracking-[0.2em]">Q3: 不重要不紧急</span>
-          </div>
-          {/* Q4: Bottom Right */}
-          <div className="flex items-end justify-end p-8 text-right">
-            <span className="text-xs font-black text-slate-200 uppercase tracking-[0.2em]">Q4: 重要但不紧急</span>
-          </div>
-        </div>
-
-        {/* Axis Labels */}
-        <div className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 flex-col items-center gap-4 lg:flex">
-          <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-300 [writing-mode:vertical-lr]">重要性 (Importance)</div>
-          <div className="h-24 w-px bg-slate-100" />
-        </div>
-        <div className="pointer-events-none absolute left-1/2 top-6 hidden -translate-x-1/2 items-center gap-4 lg:flex">
-          <div className="w-24 h-px bg-slate-100" />
-          <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-300">紧急程度 (Urgency)</div>
-        </div>
-
-        {/* The Quadrant Stage */}
-        <div 
-          ref={quadrantRef}
-          onClick={handleQuadrantClick}
-          className={cn(
-            "flex-1 relative quadrant-grid transition-all duration-500",
-            isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
-          )}
-        >
-          {/* Ghost Point */}
-          {isPlacementMode && mousePos && (
-            <div 
-              className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
-              style={{ left: `${mousePos.x}%`, top: `${mousePos.y}%` }}
-            >
-              <div className="w-8 h-8 rounded-2xl border-2 border-dashed border-teal-400 bg-teal-50/50 flex items-center justify-center animate-pulse">
-                <Plus className="w-4 h-4 text-teal-400" />
-              </div>
+          {/* Quadrant Labels */}
+          <div className="pointer-events-none absolute inset-0 hidden grid-cols-2 grid-rows-2 md:grid">
+            {/* Q2: Top Left */}
+            <div className="border-r border-b border-white/[0.08] flex items-start justify-start p-8">
+              <span className="text-xs font-bold text-sky-100 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-sky-400/20 border border-sky-200/30 shadow-[0_8px_20px_rgba(56,189,248,0.2)]">Q2 紧急 & 不重要</span>
             </div>
-          )}
+            {/* Q1: Top Right */}
+            <div className="border-b border-white/[0.08] flex items-start justify-end p-8 text-right">
+              <span className="text-xs font-bold text-rose-100 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-rose-400/20 border border-rose-200/30 shadow-[0_8px_20px_rgba(251,113,133,0.18)]">Q1 重要 & 紧急</span>
+            </div>
+            {/* Q3: Bottom Left */}
+            <div className="border-r border-white/[0.08] flex items-end justify-start p-8">
+              <span className="text-xs font-bold text-slate-200 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-slate-400/20 border border-slate-200/25 shadow-[0_8px_20px_rgba(148,163,184,0.18)]">Q3 不重要 & 不紧急</span>
+            </div>
+            {/* Q4: Bottom Right */}
+            <div className="flex items-end justify-end p-8 text-right">
+              <span className="text-xs font-bold text-emerald-100 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-emerald-400/20 border border-emerald-200/30 shadow-[0_8px_20px_rgba(52,211,153,0.2)]">Q4 重要 & 不紧急</span>
+            </div>
+          </div>
 
-          {tasks.map(task => (
-            <TaskPoint 
-              key={task.id} 
-              task={task} 
-              onSelect={() => setSelectedTask(task)}
-              onMove={updateTaskPosition}
-            />
-          ))}
-        </div>
+          {/* Axis Labels */}
+          <div className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 flex-col items-center gap-4 lg:flex opacity-50">
+            <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-cyan-100/85 [writing-mode:vertical-lr]">重要性 (Importance)</div>
+            <div className="h-24 w-px bg-gradient-to-b from-transparent via-cyan-200/80 to-transparent" />
+          </div>
+          <div className="pointer-events-none absolute left-1/2 top-6 hidden -translate-x-1/2 items-center gap-4 lg:flex opacity-50">
+            <div className="w-24 h-px bg-gradient-to-r from-transparent via-cyan-200/80 to-transparent" />
+            <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-cyan-100/85">紧急程度 (Urgency)</div>
+          </div>
+
+          {/* The Quadrant Stage */}
+          <div
+            ref={quadrantRef}
+            onClick={handleQuadrantClick}
+            className={cn(
+              "flex-1 relative quadrant-grid transition-all duration-500 bg-[radial-gradient(circle_at_12%_12%,rgba(125,211,252,0.16),transparent_44%),radial-gradient(circle_at_88%_88%,rgba(45,212,191,0.14),transparent_42%)]",
+              isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
+            )}
+          >
+            {/* Ghost Point */}
+            {isPlacementMode && mousePos && (
+              <div
+                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
+                style={{ left: `${mousePos.x}%`, top: `${mousePos.y}%` }}
+              >
+                <div className="w-8 h-8 rounded-2xl border-2 border-dashed border-teal-400 bg-teal-50/50 flex items-center justify-center animate-pulse">
+                  <Plus className="w-4 h-4 text-teal-400" />
+                </div>
+              </div>
+            )}
+
+            {tasks.map(task => (
+              <TaskPoint
+                key={task.id}
+                task={task}
+                onSelect={() => setSelectedTask(task)}
+                onMove={updateTaskPosition}
+              />
+            ))}
+          </div>
         </div>
       </main>
 
@@ -577,59 +602,62 @@ export default function App() {
       <AnimatePresence>
         {isTaskListOpen && (
           <>
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsTaskListOpen(false)}
-              className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-30"
+              className="fixed inset-0 bg-slate-950/40 backdrop-blur-sm z-30"
             />
-            <motion.div 
+            <motion.div
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
-              className="fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col bg-white shadow-2xl sm:w-96"
+              className="fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col bg-[linear-gradient(180deg,rgba(8,47,73,0.92),rgba(15,23,42,0.9))] backdrop-blur-3xl shadow-2xl border-l border-white/10 sm:w-[400px]"
             >
-              <div className="p-8 border-b flex items-center justify-between bg-slate-50/50">
+              <div className="p-8 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
                 <div>
-                  <h2 className="text-xl font-bold">任务清单</h2>
+                  <h2 className="text-xl font-bold text-white">任务清单</h2>
                   <p className="text-xs text-slate-400 mt-1">共 {tasks.length} 个进行中的任务</p>
                 </div>
-                <button onClick={() => setIsTaskListOpen(false)} className="p-2 hover:bg-slate-200 rounded-xl transition-colors">
+                <button
+                  onClick={() => setIsTaskListOpen(false)}
+                  className="p-2.5 hover:bg-white/10 rounded-xl transition-colors text-slate-400 hover:text-white"
+                >
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
                 {tasks.length === 0 ? (
-                  <div className="text-center py-20 text-slate-300">
-                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <ListTodo className="w-8 h-8 opacity-20" />
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
+                    <div className="w-16 h-16 bg-white/[0.03] rounded-3xl flex items-center justify-center mb-6 ring-1 ring-white/5 shadow-inner">
+                      <ListTodo className="w-8 h-8 opacity-40" />
                     </div>
-                    <p className="font-medium">暂无进行中的任务</p>
-                    <p className="text-xs mt-1">点击“新建任务”开始规划</p>
+                    <p className="font-semibold text-sm">暂无进行中的任务</p>
+                    <p className="text-xs mt-2 opacity-60">点击“新建任务”开始规划</p>
                   </div>
                 ) : (
                   [...tasks].sort((a, b) => b.created_at - a.created_at).map(task => (
-                    <div 
+                    <div
                       key={task.id}
                       onClick={() => {
                         setSelectedTask(task);
                         setIsTaskListOpen(false);
                       }}
-                      className="p-5 border border-slate-100 rounded-2xl hover:border-teal-500 hover:shadow-xl hover:shadow-teal-500/5 transition-all cursor-pointer group bg-white"
+                      className="p-5 border border-white/10 rounded-2xl hover:border-teal-500/50 hover:bg-teal-500/5 hover:shadow-[0_0_20px_rgba(20,184,166,0.1)] transition-all cursor-pointer group bg-white/[0.02] backdrop-blur-md"
                     >
                       <div className="flex items-start justify-between gap-4">
-                        <h3 className="font-bold text-slate-800 group-hover:text-teal-600 transition-colors line-clamp-2">{task.title || '未命名任务'}</h3>
-                        <ChevronRight className="w-5 h-5 text-slate-300 group-hover:translate-x-1 group-hover:text-teal-500 transition-all shrink-0" />
+                        <h3 className="font-semibold text-slate-200 group-hover:text-white transition-colors line-clamp-2 leading-snug">{task.title || '未命名任务'}</h3>
+                        <ChevronRight className="w-5 h-5 text-slate-500 group-hover:translate-x-1 group-hover:text-teal-400 transition-all shrink-0" />
                       </div>
-                      <div className="mt-4 flex items-center gap-3">
-                        <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-teal-500 transition-all duration-500" 
+                      <div className="mt-5 flex items-center gap-4">
+                        <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden shadow-inner">
+                          <div
+                            className="h-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-500 shadow-[0_0_10px_rgba(20,184,166,0.5)]"
                             style={{ width: `${task.steps.length > 0 ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100 : 0}%` }}
                           />
                         </div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white/[0.05] px-2 py-0.5 rounded-md">
                           {task.steps.filter(s => s.completed).length}/{task.steps.length}
                         </span>
                       </div>
@@ -646,54 +674,54 @@ export default function App() {
       <AnimatePresence>
         {selectedTask && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setSelectedTask(null)}
               className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
             />
-            <motion.div 
+            <motion.div
               layoutId={selectedTask.id}
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[1.75rem] bg-white shadow-2xl sm:rounded-[2.5rem]"
+              className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[1.75rem] glass-modal sm:rounded-[2.5rem]"
             >
               {/* Modal Header */}
-              <div className="flex items-center justify-between border-b bg-slate-50/70 p-5 sm:p-8">
+              <div className="flex items-center justify-between border-b border-white/[0.05] bg-white/[0.02] p-5 sm:p-8">
                 <div className="flex items-center gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-lg shadow-teal-200 sm:h-12 sm:w-12">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 text-white shadow-lg shadow-teal-500/20 ring-1 ring-white/20 sm:h-12 sm:w-12">
                     <ListTodo className="w-6 h-6" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold sm:text-xl">任务详情</h2>
-                    <p className="text-xs text-slate-400 font-medium uppercase tracking-wider mt-1">Task Intelligence</p>
+                    <h2 className="text-lg font-bold text-white sm:text-xl">任务详情</h2>
+                    <p className="text-xs text-teal-400 font-bold uppercase tracking-widest mt-1">Task Intelligence</p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => setSelectedTask(null)} 
-                  className="rounded-2xl p-2 transition-colors hover:bg-slate-200 sm:p-3"
+                <button
+                  onClick={() => setSelectedTask(null)}
+                  className="rounded-2xl p-2 transition-colors hover:bg-white/10 text-slate-400 hover:text-white sm:p-3"
                 >
                   <X className="w-6 h-6" />
                 </button>
               </div>
 
-              <div className="flex-1 space-y-8 overflow-y-auto p-5 sm:space-y-10 sm:p-10">
+              <div className="flex-1 space-y-8 overflow-y-auto p-5 sm:space-y-10 sm:p-10 custom-scrollbar">
                 {/* Title & Description */}
                 <div className="space-y-6">
-                  <input 
+                  <input
                     type="text"
                     placeholder="给任务起个名字..."
-                    className="w-full text-3xl font-black border-none focus:ring-0 p-0 placeholder:text-slate-200 text-slate-900"
+                    className="w-full text-3xl font-bold border-none bg-transparent focus:ring-0 p-0 placeholder:text-slate-600 text-white"
                     value={selectedTask.title}
                     onChange={(e) => setSelectedTask({ ...selectedTask, title: e.target.value })}
                   />
-                  <div className="flex items-start gap-3 text-slate-400">
-                    <Info className="w-5 h-5 shrink-0 mt-0.5" />
-                    <textarea 
+                  <div className="flex items-start gap-4 text-slate-400 bg-white/[0.02] p-4 rounded-2xl border border-white/[0.05]">
+                    <Info className="w-5 h-5 shrink-0 mt-0.5 text-slate-500" />
+                    <textarea
                       placeholder="添加一些详细描述，AI 会根据这些信息为你规划..."
-                      className="w-full min-h-[100px] border-none focus:ring-0 p-0 text-slate-600 resize-none placeholder:text-slate-200 text-lg leading-relaxed"
+                      className="w-full min-h-[100px] border-none bg-transparent focus:ring-0 p-0 text-slate-300 resize-none placeholder:text-slate-600 text-base leading-relaxed"
                       value={selectedTask.description}
                       onChange={(e) => setSelectedTask({ ...selectedTask, description: e.target.value })}
                     />
@@ -703,77 +731,85 @@ export default function App() {
                 {/* AI Plan Section */}
                 <div className="space-y-6">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-300 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-amber-500" />
+                    <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-teal-400" />
                       AI 规划建议
                     </h3>
                     {!selectedTask.ai_plan && (
-                      <button 
+                      <button
                         onClick={() => generateAIPlan(selectedTask)}
                         disabled={isGeneratingPlan || !selectedTask.title}
-                        className="text-xs font-bold text-teal-600 hover:text-teal-700 flex items-center gap-2 disabled:opacity-30 bg-teal-50 px-4 py-2 rounded-xl transition-all"
+                        className="group relative overflow-hidden rounded-xl bg-white/[0.05] border border-white/10 px-4 py-2 text-xs font-bold text-teal-300 transition-all hover:bg-white/10 hover:border-teal-500/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                       >
+                        <div className="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-teal-500/10 to-teal-500/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
                         {isGeneratingPlan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                         生成智能计划
                       </button>
                     )}
                   </div>
                   {!AI_API_KEY && (
-                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-700">
+                    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-200 flex items-center gap-3">
+                      <Info className="w-4 h-4 text-amber-400 shrink-0" />
                       未检测到 `VITE_AI_API_KEY`，请先在 `.env.local` 配置后再生成 AI 计划。
                     </div>
                   )}
                   {aiError && (
-                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600">
+                    <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs font-semibold text-rose-200">
                       {aiError}
                     </div>
                   )}
-                  
+
                   {selectedTask.ai_plan ? (
-                    <div className="bg-slate-50 rounded-3xl p-8 border border-slate-100 prose prose-slate prose-sm max-w-none shadow-inner">
+                    <div className="bg-white/[0.02] rounded-3xl p-8 border border-white/[0.05] prose prose-invert prose-sm max-w-none shadow-inner prose-headings:text-slate-200 prose-p:text-slate-300 prose-a:text-teal-400 prose-strong:text-white">
                       <Markdown>{selectedTask.ai_plan}</Markdown>
-                      <button 
+                      <button
                         onClick={() => generateAIPlan(selectedTask)}
-                        className="mt-6 text-[10px] font-bold text-slate-400 hover:text-teal-600 uppercase tracking-widest flex items-center gap-2 transition-colors"
+                        className="mt-6 text-[10px] font-bold text-slate-500 hover:text-teal-400 uppercase tracking-widest flex items-center gap-2 transition-colors bg-white/5 px-3 py-1.5 rounded-lg"
                       >
                         <Sparkles className="w-3 h-3" /> 重新生成建议
                       </button>
                     </div>
                   ) : (
-                    <div className="border-2 border-dashed border-slate-100 rounded-[2rem] p-12 text-center group hover:border-teal-200 transition-all cursor-pointer" onClick={() => generateAIPlan(selectedTask)}>
-                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-                        <Sparkles className="w-8 h-8 text-slate-200 group-hover:text-amber-400 transition-colors" />
+                    <div
+                      className="relative overflow-hidden border border-white/[0.05] bg-white/[0.02] rounded-[2rem] p-12 text-center group hover:border-teal-500/30 transition-all cursor-pointer"
+                      onClick={() => generateAIPlan(selectedTask)}
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-teal-500/0 via-teal-500/0 to-teal-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <div className="w-16 h-16 bg-white/[0.03] ring-1 ring-white/10 rounded-full flex items-center justify-center mx-auto mb-5 group-hover:scale-110 transition-transform duration-500">
+                        <Sparkles className="w-8 h-8 text-slate-500 group-hover:text-teal-400 transition-colors" />
                       </div>
-                      <p className="text-sm font-bold text-slate-300 group-hover:text-slate-400 transition-colors">点击“生成计划”获取 AI 的专业建议</p>
+                      <p className="text-sm font-semibold text-slate-400 group-hover:text-teal-100 transition-colors">点击“生成计划”获取 AI 的专业建议</p>
                     </div>
                   )}
                 </div>
 
                 {/* Steps Section */}
                 <div className="space-y-6">
-                  <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-300">执行步骤</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">执行步骤</h3>
                   <div className="space-y-3">
                     {selectedTask.steps.map((step, idx) => (
-                      <motion.div 
+                      <motion.div
                         initial={{ x: -10, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
-                        key={step.id} 
-                        className="flex items-center gap-4 group bg-white p-2 rounded-2xl hover:bg-slate-50/50 transition-all"
+                        key={step.id}
+                        className="flex items-center gap-4 group bg-white/[0.02] border border-white/[0.05] p-3 rounded-2xl hover:bg-white/[0.05] hover:border-white/10 transition-all"
                       >
-                        <button 
+                        <button
                           onClick={() => {
                             const newSteps = [...selectedTask.steps];
                             newSteps[idx].completed = !newSteps[idx].completed;
                             setSelectedTask({ ...selectedTask, steps: newSteps });
                           }}
                           className={cn(
-                            "w-8 h-8 rounded-xl flex items-center justify-center transition-all shadow-sm",
-                            step.completed ? "bg-emerald-500 text-white" : "bg-white border-2 border-slate-100 text-transparent hover:border-teal-400"
+                            "w-7 h-7 rounded-xl flex items-center justify-center transition-all shadow-sm shrink-0",
+                            step.completed
+                              ? "bg-gradient-to-br from-teal-400 to-teal-600 text-white shadow-[0_0_15px_rgba(20,184,166,0.3)] ring-1 ring-teal-300/50"
+                              : "bg-white/5 border border-white/20 text-transparent hover:border-teal-400"
                           )}
                         >
-                          {step.completed ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+                          {step.completed ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
                         </button>
-                        <input 
+                        <input
                           type="text"
                           value={step.text}
                           onChange={(e) => {
@@ -782,22 +818,22 @@ export default function App() {
                             setSelectedTask({ ...selectedTask, steps: newSteps });
                           }}
                           className={cn(
-                            "flex-1 border-none focus:ring-0 p-0 text-base font-medium transition-all bg-transparent",
-                            step.completed ? "text-slate-300 line-through" : "text-slate-700"
+                            "flex-1 border-none bg-transparent focus:ring-0 p-0 text-sm font-medium transition-all",
+                            step.completed ? "text-slate-500 line-through" : "text-slate-200"
                           )}
                         />
-                        <button 
+                        <button
                           onClick={() => {
                             const newSteps = selectedTask.steps.filter((_, i) => i !== idx);
                             setSelectedTask({ ...selectedTask, steps: newSteps });
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-2 text-slate-200 hover:text-red-500 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-400/10 rounded-xl transition-all"
                         >
-                          <Trash2 className="w-5 h-5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </motion.div>
                     ))}
-                    <button 
+                    <button
                       onClick={() => {
                         const newStep: TaskStep = {
                           id: Math.random().toString(36).substr(2, 9),
@@ -806,9 +842,9 @@ export default function App() {
                         };
                         setSelectedTask({ ...selectedTask, steps: [...selectedTask.steps, newStep] });
                       }}
-                      className="w-full py-4 border-2 border-dashed border-slate-100 rounded-2xl text-sm text-slate-400 font-bold flex items-center justify-center gap-2 hover:border-teal-200 hover:text-teal-500 transition-all"
+                      className="w-full py-3 border border-dashed border-white/20 bg-white/[0.02] rounded-2xl text-sm text-slate-400 font-semibold flex items-center justify-center gap-2 hover:border-teal-500/50 hover:text-teal-300 hover:bg-teal-500/5 transition-all"
                     >
-                      <Plus className="w-5 h-5" />
+                      <Plus className="w-4 h-4" />
                       添加新步骤
                     </button>
                   </div>
@@ -816,31 +852,31 @@ export default function App() {
               </div>
 
               {/* Modal Footer */}
-              <div className="flex flex-col gap-3 border-t bg-slate-50/70 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-8">
-                <button 
+              <div className="flex flex-col gap-3 border-t border-white/[0.05] bg-white/[0.02] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                <button
                   onClick={() => deleteTask(selectedTask.id)}
-                  className="flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-bold text-red-500 transition-all hover:bg-red-50 hover:text-red-600 sm:justify-start sm:px-6"
+                  className="flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-rose-400 transition-all hover:bg-rose-500/10 sm:justify-start"
                 >
-                  <Trash2 className="w-5 h-5" />
+                  <Trash2 className="w-4 h-4" />
                   {tasks.some(t => t.id === selectedTask.id) ? '放弃任务' : '取消创建'}
                 </button>
-                <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-4">
-                  <button 
+                <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+                  <button
                     onClick={() => {
                       saveTask(selectedTask);
                       setSelectedTask(null);
                     }}
-                    className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-6 py-3.5 font-black text-slate-700 shadow-sm transition-all hover:border-slate-300 sm:px-8"
+                    className="flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-white/10"
                   >
-                    <Save className="w-5 h-5" />
+                    <Save className="w-4 h-4" />
                     {tasks.some(t => t.id === selectedTask.id) ? '保存更改' : '确认创建'}
                   </button>
                   {tasks.some(t => t.id === selectedTask.id) && (
-                    <button 
+                    <button
                       onClick={() => completeTask(selectedTask)}
-                      className="flex items-center justify-center gap-2 rounded-2xl bg-teal-600 px-8 py-3.5 font-black text-white shadow-xl shadow-teal-200 transition-all hover:bg-teal-700 sm:px-10"
+                      className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 px-6 py-2.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(20,184,166,0.3)] ring-1 ring-teal-400/50 transition-all hover:scale-[1.02] active:scale-95"
                     >
-                      <CheckCircle2 className="w-5 h-5" />
+                      <CheckCircle2 className="w-4 h-4" />
                       完成并移除
                     </button>
                   )}
@@ -869,11 +905,11 @@ function TaskPoint({ task, onSelect, onMove }: { task: Task, onSelect: () => voi
     const handleMouseMove = (e: MouseEvent) => {
       const container = pointRef.current?.parentElement;
       if (!container) return;
-      
+
       const rect = container.getBoundingClientRect();
       const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
       const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
-      
+
       onMove(task.id, x, y);
     };
 
@@ -889,19 +925,19 @@ function TaskPoint({ task, onSelect, onMove }: { task: Task, onSelect: () => voi
     };
   }, [isDragging, task.id, onMove]);
 
-  const progress = task.steps.length > 0 
-    ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100 
+  const progress = task.steps.length > 0
+    ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100
     : 0;
 
   return (
-    <motion.div 
+    <motion.div
       ref={pointRef}
       layoutId={task.id}
       initial={{ scale: 0, opacity: 0 }}
       animate={{ scale: 1, opacity: 1, left: `${task.x}%`, top: `${task.y}%` }}
       className="absolute -translate-x-1/2 -translate-y-1/2 z-10"
     >
-      <div 
+      <div
         onMouseDown={handleMouseDown}
         onClick={(e) => {
           e.stopPropagation();
@@ -909,31 +945,32 @@ function TaskPoint({ task, onSelect, onMove }: { task: Task, onSelect: () => voi
         }}
         className={cn(
           "relative group cursor-grab active:cursor-grabbing p-4",
-          isDragging && "scale-125"
+          isDragging && "scale-110 z-50"
         )}
       >
-        {/* Progress Ring / Circle */}
-        <div className="w-8 h-8 bg-white rounded-2xl shadow-xl border-2 border-teal-500 flex items-center justify-center overflow-hidden relative group-hover:ring-4 ring-teal-500/10 transition-all">
-          <div 
-            className="absolute bottom-0 left-0 right-0 bg-teal-500/10 transition-all duration-700"
+        {/* Progress Ring / Circle Backdrop */}
+        <div className="w-8 h-8 rounded-2xl flex items-center justify-center overflow-hidden relative transition-all duration-300 backdrop-blur-md bg-white/[0.05] border border-white/20 shadow-[0_4px_20px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_20px_rgba(20,184,166,0.3)] group-hover:border-teal-400/50">
+          <div
+            className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-teal-500/40 to-teal-500/10 transition-all duration-700"
             style={{ height: `${progress}%` }}
           />
+          {/* Core dot glow */}
           <div className={cn(
-            "w-2.5 h-2.5 rounded-full transition-all duration-500",
-            progress === 100 ? "bg-emerald-500 scale-125" : "bg-teal-600"
+            "w-2.5 h-2.5 rounded-full transition-all duration-500 shadow-[0_0_10px_currentColor]",
+            progress === 100 ? "bg-emerald-400 text-emerald-400 scale-125 shadow-[0_0_20px_currentColor]" : "bg-teal-300 text-teal-300 group-hover:scale-110"
           )} />
         </div>
 
-        {/* Floating Label */}
-        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 whitespace-nowrap pointer-events-none">
-          <motion.div 
-            initial={{ y: 5, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-xl shadow-xl border border-slate-100 flex items-center gap-2"
+        {/* Floating Tooltip Label */}
+        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          <motion.div
+            initial={{ y: 5 }}
+            animate={{ y: 0 }}
+            className="glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 border border-white/[0.05] shadow-2xl"
           >
-            <span className="text-[11px] font-black text-slate-800 tracking-tight">{task.title || '未命名'}</span>
+            <span className="text-[11px] font-semibold text-white tracking-tight">{task.title || '未命名'}</span>
             {progress > 0 && (
-              <span className="text-[9px] font-black text-teal-500 bg-teal-50 px-1.5 py-0.5 rounded-md">
+              <span className="text-[9px] font-bold text-teal-300 bg-teal-500/20 px-1.5 py-0.5 rounded-md border border-teal-500/30">
                 {Math.round(progress)}%
               </span>
             )}
