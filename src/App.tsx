@@ -114,6 +114,26 @@ async function loginByPassword(username: string, password: string) {
   };
 }
 
+async function registerByPassword(username: string, password: string) {
+  const response = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+
+  const payload = await response.json().catch(() => ({} as { error?: string; token?: string; username?: string }));
+  if (!response.ok) {
+    throw new Error(payload?.error || '注册失败');
+  }
+  if (!payload?.token) {
+    throw new Error('注册失败：未返回 token');
+  }
+  return {
+    token: payload.token,
+    username: payload.username || username,
+  };
+}
+
 async function validateSession(token: string) {
   const response = await fetch('/api/auth/session', {
     headers: withAuthHeaders(token),
@@ -136,6 +156,8 @@ export default function App() {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [loginUsername, setLoginUsername] = useState('admin');
   const [loginPassword, setLoginPassword] = useState('');
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
@@ -406,17 +428,25 @@ export default function App() {
       setLoginError('请输入账号和密码');
       return;
     }
+    if (authMode === 'register' && loginPassword !== registerConfirmPassword) {
+      setLoginError('两次输入的密码不一致');
+      return;
+    }
 
     setIsLoggingIn(true);
     setLoginError('');
     try {
-      const result = await loginByPassword(loginUsername.trim(), loginPassword);
+      const result = authMode === 'register'
+        ? await registerByPassword(loginUsername.trim(), loginPassword)
+        : await loginByPassword(loginUsername.trim(), loginPassword);
       if (typeof window !== 'undefined') {
         localStorage.setItem(AUTH_TOKEN_KEY, result.token);
       }
       setAuthToken(result.token);
       setAuthUser(result.username);
       setLoginPassword('');
+      setRegisterConfirmPassword('');
+      setAuthMode('login');
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : '登录失败');
     } finally {
@@ -439,8 +469,10 @@ export default function App() {
           onSubmit={handleLogin}
           className="w-full max-w-sm rounded-2xl border border-slate-600/70 bg-slate-900 px-6 py-7 shadow-2xl"
         >
-          <h1 className="text-xl font-bold text-white">账号登录</h1>
-          <p className="mt-2 text-xs text-slate-400">登录后可访问任务矩阵。</p>
+          <h1 className="text-xl font-bold text-white">{authMode === 'register' ? '注册账号' : '账号登录'}</h1>
+          <p className="mt-2 text-xs text-slate-400">
+            {authMode === 'register' ? '注册成功后将自动登录。' : '登录后可访问任务矩阵。'}
+          </p>
           <div className="mt-6 space-y-3">
             <input
               type="text"
@@ -456,6 +488,15 @@ export default function App() {
               placeholder="密码"
               className="w-full rounded-xl border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
             />
+            {authMode === 'register' && (
+              <input
+                type="password"
+                value={registerConfirmPassword}
+                onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+                placeholder="确认密码"
+                className="w-full rounded-xl border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+              />
+            )}
           </div>
           {loginError && (
             <div className="mt-4 rounded-xl border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-200">
@@ -467,7 +508,19 @@ export default function App() {
             disabled={isLoggingIn}
             className="mt-5 w-full rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isLoggingIn ? '登录中...' : '登录'}
+            {isLoggingIn ? (authMode === 'register' ? '注册中...' : '登录中...') : (authMode === 'register' ? '注册并登录' : '登录')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAuthMode((prev) => (prev === 'login' ? 'register' : 'login'));
+              setLoginError('');
+              setLoginPassword('');
+              setRegisterConfirmPassword('');
+            }}
+            className="mt-3 w-full text-xs font-semibold text-slate-400 transition-colors hover:text-slate-200"
+          >
+            {authMode === 'register' ? '已有账号，去登录' : '没有账号？注册一个'}
           </button>
         </form>
       </div>

@@ -1,5 +1,5 @@
-import express from 'express';
 import crypto from 'node:crypto';
+import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,16 +12,49 @@ const port = Number(process.env.PORT || 3000);
 
 const dataDir = path.resolve(__dirname, '.data');
 const legacyTasksFile = path.join(dataDir, 'tasks.json');
+const authUsersFile = path.join(dataDir, 'auth-users.json');
 const distDir = path.resolve(__dirname, 'dist');
 
 const AI_MODEL = process.env.AI_MODEL || process.env.VITE_AI_MODEL || 'gemini-3.1-pro-preview';
 const AI_API_BASE = (process.env.AI_BASE_URL || process.env.VITE_AI_BASE_URL || 'https://api.aipaibox.com').replace(/\/$/, '');
 const AI_API_KEY = process.env.AI_API_KEY || process.env.VITE_AI_API_KEY || '';
-const AUTH_USERS = parseAuthUsersFromEnv();
+const AUTH_ALLOW_REGISTRATION = (process.env.AUTH_ALLOW_REGISTRATION || 'true').toLowerCase() !== 'false';
+const SEED_USERS = parseSeedUsersFromEnv();
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24);
 const sessions = new Map();
 
-function parseAuthUsersFromEnv() {
+const SYSTEM_PROMPT = `你是一位高执行力任务规划助手。请严格返回 JSON，不要有任何额外文字。
+返回结构:
+{
+  "plan": "Markdown 形式的执行建议",
+  "steps": ["步骤1", "步骤2"]
+}
+要求:
+1. steps 至少 4 条。
+2. 每条步骤要具体、可执行。
+3. plan 使用中文并包含小标题。`;
+
+function normalizeUsername(username) {
+  return username.trim().toLowerCase();
+}
+
+function isValidUsername(username) {
+  return /^[a-zA-Z0-9._-]{3,32}$/.test(username);
+}
+
+function isValidPassword(password) {
+  return typeof password === 'string' && password.length >= 8 && password.length <= 128;
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  const passwordHash = crypto
+    .createHash('sha256')
+    .update(`${salt}:${password}`, 'utf-8')
+    .digest('hex');
+  return { salt, passwordHash };
+}
+
+function parseSeedUsersFromEnv() {
   const raw = process.env.AUTH_USERS;
   if (raw) {
     try {
@@ -35,7 +68,7 @@ function parseAuthUsersFromEnv() {
           return users;
         }
       }
-    } catch (error) {
+    } catch {
       console.warn('Invalid AUTH_USERS JSON; fallback to AUTH_USERNAME/AUTH_PASSWORD');
     }
   }
@@ -45,16 +78,84 @@ function parseAuthUsersFromEnv() {
   return [{ username: fallbackUsername, password: fallbackPassword }];
 }
 
-const SYSTEM_PROMPT = `你是一位高执行力任务规划助手。请严格返回 JSON，不要有任何额外文字。
-返回结构:
-{
-  "plan": "Markdown 形式的执行建议",
-  "steps": ["步骤1", "步骤2"]
+async function readRegisteredUsers() {
+  try {
+    const text = await fs.promises.readFile(authUsersFile, 'utf-8');
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return [];
+    throw error;
+  }
 }
-要求:
-1. steps 至少 4 条。
-2. 每条步骤要具体、可执行。
-3. plan 使用中文并包含小标题。`;
+
+async function writeRegisteredUsers(users) {
+  await fs.promises.mkdir(dataDir, { recursive: true });
+  await fs.promises.writeFile(authUsersFile, JSON.stringify(users, null, 2), 'utf-8');
+}
+
+async function findUserForLogin(username, password) {
+  const normalized = normalizeUsername(username);
+  const registeredUsers = await readRegisteredUsers();
+  const registeredUser = registeredUsers.find((u) => u.username_normalized === normalized);
+  if (registeredUser) {
+    const { passwordHash } = hashPassword(password, registeredUser.salt);
+    if (passwordHash === registeredUser.password_hash) {
+      return {
+        username: registeredUser.username,
+        source: 'registered',
+      };
+    }
+    return null;
+  }
+
+  const seedUser = SEED_USERS.find((u) => normalizeUsername(u.username) === normalized);
+  if (seedUser && seedUser.password === password) {
+    return {
+      username: seedUser.username,
+      source: 'seed',
+    };
+  }
+
+  return null;
+}
+
+async function registerUser(username, password) {
+  if (!AUTH_ALLOW_REGISTRATION) {
+    throw new Error('REGISTRATION_DISABLED');
+  }
+
+  const normalized = normalizeUsername(username);
+  if (!isValidUsername(username)) {
+    throw new Error('INVALID_USERNAME');
+  }
+  if (!isValidPassword(password)) {
+    throw new Error('INVALID_PASSWORD');
+  }
+
+  const seedExists = SEED_USERS.some((u) => normalizeUsername(u.username) === normalized);
+  if (seedExists) {
+    throw new Error('USER_EXISTS');
+  }
+
+  const users = await readRegisteredUsers();
+  const exists = users.some((u) => u.username_normalized === normalized);
+  if (exists) {
+    throw new Error('USER_EXISTS');
+  }
+
+  const { salt, passwordHash } = hashPassword(password);
+  const newUser = {
+    username: username.trim(),
+    username_normalized: normalized,
+    salt,
+    password_hash: passwordHash,
+    created_at: Date.now(),
+  };
+  users.push(newUser);
+  await writeRegisteredUsers(users);
+  return newUser.username;
+}
 
 function buildPrompt(task) {
   return `帮我为这个任务制定一个详细执行计划。
@@ -147,7 +248,7 @@ async function requestAIPlan(task) {
 }
 
 function getUserTasksFile(username) {
-  const safeUser = encodeURIComponent(username.trim().toLowerCase());
+  const safeUser = encodeURIComponent(normalizeUsername(username));
   return path.join(dataDir, 'users', safeUser, 'tasks.json');
 }
 
@@ -159,7 +260,6 @@ async function readTasks(username) {
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
     if (error && error.code === 'ENOENT') {
-      // Backward compatibility for old single-file storage.
       try {
         const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
         const parsed = JSON.parse(text);
@@ -193,8 +293,7 @@ function createSessionToken(username) {
 function parseBearerToken(authorizationHeader) {
   if (!authorizationHeader) return '';
   const [scheme, token] = authorizationHeader.split(' ');
-  if (!scheme || !token) return '';
-  if (scheme.toLowerCase() !== 'bearer') return '';
+  if (!scheme || !token || scheme.toLowerCase() !== 'bearer') return '';
   return token.trim();
 }
 
@@ -222,7 +321,41 @@ function requireAuth(req, res, next) {
 
 app.use(express.json({ limit: '1mb' }));
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
+  const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+
+  try {
+    const registeredUsername = await registerUser(username, password);
+    const token = createSessionToken(registeredUsername);
+    res.status(201).json({
+      token,
+      username: registeredUsername,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '注册失败';
+    if (message === 'REGISTRATION_DISABLED') {
+      res.status(403).json({ error: '当前环境不允许注册' });
+      return;
+    }
+    if (message === 'INVALID_USERNAME') {
+      res.status(400).json({ error: '用户名需为 3-32 位，仅支持字母、数字、._-' });
+      return;
+    }
+    if (message === 'INVALID_PASSWORD') {
+      res.status(400).json({ error: '密码长度需在 8-128 位' });
+      return;
+    }
+    if (message === 'USER_EXISTS') {
+      res.status(409).json({ error: '用户名已存在' });
+      return;
+    }
+    res.status(500).json({ error: '注册失败，请稍后重试' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
   const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!username || !password) {
@@ -230,16 +363,16 @@ app.post('/api/auth/login', (req, res) => {
     return;
   }
 
-  const matchedUser = AUTH_USERS.find((u) => u.username === username && u.password === password);
+  const matchedUser = await findUserForLogin(username, password);
   if (!matchedUser) {
     res.status(401).json({ error: '账号或密码错误' });
     return;
   }
 
-  const token = createSessionToken(username);
+  const token = createSessionToken(matchedUser.username);
   res.status(200).json({
     token,
-    username,
+    username: matchedUser.username,
     expiresAt: Date.now() + SESSION_TTL_MS,
   });
 });

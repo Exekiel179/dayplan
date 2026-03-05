@@ -1,12 +1,13 @@
-import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
 import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
 
 const dataDir = path.resolve(__dirname, '.data');
 const legacyTasksFile = path.join(dataDir, 'tasks.json');
+const authUsersFile = path.join(dataDir, 'auth-users.json');
 
 type Req = {
   method?: string;
@@ -28,10 +29,11 @@ type AiConfig = {
 };
 
 type AuthConfig = {
-  users: Array<{
+  seedUsers: Array<{
     username: string;
     password: string;
   }>;
+  allowRegistration: boolean;
   sessionTtlMs: number;
 };
 
@@ -45,6 +47,14 @@ type SessionRecord = {
   expiresAt: number;
 };
 
+type RegisteredUser = {
+  username: string;
+  username_normalized: string;
+  salt: string;
+  password_hash: string;
+  created_at: number;
+};
+
 const sessions = new Map<string, SessionRecord>();
 
 function sendJson(res: Res, statusCode: number, payload: unknown) {
@@ -53,8 +63,25 @@ function sendJson(res: Res, statusCode: number, payload: unknown) {
   res.end(JSON.stringify(payload));
 }
 
+function normalizeUsername(username: string) {
+  return username.trim().toLowerCase();
+}
+
+function isValidUsername(username: string) {
+  return /^[a-zA-Z0-9._-]{3,32}$/.test(username);
+}
+
+function isValidPassword(password: string) {
+  return typeof password === 'string' && password.length >= 8 && password.length <= 128;
+}
+
+function hashPassword(password: string, salt = crypto.randomBytes(16).toString('hex')) {
+  const passwordHash = crypto.createHash('sha256').update(`${salt}:${password}`, 'utf-8').digest('hex');
+  return { salt, passwordHash };
+}
+
 function getUserTasksFile(username: string) {
-  const safeUser = encodeURIComponent(username.trim().toLowerCase());
+  const safeUser = encodeURIComponent(normalizeUsername(username));
   return path.join(dataDir, 'users', safeUser, 'tasks.json');
 }
 
@@ -71,9 +98,7 @@ async function readTasks(username: string) {
         const parsed = JSON.parse(text);
         return Array.isArray(parsed) ? parsed : [];
       } catch (legacyError: unknown) {
-        if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') {
-          return [];
-        }
+        if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') return [];
         throw legacyError;
       }
     }
@@ -85,6 +110,22 @@ async function writeTasks(username: string, tasks: unknown[]) {
   const tasksFile = getUserTasksFile(username);
   await fs.promises.mkdir(path.dirname(tasksFile), { recursive: true });
   await fs.promises.writeFile(tasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
+}
+
+async function readRegisteredUsers() {
+  try {
+    const text = await fs.promises.readFile(authUsersFile, 'utf-8');
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? (parsed as RegisteredUser[]) : [];
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+async function writeRegisteredUsers(users: RegisteredUser[]) {
+  await fs.promises.mkdir(dataDir, { recursive: true });
+  await fs.promises.writeFile(authUsersFile, JSON.stringify(users, null, 2), 'utf-8');
 }
 
 async function readJsonBody(req: Req) {
@@ -154,15 +195,11 @@ async function requestPlanByChatCompletions(task: PlanTask, aiConfig: AiConfig) 
     })
   });
 
-  if (!response.ok) {
-    throw new Error(`chat completions failed: ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`chat completions failed: ${response.status}`);
 
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('chat completions returned empty content');
-  }
+  if (typeof content !== 'string' || !content.trim()) throw new Error('chat completions returned empty content');
   return parsePlanPayload(content);
 }
 
@@ -183,22 +220,16 @@ async function requestPlanByGemini(task: PlanTask, aiConfig: AiConfig) {
     })
   });
 
-  if (!response.ok) {
-    throw new Error(`generateContent failed: ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`generateContent failed: ${response.status}`);
 
   const data = await response.json();
   const content = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || '').join('\n');
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('generateContent returned empty content');
-  }
+  if (typeof content !== 'string' || !content.trim()) throw new Error('generateContent returned empty content');
   return parsePlanPayload(content);
 }
 
 async function requestAiPlan(task: PlanTask, aiConfig: AiConfig) {
-  if (!aiConfig.apiKey) {
-    throw new Error('服务器未配置 AI_API_KEY');
-  }
+  if (!aiConfig.apiKey) throw new Error('服务器未配置 AI_API_KEY');
   try {
     return await requestPlanByChatCompletions(task, aiConfig);
   } catch {
@@ -245,8 +276,96 @@ function requireAuth(req: Req, res: Res) {
   return session;
 }
 
+async function findUserForLogin(username: string, password: string, authConfig: AuthConfig) {
+  const normalized = normalizeUsername(username);
+  const registeredUsers = await readRegisteredUsers();
+  const registeredUser = registeredUsers.find((u) => u.username_normalized === normalized);
+  if (registeredUser) {
+    const { passwordHash } = hashPassword(password, registeredUser.salt);
+    if (passwordHash === registeredUser.password_hash) {
+      return { username: registeredUser.username };
+    }
+    return null;
+  }
+
+  const seedUser = authConfig.seedUsers.find((u) => normalizeUsername(u.username) === normalized);
+  if (seedUser && seedUser.password === password) {
+    return { username: seedUser.username };
+  }
+  return null;
+}
+
+async function registerUser(username: string, password: string, authConfig: AuthConfig) {
+  if (!authConfig.allowRegistration) throw new Error('REGISTRATION_DISABLED');
+  if (!isValidUsername(username)) throw new Error('INVALID_USERNAME');
+  if (!isValidPassword(password)) throw new Error('INVALID_PASSWORD');
+
+  const normalized = normalizeUsername(username);
+  const seedExists = authConfig.seedUsers.some((u) => normalizeUsername(u.username) === normalized);
+  if (seedExists) throw new Error('USER_EXISTS');
+
+  const users = await readRegisteredUsers();
+  if (users.some((u) => u.username_normalized === normalized)) throw new Error('USER_EXISTS');
+
+  const { salt, passwordHash } = hashPassword(password);
+  const newUser: RegisteredUser = {
+    username: username.trim(),
+    username_normalized: normalized,
+    salt,
+    password_hash: passwordHash,
+    created_at: Date.now(),
+  };
+  users.push(newUser);
+  await writeRegisteredUsers(users);
+  return { username: newUser.username };
+}
+
 function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
   return (req: Req, res: Res, next: () => void) => {
+    if (req.url?.startsWith('/api/auth/register')) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method not allowed' });
+        return;
+      }
+
+      readJsonBody(req)
+        .then(async (payload) => {
+          const body = (payload || {}) as { username?: string; password?: string };
+          const username = typeof body.username === 'string' ? body.username.trim() : '';
+          const password = typeof body.password === 'string' ? body.password : '';
+          try {
+            const result = await registerUser(username, password, authConfig);
+            const token = createSessionToken(result.username, authConfig);
+            sendJson(res, 201, {
+              token,
+              username: result.username,
+              expiresAt: Date.now() + authConfig.sessionTtlMs,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '注册失败';
+            if (message === 'REGISTRATION_DISABLED') {
+              sendJson(res, 403, { error: '当前环境不允许注册' });
+              return;
+            }
+            if (message === 'INVALID_USERNAME') {
+              sendJson(res, 400, { error: '用户名需为 3-32 位，仅支持字母、数字、._-' });
+              return;
+            }
+            if (message === 'INVALID_PASSWORD') {
+              sendJson(res, 400, { error: '密码长度需在 8-128 位' });
+              return;
+            }
+            if (message === 'USER_EXISTS') {
+              sendJson(res, 409, { error: '用户名已存在' });
+              return;
+            }
+            sendJson(res, 500, { error: '注册失败，请稍后重试' });
+          }
+        })
+        .catch((error) => sendJson(res, 500, { error: `register failed: ${(error as Error).message}` }));
+      return;
+    }
+
     if (req.url?.startsWith('/api/auth/login')) {
       if (req.method !== 'POST') {
         sendJson(res, 405, { error: 'method not allowed' });
@@ -254,7 +373,7 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
       }
 
       readJsonBody(req)
-        .then((payload) => {
+        .then(async (payload) => {
           const body = (payload || {}) as { username?: string; password?: string };
           const username = typeof body.username === 'string' ? body.username.trim() : '';
           const password = typeof body.password === 'string' ? body.password : '';
@@ -262,16 +381,17 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
             sendJson(res, 400, { error: '请输入账号和密码' });
             return;
           }
-          const matchedUser = authConfig.users.find((u) => u.username === username && u.password === password);
+
+          const matchedUser = await findUserForLogin(username, password, authConfig);
           if (!matchedUser) {
             sendJson(res, 401, { error: '账号或密码错误' });
             return;
           }
 
-          const token = createSessionToken(username, authConfig);
+          const token = createSessionToken(matchedUser.username, authConfig);
           sendJson(res, 200, {
             token,
-            username,
+            username: matchedUser.username,
             expiresAt: Date.now() + authConfig.sessionTtlMs,
           });
         })
@@ -357,7 +477,7 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
-  const authUsers = (() => {
+  const seedUsers = (() => {
     if (env.AUTH_USERS) {
       try {
         const parsed = JSON.parse(env.AUTH_USERS);
@@ -369,7 +489,7 @@ export default defineConfig(({ mode }) => {
           if (users.length > 0) return users;
         }
       } catch {
-        // fall back to single user env below
+        // ignore and fallback
       }
     }
     return [{
@@ -384,7 +504,8 @@ export default defineConfig(({ mode }) => {
     model: env.AI_MODEL || env.VITE_AI_MODEL || process.env.AI_MODEL || 'gemini-3.1-pro-preview',
   };
   const authConfig: AuthConfig = {
-    users: authUsers,
+    seedUsers,
+    allowRegistration: (env.AUTH_ALLOW_REGISTRATION || process.env.AUTH_ALLOW_REGISTRATION || 'true').toLowerCase() !== 'false',
     sessionTtlMs: Number(env.SESSION_TTL_MS || process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24),
   };
 
