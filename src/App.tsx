@@ -127,6 +127,26 @@ async function requestAIPlan(task: Task) {
   }
 }
 
+async function loadTasksFromApi() {
+  const response = await fetch('/api/tasks', {cache: 'no-store'});
+  if (!response.ok) {
+    throw new Error(`load tasks failed: ${response.status}`);
+  }
+  const data = await response.json();
+  return Array.isArray(data) ? (data as Task[]) : [];
+}
+
+async function persistTasksToApi(tasks: Task[]) {
+  const response = await fetch('/api/tasks', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(tasks),
+  });
+  if (!response.ok) {
+    throw new Error(`persist tasks failed: ${response.status}`);
+  }
+}
+
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -138,8 +158,11 @@ export default function App() {
   const [isResizing, setIsResizing] = useState(false);
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
   const [aiError, setAiError] = useState('');
+  const [isLoadingTasks, setIsLoadingTasks] = useState(true);
+  const [storageError, setStorageError] = useState('');
   
   const quadrantRef = useRef<HTMLDivElement>(null);
+  const hasHydratedRef = useRef(false);
 
   // Sorting logic for tasks in the sidebar
   // Importance = x, Urgency = 100 - y
@@ -199,22 +222,50 @@ export default function App() {
     };
   }, [isResizing]);
 
-  // Load tasks from localStorage
+  // Load tasks from disk-backed API
   useEffect(() => {
-    const saved = localStorage.getItem('quadrant_tasks');
-    if (saved) {
-      try {
-        setTasks(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse saved tasks", e);
-      }
-    }
+    let canceled = false;
+    setIsLoadingTasks(true);
+    loadTasksFromApi()
+      .then((loadedTasks) => {
+        if (canceled) return;
+        setTasks(loadedTasks);
+        setStorageError('');
+      })
+      .catch((e) => {
+        if (canceled) return;
+        console.error("Failed to load tasks", e);
+        setStorageError('任务加载失败，暂时显示为空。');
+      })
+      .finally(() => {
+        if (canceled) return;
+        setIsLoadingTasks(false);
+      });
+
+    return () => {
+      canceled = true;
+    };
   }, []);
 
-  // Save tasks to localStorage
+  // Persist tasks with debounce (avoid writing on every drag frame)
   useEffect(() => {
-    localStorage.setItem('quadrant_tasks', JSON.stringify(tasks));
-  }, [tasks]);
+    if (isLoadingTasks) return;
+    if (!hasHydratedRef.current) {
+      hasHydratedRef.current = true;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      persistTasksToApi(tasks)
+        .then(() => setStorageError(''))
+        .catch((e) => {
+          console.error("Failed to persist tasks", e);
+          setStorageError('任务保存失败，请稍后重试。');
+        });
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [tasks, isLoadingTasks]);
 
   const handleAddTask = () => {
     setIsPlacementMode(true);
@@ -340,6 +391,15 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {(isLoadingTasks || storageError) && (
+        <div className={cn(
+          "z-20 px-4 py-2 text-xs font-semibold sm:px-6",
+          storageError ? "bg-red-50 text-red-600" : "bg-slate-50 text-slate-500"
+        )}>
+          {storageError || '正在加载任务...'}
+        </div>
+      )}
 
       <main className="relative flex flex-1 overflow-hidden">
         {/* Left Collapsible Sidebar */}
@@ -883,4 +943,3 @@ function TaskPoint({ task, onSelect, onMove }: { task: Task, onSelect: () => voi
     </motion.div>
   );
 }
-
