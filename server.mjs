@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,12 +11,39 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 
 const dataDir = path.resolve(__dirname, '.data');
-const tasksFile = path.join(dataDir, 'tasks.json');
+const legacyTasksFile = path.join(dataDir, 'tasks.json');
 const distDir = path.resolve(__dirname, 'dist');
 
 const AI_MODEL = process.env.AI_MODEL || process.env.VITE_AI_MODEL || 'gemini-3.1-pro-preview';
 const AI_API_BASE = (process.env.AI_BASE_URL || process.env.VITE_AI_BASE_URL || 'https://api.aipaibox.com').replace(/\/$/, '');
 const AI_API_KEY = process.env.AI_API_KEY || process.env.VITE_AI_API_KEY || '';
+const AUTH_USERS = parseAuthUsersFromEnv();
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24);
+const sessions = new Map();
+
+function parseAuthUsersFromEnv() {
+  const raw = process.env.AUTH_USERS;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const users = parsed
+          .filter((u) => u && typeof u.username === 'string' && typeof u.password === 'string')
+          .map((u) => ({ username: u.username.trim(), password: u.password }))
+          .filter((u) => u.username.length > 0 && u.password.length > 0);
+        if (users.length > 0) {
+          return users;
+        }
+      }
+    } catch (error) {
+      console.warn('Invalid AUTH_USERS JSON; fallback to AUTH_USERNAME/AUTH_PASSWORD');
+    }
+  }
+
+  const fallbackUsername = process.env.AUTH_USERNAME || 'admin';
+  const fallbackPassword = process.env.AUTH_PASSWORD || 'admin123456';
+  return [{ username: fallbackUsername, password: fallbackPassword }];
+}
 
 const SYSTEM_PROMPT = `你是一位高执行力任务规划助手。请严格返回 JSON，不要有任何额外文字。
 返回结构:
@@ -118,49 +146,134 @@ async function requestAIPlan(task) {
   }
 }
 
-async function readTasks() {
+function getUserTasksFile(username) {
+  const safeUser = encodeURIComponent(username.trim().toLowerCase());
+  return path.join(dataDir, 'users', safeUser, 'tasks.json');
+}
+
+async function readTasks(username) {
+  const userTasksFile = getUserTasksFile(username);
   try {
-    const text = await fs.promises.readFile(tasksFile, 'utf-8');
+    const text = await fs.promises.readFile(userTasksFile, 'utf-8');
     const parsed = JSON.parse(text);
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
     if (error && error.code === 'ENOENT') {
-      return [];
+      // Backward compatibility for old single-file storage.
+      try {
+        const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
+        const parsed = JSON.parse(text);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (legacyError) {
+        if (legacyError && legacyError.code === 'ENOENT') {
+          return [];
+        }
+        throw legacyError;
+      }
     }
     throw error;
   }
 }
 
-async function writeTasks(tasks) {
-  await fs.promises.mkdir(dataDir, { recursive: true });
-  await fs.promises.writeFile(tasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
+async function writeTasks(username, tasks) {
+  const userTasksFile = getUserTasksFile(username);
+  await fs.promises.mkdir(path.dirname(userTasksFile), { recursive: true });
+  await fs.promises.writeFile(userTasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
+}
+
+function createSessionToken(username) {
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, {
+    username,
+    expiresAt: Date.now() + SESSION_TTL_MS,
+  });
+  return token;
+}
+
+function parseBearerToken(authorizationHeader) {
+  if (!authorizationHeader) return '';
+  const [scheme, token] = authorizationHeader.split(' ');
+  if (!scheme || !token) return '';
+  if (scheme.toLowerCase() !== 'bearer') return '';
+  return token.trim();
+}
+
+function getSession(token) {
+  if (!token) return null;
+  const session = sessions.get(token);
+  if (!session) return null;
+  if (session.expiresAt < Date.now()) {
+    sessions.delete(token);
+    return null;
+  }
+  return session;
+}
+
+function requireAuth(req, res, next) {
+  const token = parseBearerToken(req.headers.authorization);
+  const session = getSession(token);
+  if (!session) {
+    res.status(401).json({ error: '未登录或会话已过期' });
+    return;
+  }
+  req.authUser = session.username;
+  next();
 }
 
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/api/tasks', async (_req, res) => {
+app.post('/api/auth/login', (req, res) => {
+  const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!username || !password) {
+    res.status(400).json({ error: '请输入账号和密码' });
+    return;
+  }
+
+  const matchedUser = AUTH_USERS.find((u) => u.username === username && u.password === password);
+  if (!matchedUser) {
+    res.status(401).json({ error: '账号或密码错误' });
+    return;
+  }
+
+  const token = createSessionToken(username);
+  res.status(200).json({
+    token,
+    username,
+    expiresAt: Date.now() + SESSION_TTL_MS,
+  });
+});
+
+app.get('/api/auth/session', requireAuth, (req, res) => {
+  res.status(200).json({
+    ok: true,
+    username: req.authUser,
+  });
+});
+
+app.get('/api/tasks', requireAuth, async (req, res) => {
   try {
-    const tasks = await readTasks();
+    const tasks = await readTasks(req.authUser);
     res.status(200).json(tasks);
   } catch (error) {
     res.status(500).json({ error: `read failed: ${error.message}` });
   }
 });
 
-app.put('/api/tasks', async (req, res) => {
+app.put('/api/tasks', requireAuth, async (req, res) => {
   try {
     if (!Array.isArray(req.body)) {
       res.status(400).json({ error: 'payload must be an array' });
       return;
     }
-    await writeTasks(req.body);
+    await writeTasks(req.authUser, req.body);
     res.status(200).json({ ok: true });
   } catch (error) {
     res.status(500).json({ error: `write failed: ${error.message}` });
   }
 });
 
-app.post('/api/ai/plan', async (req, res) => {
+app.post('/api/ai/plan', requireAuth, async (req, res) => {
   try {
     const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
     const description = typeof req.body?.description === 'string' ? req.body.description : '';

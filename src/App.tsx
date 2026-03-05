@@ -13,7 +13,8 @@ import {
   Save,
   Loader2,
   MousePointer2,
-  Info
+  Info,
+  LogOut
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
@@ -24,12 +25,22 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-async function requestAIPlan(task: Task) {
+const AUTH_TOKEN_KEY = 'dayplan_auth_token';
+
+function withAuthHeaders(token: string, headers: Record<string, string> = {}) {
+  if (!token) return headers;
+  return {
+    ...headers,
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+async function requestAIPlan(task: Task, token: string) {
   const response = await fetch('/api/ai/plan', {
     method: 'POST',
-    headers: {
+    headers: withAuthHeaders(token, {
       'Content-Type': 'application/json',
-    },
+    }),
     body: JSON.stringify({
       title: task.title,
       description: task.description || '',
@@ -37,6 +48,9 @@ async function requestAIPlan(task: Task) {
   });
 
   const payload = await response.json().catch(() => ({} as { error?: string; plan?: string; steps?: string[] }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
   if (!response.ok) {
     throw new Error(payload?.error || `AI 请求失败 (${response.status})`);
   }
@@ -51,8 +65,14 @@ async function requestAIPlan(task: Task) {
   };
 }
 
-async function loadTasksFromApi() {
-  const response = await fetch('/api/tasks', { cache: 'no-store' });
+async function loadTasksFromApi(token: string) {
+  const response = await fetch('/api/tasks', {
+    cache: 'no-store',
+    headers: withAuthHeaders(token),
+  });
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
   if (!response.ok) {
     throw new Error(`load tasks failed: ${response.status}`);
   }
@@ -60,18 +80,65 @@ async function loadTasksFromApi() {
   return Array.isArray(data) ? (data as Task[]) : [];
 }
 
-async function persistTasksToApi(tasks: Task[]) {
+async function persistTasksToApi(tasks: Task[], token: string) {
   const response = await fetch('/api/tasks', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(tasks),
   });
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
   if (!response.ok) {
     throw new Error(`persist tasks failed: ${response.status}`);
   }
 }
 
+async function loginByPassword(username: string, password: string) {
+  const response = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+
+  const payload = await response.json().catch(() => ({} as { error?: string; token?: string; username?: string }));
+  if (!response.ok) {
+    throw new Error(payload?.error || '登录失败');
+  }
+  if (!payload?.token) {
+    throw new Error('登录失败：未返回 token');
+  }
+  return {
+    token: payload.token,
+    username: payload.username || username,
+  };
+}
+
+async function validateSession(token: string) {
+  const response = await fetch('/api/auth/session', {
+    headers: withAuthHeaders(token),
+  });
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(`session check failed: ${response.status}`);
+  }
+  const payload = await response.json().catch(() => ({} as { username?: string }));
+  return {
+    username: payload?.username || '',
+  };
+}
+
 export default function App() {
+  const [authToken, setAuthToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) || '' : ''));
+  const [authUser, setAuthUser] = useState('');
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [loginUsername, setLoginUsername] = useState('admin');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
@@ -87,6 +154,18 @@ export default function App() {
 
   const quadrantRef = useRef<HTMLDivElement>(null);
   const hasHydratedRef = useRef(false);
+
+  const clearAuth = () => {
+    setAuthToken('');
+    setAuthUser('');
+    setTasks([]);
+    setSelectedTask(null);
+    setIsLoadingTasks(false);
+    setStorageError('');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+    }
+  };
 
   // Sorting logic for tasks in the sidebar
   // Importance = x, Urgency = 100 - y
@@ -146,11 +225,46 @@ export default function App() {
     };
   }, [isResizing]);
 
+  // Validate auth session
+  useEffect(() => {
+    let canceled = false;
+
+    if (!authToken) {
+      setIsAuthChecking(false);
+      return;
+    }
+
+    setIsAuthChecking(true);
+    validateSession(authToken)
+      .then((session) => {
+        if (canceled) return;
+        setAuthUser(session.username);
+      })
+      .catch((e) => {
+        if (canceled) return;
+        console.error("Session validation failed", e);
+        clearAuth();
+      })
+      .finally(() => {
+        if (canceled) return;
+        setIsAuthChecking(false);
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [authToken]);
+
   // Load tasks from disk-backed API
   useEffect(() => {
     let canceled = false;
+    if (isAuthChecking || !authToken) {
+      setIsLoadingTasks(false);
+      return;
+    }
+
     setIsLoadingTasks(true);
-    loadTasksFromApi()
+    loadTasksFromApi(authToken)
       .then((loadedTasks) => {
         if (canceled) return;
         setTasks(loadedTasks);
@@ -159,6 +273,11 @@ export default function App() {
       .catch((e) => {
         if (canceled) return;
         console.error("Failed to load tasks", e);
+        if (e instanceof Error && e.message === 'UNAUTHORIZED') {
+          clearAuth();
+          setLoginError('登录已过期，请重新登录。');
+          return;
+        }
         setStorageError('任务加载失败，暂时显示为空。');
       })
       .finally(() => {
@@ -169,10 +288,11 @@ export default function App() {
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [authToken, isAuthChecking]);
 
   // Persist tasks with debounce (avoid writing on every drag frame)
   useEffect(() => {
+    if (!authToken) return;
     if (isLoadingTasks) return;
     if (!hasHydratedRef.current) {
       hasHydratedRef.current = true;
@@ -180,16 +300,21 @@ export default function App() {
     }
 
     const timer = window.setTimeout(() => {
-      persistTasksToApi(tasks)
+      persistTasksToApi(tasks, authToken)
         .then(() => setStorageError(''))
         .catch((e) => {
           console.error("Failed to persist tasks", e);
+          if (e instanceof Error && e.message === 'UNAUTHORIZED') {
+            clearAuth();
+            setLoginError('登录已过期，请重新登录。');
+            return;
+          }
           setStorageError('任务保存失败，请稍后重试。');
         });
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [tasks, isLoadingTasks]);
+  }, [tasks, isLoadingTasks, authToken]);
 
   const handleAddTask = () => {
     setIsPlacementMode(true);
@@ -242,7 +367,7 @@ export default function App() {
     setAiError('');
     setIsGeneratingPlan(true);
     try {
-      const result = await requestAIPlan(task);
+      const result = await requestAIPlan(task, authToken);
       const stepList = result.steps.length > 0 ? result.steps : ['拆解目标范围', '准备关键资源', '执行核心任务', '复盘并优化'];
       const newSteps: TaskStep[] = stepList.map((s: string) => ({
         id: Math.random().toString(36).substr(2, 9),
@@ -260,6 +385,11 @@ export default function App() {
       saveTask(updatedTask);
     } catch (err) {
       console.error("AI generation failed", err);
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        clearAuth();
+        setLoginError('登录已过期，请重新登录。');
+        return;
+      }
       setAiError(err instanceof Error ? err.message : 'AI 生成失败，请稍后重试。');
     } finally {
       setIsGeneratingPlan(false);
@@ -270,13 +400,82 @@ export default function App() {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, x, y } : t));
   };
 
-  return (
-    <div className="relative isolate min-h-screen flex flex-col overflow-hidden bg-[#020617] text-slate-100 font-sans selection:bg-teal-500/30">
-      {/* Starfield + Intensity Background */}
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(56,189,248,0.18),transparent_44%),radial-gradient(circle_at_82%_82%,rgba(52,211,153,0.14),transparent_46%)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(2,6,23,0.15),rgba(2,6,23,0.72))]" />
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginUsername.trim() || !loginPassword) {
+      setLoginError('请输入账号和密码');
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError('');
+    try {
+      const result = await loginByPassword(loginUsername.trim(), loginPassword);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(AUTH_TOKEN_KEY, result.token);
+      }
+      setAuthToken(result.token);
+      setAuthUser(result.username);
+      setLoginPassword('');
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : '登录失败');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center">
+        <div className="text-sm font-semibold text-slate-300">正在验证登录状态...</div>
       </div>
+    );
+  }
+
+  if (!authToken) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center p-4">
+        <form
+          onSubmit={handleLogin}
+          className="w-full max-w-sm rounded-2xl border border-slate-600/70 bg-slate-900 px-6 py-7 shadow-2xl"
+        >
+          <h1 className="text-xl font-bold text-white">账号登录</h1>
+          <p className="mt-2 text-xs text-slate-400">登录后可访问任务矩阵。</p>
+          <div className="mt-6 space-y-3">
+            <input
+              type="text"
+              value={loginUsername}
+              onChange={(e) => setLoginUsername(e.target.value)}
+              placeholder="用户名"
+              className="w-full rounded-xl border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+            />
+            <input
+              type="password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              placeholder="密码"
+              className="w-full rounded-xl border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+            />
+          </div>
+          {loginError && (
+            <div className="mt-4 rounded-xl border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-200">
+              {loginError}
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={isLoggingIn}
+            className="mt-5 w-full rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoggingIn ? '登录中...' : '登录'}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative isolate min-h-screen flex flex-col overflow-hidden bg-[#0f172a] text-slate-100 font-sans selection:bg-teal-500/30">
 
       {/* Header */}
       <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/[0.05] glass-panel px-4 sm:px-6">
@@ -293,6 +492,14 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3 sm:gap-4">
+          <span className="hidden text-xs font-semibold text-slate-300 sm:block">用户：{authUser || loginUsername}</span>
+          <button
+            onClick={clearAuth}
+            className="rounded-xl border border-white/15 bg-white/5 p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            title="退出登录"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
           <button
             onClick={() => setIsTaskListOpen(true)}
             className="relative rounded-xl p-2.5 transition-all hover:bg-white/5 active:scale-95 group border border-transparent hover:border-white/10"
@@ -485,7 +692,7 @@ export default function App() {
             ref={quadrantRef}
             onClick={handleQuadrantClick}
             className={cn(
-              "flex-1 relative quadrant-grid transition-all duration-500 bg-[radial-gradient(circle_at_12%_12%,rgba(125,211,252,0.16),transparent_44%),radial-gradient(circle_at_88%_88%,rgba(45,212,191,0.14),transparent_42%)]",
+              "flex-1 relative quadrant-grid transition-all duration-500",
               isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
             )}
           >

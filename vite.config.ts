@@ -1,15 +1,17 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 
 const dataDir = path.resolve(__dirname, '.data');
-const tasksFile = path.join(dataDir, 'tasks.json');
+const legacyTasksFile = path.join(dataDir, 'tasks.json');
 
 type Req = {
   method?: string;
   url?: string;
+  headers?: Record<string, string | string[] | undefined>;
   on: (event: string, cb: (chunk?: Buffer) => void) => void;
 };
 
@@ -25,10 +27,25 @@ type AiConfig = {
   model: string;
 };
 
+type AuthConfig = {
+  users: Array<{
+    username: string;
+    password: string;
+  }>;
+  sessionTtlMs: number;
+};
+
 type PlanTask = {
   title: string;
   description: string;
 };
+
+type SessionRecord = {
+  username: string;
+  expiresAt: number;
+};
+
+const sessions = new Map<string, SessionRecord>();
 
 function sendJson(res: Res, statusCode: number, payload: unknown) {
   res.statusCode = statusCode;
@@ -36,21 +53,37 @@ function sendJson(res: Res, statusCode: number, payload: unknown) {
   res.end(JSON.stringify(payload));
 }
 
-async function readTasks() {
+function getUserTasksFile(username: string) {
+  const safeUser = encodeURIComponent(username.trim().toLowerCase());
+  return path.join(dataDir, 'users', safeUser, 'tasks.json');
+}
+
+async function readTasks(username: string) {
+  const tasksFile = getUserTasksFile(username);
   try {
     const text = await fs.promises.readFile(tasksFile, 'utf-8');
     const parsed = JSON.parse(text);
     return Array.isArray(parsed) ? parsed : [];
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
+      try {
+        const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
+        const parsed = JSON.parse(text);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (legacyError: unknown) {
+        if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') {
+          return [];
+        }
+        throw legacyError;
+      }
     }
     throw error;
   }
 }
 
-async function writeTasks(tasks: unknown[]) {
-  await fs.promises.mkdir(dataDir, { recursive: true });
+async function writeTasks(username: string, tasks: unknown[]) {
+  const tasksFile = getUserTasksFile(username);
+  await fs.promises.mkdir(path.dirname(tasksFile), { recursive: true });
   await fs.promises.writeFile(tasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
 }
 
@@ -173,11 +206,99 @@ async function requestAiPlan(task: PlanTask, aiConfig: AiConfig) {
   }
 }
 
-function createApiMiddleware(aiConfig: AiConfig) {
+function createSessionToken(username: string, authConfig: AuthConfig) {
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, {
+    username,
+    expiresAt: Date.now() + authConfig.sessionTtlMs,
+  });
+  return token;
+}
+
+function parseBearerToken(authorizationHeader: string | undefined) {
+  if (!authorizationHeader) return '';
+  const [scheme, token] = authorizationHeader.split(' ');
+  if (!scheme || !token || scheme.toLowerCase() !== 'bearer') return '';
+  return token.trim();
+}
+
+function getSession(token: string) {
+  if (!token) return null;
+  const session = sessions.get(token);
+  if (!session) return null;
+  if (session.expiresAt < Date.now()) {
+    sessions.delete(token);
+    return null;
+  }
+  return session;
+}
+
+function requireAuth(req: Req, res: Res) {
+  const rawHeader = req.headers?.authorization;
+  const authHeader = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  const token = parseBearerToken(authHeader);
+  const session = getSession(token);
+  if (!session) {
+    sendJson(res, 401, { error: '未登录或会话已过期' });
+    return null;
+  }
+  return session;
+}
+
+function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
   return (req: Req, res: Res, next: () => void) => {
+    if (req.url?.startsWith('/api/auth/login')) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method not allowed' });
+        return;
+      }
+
+      readJsonBody(req)
+        .then((payload) => {
+          const body = (payload || {}) as { username?: string; password?: string };
+          const username = typeof body.username === 'string' ? body.username.trim() : '';
+          const password = typeof body.password === 'string' ? body.password : '';
+          if (!username || !password) {
+            sendJson(res, 400, { error: '请输入账号和密码' });
+            return;
+          }
+          const matchedUser = authConfig.users.find((u) => u.username === username && u.password === password);
+          if (!matchedUser) {
+            sendJson(res, 401, { error: '账号或密码错误' });
+            return;
+          }
+
+          const token = createSessionToken(username, authConfig);
+          sendJson(res, 200, {
+            token,
+            username,
+            expiresAt: Date.now() + authConfig.sessionTtlMs,
+          });
+        })
+        .catch((error) => sendJson(res, 500, { error: `login failed: ${(error as Error).message}` }));
+      return;
+    }
+
+    if (req.url?.startsWith('/api/auth/session')) {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method not allowed' });
+        return;
+      }
+      const session = requireAuth(req, res);
+      if (!session) return;
+      sendJson(res, 200, {
+        ok: true,
+        username: session.username,
+      });
+      return;
+    }
+
     if (req.url?.startsWith('/api/tasks')) {
+      const session = requireAuth(req, res);
+      if (!session) return;
+
       if (req.method === 'GET') {
-        readTasks()
+        readTasks(session.username)
           .then((tasks) => sendJson(res, 200, tasks))
           .catch((error) => sendJson(res, 500, { error: `read failed: ${(error as Error).message}` }));
         return;
@@ -190,7 +311,7 @@ function createApiMiddleware(aiConfig: AiConfig) {
               sendJson(res, 400, { error: 'payload must be an array' });
               return;
             }
-            await writeTasks(payload);
+            await writeTasks(session.username, payload);
             sendJson(res, 200, { ok: true });
           })
           .catch((error) => sendJson(res, 500, { error: `write failed: ${(error as Error).message}` }));
@@ -202,6 +323,9 @@ function createApiMiddleware(aiConfig: AiConfig) {
     }
 
     if (req.url?.startsWith('/api/ai/plan')) {
+      const session = requireAuth(req, res);
+      if (!session) return;
+
       if (req.method !== 'POST') {
         sendJson(res, 405, { error: 'method not allowed' });
         return;
@@ -233,10 +357,35 @@ function createApiMiddleware(aiConfig: AiConfig) {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
+  const authUsers = (() => {
+    if (env.AUTH_USERS) {
+      try {
+        const parsed = JSON.parse(env.AUTH_USERS);
+        if (Array.isArray(parsed)) {
+          const users = parsed
+            .filter((u) => u && typeof u.username === 'string' && typeof u.password === 'string')
+            .map((u) => ({ username: u.username.trim(), password: u.password }))
+            .filter((u) => u.username.length > 0 && u.password.length > 0);
+          if (users.length > 0) return users;
+        }
+      } catch {
+        // fall back to single user env below
+      }
+    }
+    return [{
+      username: env.AUTH_USERNAME || process.env.AUTH_USERNAME || 'admin',
+      password: env.AUTH_PASSWORD || process.env.AUTH_PASSWORD || 'admin123456',
+    }];
+  })();
+
   const aiConfig: AiConfig = {
     apiKey: env.AI_API_KEY || env.VITE_AI_API_KEY || process.env.AI_API_KEY || '',
     apiBase: (env.AI_BASE_URL || env.VITE_AI_BASE_URL || process.env.AI_BASE_URL || 'https://api.aipaibox.com').replace(/\/$/, ''),
     model: env.AI_MODEL || env.VITE_AI_MODEL || process.env.AI_MODEL || 'gemini-3.1-pro-preview',
+  };
+  const authConfig: AuthConfig = {
+    users: authUsers,
+    sessionTtlMs: Number(env.SESSION_TTL_MS || process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24),
   };
 
   return {
@@ -246,10 +395,10 @@ export default defineConfig(({ mode }) => {
       {
         name: 'local-api',
         configureServer(server) {
-          server.middlewares.use(createApiMiddleware(aiConfig));
+          server.middlewares.use(createApiMiddleware(aiConfig, authConfig));
         },
         configurePreviewServer(server) {
-          server.middlewares.use(createApiMiddleware(aiConfig));
+          server.middlewares.use(createApiMiddleware(aiConfig, authConfig));
         },
       },
     ],

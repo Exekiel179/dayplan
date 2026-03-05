@@ -19,6 +19,9 @@ View your app in AI Studio: https://ai.studio/apps/44359201-eb79-4716-a227-d07eb
    - `AI_API_KEY`
    - `AI_BASE_URL=https://api.aipaibox.com`
    - `AI_MODEL=gemini-3.1-pro-preview`
+   - `AUTH_USERNAME=admin`
+   - `AUTH_PASSWORD=admin123456`
+   - Optional: `AUTH_USERS=[{"username":"admin","password":"admin123456"},{"username":"alice","password":"alice123"}]`
 3. Run the app:
    `npm run dev`
 
@@ -28,6 +31,9 @@ View your app in AI Studio: https://ai.studio/apps/44359201-eb79-4716-a227-d07eb
    - `AI_API_KEY=...`
    - `AI_BASE_URL=https://api.aipaibox.com`
    - `AI_MODEL=gemini-3.1-pro-preview`
+   - `AUTH_USERNAME=admin`
+   - `AUTH_PASSWORD=admin123456`
+   - Optional: `AUTH_USERS=[{"username":"admin","password":"admin123456"},{"username":"alice","password":"alice123"}]`
 2. Build and start:
    - `docker compose --env-file .env up -d --build`
 3. Open:
@@ -35,7 +41,10 @@ View your app in AI Studio: https://ai.studio/apps/44359201-eb79-4716-a227-d07eb
 
 The frontend now calls your own backend endpoint `/api/ai/plan`, so the API key stays on the server and is not exposed to browser users.
 
+The app now requires login. Each user has independent task data storage.
+
 ## Task Persistence
 
-- Tasks are now stored on disk at `.data/tasks.json`.
-- This storage is independent of browser port/origin, so restarting the app or changing from `3000` to `3001` will not lose tasks.
+- Tasks are stored on disk by user at `.data/users/<url-encoded-username>/tasks.json`.
+- Legacy `.data/tasks.json` is still read as fallback for backward compatibility.
+- This storage is independent of browser port/origin, so restarting the app or changing ports will not lose tasks.

@@ -9,13 +9,7 @@
 body {
   margin: 0;
   font-family: var(--font-ui);
-  background:
-    radial-gradient(circle at 20px 25px, rgba(255, 255, 255, 0.75) 0 1px, transparent 1.2px),
-    radial-gradient(circle at 140px 75px, rgba(255, 255, 255, 0.65) 0 1px, transparent 1.2px),
-    radial-gradient(circle at 70px 160px, rgba(186, 230, 253, 0.55) 0 1px, transparent 1.2px),
-    radial-gradient(circle at 200px 130px, rgba(167, 243, 208, 0.45) 0 1px, transparent 1.2px),
-    linear-gradient(180deg, #020617 0%, #07142d 40%, #0b1f3a 100%);
-  background-size: 220px 220px, 260px 260px, 240px 240px, 280px 280px, 100% 100%;
+  background-color: #0f172a;
   color: #f1f5f9;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
