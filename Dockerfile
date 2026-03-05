@@ -1,7 +1,10 @@
 # Stage 1: Build the application
-FROM node:18-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
+
+# Native modules (e.g. better-sqlite3 on alpine/musl) may need build tooling.
+RUN apk add --no-cache python3 make g++
 
 # Copy package files
 COPY package*.json ./
