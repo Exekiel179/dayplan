@@ -10,10 +10,13 @@ body {
   margin: 0;
   font-family: var(--font-ui);
   background:
-    radial-gradient(circle at 15% 18%, rgba(125, 211, 252, 0.14), transparent 42%),
-    radial-gradient(circle at 86% 78%, rgba(45, 212, 191, 0.16), transparent 40%),
-    linear-gradient(135deg, #0b1f3a 0%, #10344f 45%, #135e69 100%);
-  color: #f8fafc;
+    radial-gradient(circle at 20px 25px, rgba(255, 255, 255, 0.75) 0 1px, transparent 1.2px),
+    radial-gradient(circle at 140px 75px, rgba(255, 255, 255, 0.65) 0 1px, transparent 1.2px),
+    radial-gradient(circle at 70px 160px, rgba(186, 230, 253, 0.55) 0 1px, transparent 1.2px),
+    radial-gradient(circle at 200px 130px, rgba(167, 243, 208, 0.45) 0 1px, transparent 1.2px),
+    linear-gradient(180deg, #020617 0%, #07142d 40%, #0b1f3a 100%);
+  background-size: 220px 220px, 260px 260px, 240px 240px, 280px 280px, 100% 100%;
+  color: #f1f5f9;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -22,21 +25,17 @@ body {
   min-height: 100vh;
 }
 
-/* Glassmorphism Utilities */
+/* Panel Utilities (No blur/frosted effects) */
 .glass-panel {
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.52), rgba(8, 47, 73, 0.42));
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 16px 42px rgba(8, 47, 73, 0.28);
+  background: linear-gradient(145deg, rgba(2, 6, 23, 0.8), rgba(8, 47, 73, 0.72));
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.5);
 }
 
 .glass-modal {
-  background: linear-gradient(180deg, rgba(8, 47, 73, 0.78), rgba(15, 23, 42, 0.84));
-  backdrop-filter: blur(40px);
-  -webkit-backdrop-filter: blur(40px);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow: 0 30px 65px -20px rgba(2, 6, 23, 0.72);
+  background: linear-gradient(180deg, rgba(7, 18, 41, 0.98), rgba(15, 23, 42, 0.98));
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 30px 65px -25px rgba(2, 6, 23, 0.72);
 }
 
 /* Custom Typography Headers */
@@ -46,15 +45,17 @@ h1 {
 
 /* Glowing text utility */
 .text-glow {
-  text-shadow: 0 0 24px rgba(186, 230, 253, 0.38);
+  text-shadow: 0 0 16px rgba(125, 211, 252, 0.3);
 }
 
 /* Quadrant Styles */
 .quadrant-grid {
-  background-color: rgba(8, 47, 73, 0.16);
+  background-color: rgba(2, 6, 23, 0.45);
   background-image:
-    linear-gradient(to right, rgba(148, 163, 184, 0.2) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(148, 163, 184, 0.2) 1px, transparent 1px);
+    linear-gradient(to right, rgba(148, 163, 184, 0.18) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.08) 0%, rgba(56, 189, 248, 0.08) 50%, rgba(52, 211, 153, 0.1) 50%, rgba(52, 211, 153, 0.1) 100%),
+    linear-gradient(180deg, rgba(251, 113, 133, 0.1) 0%, rgba(251, 113, 133, 0.1) 50%, rgba(148, 163, 184, 0.08) 50%, rgba(148, 163, 184, 0.08) 100%);
   background-size: 60px 60px;
 }
 

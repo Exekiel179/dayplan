@@ -1,4 +1,3 @@
-# Stage 1: Build the application
 FROM node:22-alpine AS builder
 
 WORKDIR /app
@@ -6,25 +5,23 @@ WORKDIR /app
 # Native modules (e.g. better-sqlite3 on alpine/musl) may need build tooling.
 RUN apk add --no-cache python3 make g++
 
-# Copy package files
 COPY package*.json ./
-
-# Install dependencies
 RUN npm ci
 
-# Copy full source and build
 COPY . .
 RUN npm run build
 
-# Stage 2: Serve the application with Nginx
-FROM nginx:alpine
+FROM node:22-alpine AS runtime
 
-# Copy custom Nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
 
-# Copy build output from Stage 1 to Nginx HTML directory
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/server.mjs ./server.mjs
+COPY --from=builder /app/package*.json ./
 
-EXPOSE 80
+EXPOSE 3000
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "server.mjs"]

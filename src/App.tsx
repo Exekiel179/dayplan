@@ -24,107 +24,31 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const AI_MODEL = import.meta.env.VITE_AI_MODEL || 'gemini-3.1-pro-preview';
-const AI_API_BASE = (import.meta.env.VITE_AI_BASE_URL || 'https://api.aipaibox.com').replace(/\/$/, '');
-const AI_API_KEY = import.meta.env.VITE_AI_API_KEY;
-
-const SYSTEM_PROMPT = `你是一位高执行力任务规划助手。请严格返回 JSON，不要有任何额外文字。
-返回结构:
-{
-  "plan": "Markdown 形式的执行建议",
-  "steps": ["步骤1", "步骤2"]
-}
-要求:
-1. steps 至少 4 条。
-2. 每条步骤要具体、可执行。
-3. plan 使用中文并包含小标题。`;
-
-function buildPrompt(task: Task) {
-  return `帮我为这个任务制定一个详细执行计划。
-任务名称：${task.title}
-任务描述：${task.description || '无'}
-请按要求返回。`;
-}
-
-function parsePlanPayload(raw: string) {
-  const trimmed = raw.trim();
-  const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
-  const jsonText = jsonMatch?.[0] || trimmed;
-  const result = JSON.parse(jsonText);
-  return {
-    plan: typeof result.plan === 'string' ? result.plan : '',
-    steps: Array.isArray(result.steps) ? result.steps.filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0) : []
-  };
-}
-
-async function requestPlanByChatCompletions(task: Task) {
-  const response = await fetch(`${AI_API_BASE}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${AI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      temperature: 0.35,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: buildPrompt(task) }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`chat completions failed: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('chat completions returned empty content');
-  }
-  return parsePlanPayload(content);
-}
-
-async function requestPlanByGemini(task: Task) {
-  const response = await fetch(`${AI_API_BASE}/v1beta/models/${AI_MODEL}:generateContent`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${AI_API_KEY}`,
-      'x-goog-api-key': AI_API_KEY
-    },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: `${SYSTEM_PROMPT}\n\n${buildPrompt(task)}` }] }],
-      generationConfig: {
-        temperature: 0.35,
-        responseMimeType: 'application/json'
-      }
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`generateContent failed: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const content = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || '').join('\n');
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('generateContent returned empty content');
-  }
-  return parsePlanPayload(content);
-}
-
 async function requestAIPlan(task: Task) {
-  if (!AI_API_KEY) {
-    throw new Error('Missing VITE_AI_API_KEY');
+  const response = await fetch('/api/ai/plan', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      title: task.title,
+      description: task.description || '',
+    })
+  });
+
+  const payload = await response.json().catch(() => ({} as { error?: string; plan?: string; steps?: string[] }));
+  if (!response.ok) {
+    throw new Error(payload?.error || `AI 请求失败 (${response.status})`);
   }
-  try {
-    return await requestPlanByChatCompletions(task);
-  } catch {
-    return requestPlanByGemini(task);
-  }
+
+  const steps = Array.isArray(payload?.steps)
+    ? payload.steps.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    : [];
+
+  return {
+    plan: typeof payload?.plan === 'string' ? payload.plan : '',
+    steps,
+  };
 }
 
 async function loadTasksFromApi() {
@@ -336,7 +260,7 @@ export default function App() {
       saveTask(updatedTask);
     } catch (err) {
       console.error("AI generation failed", err);
-      setAiError('AI 生成失败，请检查接口地址、模型名或 API Key 后重试。');
+      setAiError(err instanceof Error ? err.message : 'AI 生成失败，请稍后重试。');
     } finally {
       setIsGeneratingPlan(false);
     }
@@ -347,25 +271,16 @@ export default function App() {
   };
 
   return (
-    <div className="relative isolate min-h-screen flex flex-col overflow-hidden bg-[linear-gradient(135deg,#0b1f3a_0%,#10344f_45%,#135e69_100%)] text-slate-100 font-sans selection:bg-teal-500/30">
-      {/* Dynamic Ambient Background Elements */}
+    <div className="relative isolate min-h-screen flex flex-col overflow-hidden bg-[#020617] text-slate-100 font-sans selection:bg-teal-500/30">
+      {/* Starfield + Intensity Background */}
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <motion.div
-          animate={{ scale: [1, 1.12, 1], opacity: [0.18, 0.25, 0.18] }}
-          transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute -left-40 -top-40 h-[620px] w-[620px] rounded-full bg-[radial-gradient(circle,rgba(125,211,252,0.24),transparent_72%)] blur-[84px]"
-        />
-        <motion.div
-          animate={{ scale: [1, 1.18, 1], opacity: [0.12, 0.2, 0.12] }}
-          transition={{ duration: 15, repeat: Infinity, ease: "easeInOut", delay: 2 }}
-          className="absolute right-0 bottom-0 h-[820px] w-[820px] rounded-full bg-[radial-gradient(circle,rgba(45,212,191,0.2),transparent_74%)] blur-[108px]"
-        />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[radial-gradient(circle_at_center,rgba(224,242,254,0.1)_0%,rgba(8,47,73,0.3)_56%,rgba(2,6,23,0.75)_100%)] opacity-85" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(56,189,248,0.18),transparent_44%),radial-gradient(circle_at_82%_82%,rgba(52,211,153,0.14),transparent_46%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(2,6,23,0.15),rgba(2,6,23,0.72))]" />
       </div>
 
       {/* Header */}
       <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/[0.05] glass-panel px-4 sm:px-6">
-        <div className="flex items-center gap-3 rounded-2xl border border-white/15 bg-white/[0.06] px-3 py-2 shadow-[0_10px_30px_rgba(8,47,73,0.28)] backdrop-blur-xl">
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-300/20 bg-slate-950/75 px-3 py-2 shadow-[0_10px_30px_rgba(2,6,23,0.45)]">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 via-teal-400 to-emerald-500 shadow-lg shadow-cyan-500/20 ring-1 ring-white/25">
             <LayoutGrid className="text-white w-5 h-5 stroke-[2.5]" />
           </div>
@@ -460,7 +375,7 @@ export default function App() {
                   key={task.id}
                   onClick={() => setSelectedTask(task)}
                   className={cn(
-                    "p-4 rounded-2xl border transition-all duration-300 cursor-pointer group relative overflow-hidden backdrop-blur-md",
+                    "p-4 rounded-2xl border transition-all duration-300 cursor-pointer group relative overflow-hidden",
                     selectedTask?.id === task.id
                       ? "bg-teal-500/10 border-teal-500/50 shadow-[0_0_20px_rgba(20,184,166,0.1)]"
                       : "bg-white/[0.02] border-white/[0.05] hover:border-white/20 hover:bg-white/[0.05]"
@@ -521,7 +436,7 @@ export default function App() {
                 initial={{ y: -50, opacity: 0, scale: 0.9 }}
                 animate={{ y: 0, opacity: 1, scale: 1 }}
                 exit={{ y: -50, opacity: 0, scale: 0.9 }}
-                className="absolute left-1/2 top-4 z-30 flex w-[calc(100%-1.5rem)] max-w-xl -translate-x-1/2 items-center gap-3 rounded-2xl bg-teal-500/20 px-4 py-3 text-teal-100 backdrop-blur-xl border border-teal-500/30 shadow-[0_0_30px_rgba(20,184,166,0.2)] sm:px-6"
+                className="absolute left-1/2 top-4 z-30 flex w-[calc(100%-1.5rem)] max-w-xl -translate-x-1/2 items-center gap-3 rounded-2xl bg-teal-900/65 px-4 py-3 text-teal-100 border border-teal-400/40 shadow-[0_0_30px_rgba(20,184,166,0.2)] sm:px-6"
               >
                 <MousePointer2 className="h-5 w-5 animate-bounce shrink-0 text-teal-300" />
                 <span className="text-sm font-semibold sm:text-base">请在象限中点击一个位置来放置任务</span>
@@ -538,19 +453,19 @@ export default function App() {
           {/* Quadrant Labels */}
           <div className="pointer-events-none absolute inset-0 hidden grid-cols-2 grid-rows-2 md:grid">
             {/* Q2: Top Left */}
-            <div className="border-r border-b border-white/[0.08] flex items-start justify-start p-8">
+            <div className="border-r border-b border-white/[0.08] bg-sky-500/[0.05] flex items-start justify-start p-8">
               <span className="text-xs font-bold text-sky-100 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-sky-400/20 border border-sky-200/30 shadow-[0_8px_20px_rgba(56,189,248,0.2)]">Q2 紧急 & 不重要</span>
             </div>
             {/* Q1: Top Right */}
-            <div className="border-b border-white/[0.08] flex items-start justify-end p-8 text-right">
+            <div className="border-b border-white/[0.08] bg-rose-500/[0.06] flex items-start justify-end p-8 text-right">
               <span className="text-xs font-bold text-rose-100 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-rose-400/20 border border-rose-200/30 shadow-[0_8px_20px_rgba(251,113,133,0.18)]">Q1 重要 & 紧急</span>
             </div>
             {/* Q3: Bottom Left */}
-            <div className="border-r border-white/[0.08] flex items-end justify-start p-8">
+            <div className="border-r border-white/[0.08] bg-slate-500/[0.05] flex items-end justify-start p-8">
               <span className="text-xs font-bold text-slate-200 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-slate-400/20 border border-slate-200/25 shadow-[0_8px_20px_rgba(148,163,184,0.18)]">Q3 不重要 & 不紧急</span>
             </div>
             {/* Q4: Bottom Right */}
-            <div className="flex items-end justify-end p-8 text-right">
+            <div className="bg-emerald-500/[0.06] flex items-end justify-end p-8 text-right">
               <span className="text-xs font-bold text-emerald-100 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-emerald-400/20 border border-emerald-200/30 shadow-[0_8px_20px_rgba(52,211,153,0.2)]">Q4 重要 & 不紧急</span>
             </div>
           </div>
@@ -607,13 +522,13 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsTaskListOpen(false)}
-              className="fixed inset-0 bg-slate-950/40 backdrop-blur-sm z-30"
+              className="fixed inset-0 bg-slate-950/65 z-30"
             />
             <motion.div
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
-              className="fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col bg-[linear-gradient(180deg,rgba(8,47,73,0.92),rgba(15,23,42,0.9))] backdrop-blur-3xl shadow-2xl border-l border-white/10 sm:w-[400px]"
+              className="fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col bg-[linear-gradient(180deg,rgba(7,18,41,0.98),rgba(15,23,42,0.98))] shadow-2xl border-l border-white/10 sm:w-[400px]"
             >
               <div className="p-8 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
                 <div>
@@ -644,7 +559,7 @@ export default function App() {
                         setSelectedTask(task);
                         setIsTaskListOpen(false);
                       }}
-                      className="p-5 border border-white/10 rounded-2xl hover:border-teal-500/50 hover:bg-teal-500/5 hover:shadow-[0_0_20px_rgba(20,184,166,0.1)] transition-all cursor-pointer group bg-white/[0.02] backdrop-blur-md"
+                      className="p-5 border border-white/10 rounded-2xl hover:border-teal-500/50 hover:bg-teal-500/5 hover:shadow-[0_0_20px_rgba(20,184,166,0.1)] transition-all cursor-pointer group bg-white/[0.02]"
                     >
                       <div className="flex items-start justify-between gap-4">
                         <h3 className="font-semibold text-slate-200 group-hover:text-white transition-colors line-clamp-2 leading-snug">{task.title || '未命名任务'}</h3>
@@ -679,7 +594,7 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setSelectedTask(null)}
-              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+              className="absolute inset-0 bg-slate-950/75"
             />
             <motion.div
               layoutId={selectedTask.id}
@@ -747,12 +662,6 @@ export default function App() {
                       </button>
                     )}
                   </div>
-                  {!AI_API_KEY && (
-                    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-200 flex items-center gap-3">
-                      <Info className="w-4 h-4 text-amber-400 shrink-0" />
-                      未检测到 `VITE_AI_API_KEY`，请先在 `.env.local` 配置后再生成 AI 计划。
-                    </div>
-                  )}
                   {aiError && (
                     <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs font-semibold text-rose-200">
                       {aiError}
@@ -949,7 +858,7 @@ function TaskPoint({ task, onSelect, onMove }: { task: Task, onSelect: () => voi
         )}
       >
         {/* Progress Ring / Circle Backdrop */}
-        <div className="w-8 h-8 rounded-2xl flex items-center justify-center overflow-hidden relative transition-all duration-300 backdrop-blur-md bg-white/[0.05] border border-white/20 shadow-[0_4px_20px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_20px_rgba(20,184,166,0.3)] group-hover:border-teal-400/50">
+        <div className="w-8 h-8 rounded-2xl flex items-center justify-center overflow-hidden relative transition-all duration-300 bg-slate-900/90 border border-white/20 shadow-[0_4px_20px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_20px_rgba(20,184,166,0.3)] group-hover:border-teal-400/50">
           <div
             className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-teal-500/40 to-teal-500/10 transition-all duration-700"
             style={{ height: `${progress}%` }}
