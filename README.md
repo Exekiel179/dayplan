@@ -1,73 +1,161 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+
+# 📋 DayPlan
+
+**AI 驱动的可视化任务管理平台**
+
+用坐标轴看板管理你的任务 · AI 自动生成执行计划 · 支持任务依赖与周期循环
+
+[![Docker Image](https://img.shields.io/docker/v/exekiel179/dayplan?label=Docker%20Hub&logo=docker&sort=semver)](https://hub.docker.com/r/exekiel179/dayplan)
+[![GHCR](https://img.shields.io/badge/GHCR-latest-blue?logo=github)](https://ghcr.io/exekiel179/dayplan)
+[![CI](https://github.com/Exekiel179/dayplan/actions/workflows/ci.yml/badge.svg)](https://github.com/Exekiel179/dayplan/actions/workflows/ci.yml)
+
 </div>
 
-# Run and deploy your AI Studio app
+---
 
-This contains everything you need to run your app locally.
+## ✨ 功能特性
 
-View your app in AI Studio: https://ai.studio/apps/44359201-eb79-4716-a227-d07eb511c122
+### 📊 坐标轴任务看板
+- 任务在二维坐标系中拖拽定位，直观展示**重要性**与**紧急度**
+- 点击坐标区域快速创建任务，拖拽调整优先位置
+- 支持列表视图与矩阵视图切换
 
-## Run Locally
+### 🤖 AI 执行计划
+- 输入任务标题，一键生成 **Markdown 格式的分步执行建议**
+- 自动拆解为至少 4 个可执行步骤
+- 支持 OpenAI Chat Completions 和 Gemini 双协议适配
 
-**Prerequisites:**  Node.js
+### 🔗 任务依赖 & 工作流
+- 任务间可设置**前置依赖关系**
+- 前置任务未完成时，后续任务显示锁定状态
+- 可视化依赖连线
 
+### ⏰ 截止日期 & 倒计时
+- 为任务设定 deadline，自动计算剩余时间
+- 倒计时紧迫度影响任务在坐标轴的 Y 轴位置
 
-1. Install dependencies:
-   `npm install`
-2. Create `.env.local` (or copy from `.env.example`) and set:
-   - `AI_API_KEY`
-   - `AI_BASE_URL=https://api.aipaibox.com`
-   - `AI_MODEL=gemini-3.1-pro-preview`
-   - `AUTH_USERNAME=admin`
-   - `AUTH_PASSWORD=admin123456`
-   - Optional: `AUTH_USERS=[{"username":"admin","password":"admin123456"},{"username":"alice","password":"alice123"}]`
-   - Optional: `AUTH_ALLOW_REGISTRATION=true`
-3. Run the app:
-   `npm run dev`
+### 🔄 周期性任务
+- 支持三种循环模式：**每日** / **每周** / **自定义间隔天数**
+- 完成后自动重置，记录累计完成次数
+- 到期任务自动上浮提醒
 
-## Secure Deployment (Docker)
+### 📈 能力维度追踪
+- 自定义能力维度（如"技术力"、"沟通力"、"执行力"）
+- 为每个任务设置各维度的经验获取量
+- 完成任务后累计能力成长，量化个人提升
 
-1. Create `.env` on the server:
-   - `DAYPLAN_IMAGE=exekiel179/dayplan:latest` (or `ghcr.io/<github-owner>/dayplan:latest`)
-   - `AI_API_KEY=...`
-   - `AI_BASE_URL=https://api.aipaibox.com`
-   - `AI_MODEL=gemini-3.1-pro-preview`
-   - `AUTH_USERNAME=admin`
-   - `AUTH_PASSWORD=admin123456`
-   - Optional: `AUTH_USERS=[{"username":"admin","password":"admin123456"},{"username":"alice","password":"alice123"}]`
-   - Optional: `AUTH_ALLOW_REGISTRATION=true`
-2. Start:
-   - `docker compose --env-file .env pull`
-   - `docker compose --env-file .env up -d`
-3. Open:
-   - `http://<your-server>:3000`
+### ✅ 子步骤管理
+- 每个任务支持拆分为多个子步骤
+- 可逐步勾选完成、拖拽排序
+- 配合 AI 自动生成步骤使用
 
-If you want to run a locally built image instead of registry image:
-- `docker build -t dayplan-local:latest .`
-- set `DAYPLAN_IMAGE=dayplan-local:latest`
-- `docker compose --env-file .env up -d`
+### 📦 归档 & 恢复
+- 完成的任务自动归档，保持看板整洁
+- 支持查看归档列表并恢复任务
 
-The frontend now calls your own backend endpoint `/api/ai/plan`, so the API key stays on the server and is not exposed to browser users.
+### 👥 多用户系统
+- 用户名密码登录认证
+- 可选开启前端自助注册
+- 每个用户**独立的任务数据存储**，互不干扰
+- 密码 SHA-256 + salt 哈希，Bearer Token 会话管理
 
-The app now requires login. Each user has independent task data storage.
-The frontend supports self-service registration (can be disabled via `AUTH_ALLOW_REGISTRATION=false`).
+---
 
-## Task Persistence
+## 🛠️ 技术栈
 
-- Tasks are stored on disk by user at `.data/users/<url-encoded-username>/tasks.json`.
-- Registered accounts are stored at `.data/auth-users.json` (password hash + salt).
-- Legacy `.data/tasks.json` is still read as fallback for backward compatibility.
-- This storage is independent of browser port/origin, so restarting the app or changing ports will not lose tasks.
+| 层级 | 技术 |
+|------|------|
+| 前端 | React 19 · TypeScript · Tailwind CSS 4 · Framer Motion |
+| 后端 | Node.js · Express.js |
+| 存储 | 文件系统 JSON（无需数据库） |
+| AI | 服务端代理调用 — API Key 不暴露给浏览器 |
+| 部署 | Docker 多阶段构建 · docker-compose · GitHub Actions CI/CD |
 
-## GitHub Automation
+---
 
-- CI: `.github/workflows/ci.yml` runs `npm run lint` and `npm run build` on push/PR.
-- Docker publish: `.github/workflows/docker-publish.yml` publishes images to:
-  - `ghcr.io/<owner>/dayplan` (always, on `main` and tag `v*`)
-  - `<dockerhub-user>/dayplan` (if secrets are configured)
-  - Before pushing the new `latest`, workflow backs up previous `latest` as `bak`.
+## 🚀 快速开始
 
-Set repository secrets for DockerHub publish:
-- `DOCKERHUB_USERNAME`
-- `DOCKERHUB_TOKEN`
+### 本地开发
+
+```bash
+# 1. 安装依赖
+npm install
+
+# 2. 配置环境变量
+cp .env.example .env.local
+# 编辑 .env.local 填入你的 AI_API_KEY
+
+# 3. 启动开发服务器
+npm run dev
+```
+
+### Docker 部署（推荐）
+
+```bash
+# 1. 创建 .env 文件
+cat > .env << EOF
+DAYPLAN_IMAGE=exekiel179/dayplan:latest
+AI_API_KEY=your_api_key_here
+AI_BASE_URL=https://api.aipaibox.com
+AI_MODEL=gemini-3.1-pro-preview
+AUTH_USERNAME=admin
+AUTH_PASSWORD=your_password
+AUTH_ALLOW_REGISTRATION=true
+EOF
+
+# 2. 拉取并启动
+docker compose --env-file .env pull
+docker compose --env-file .env up -d
+
+# 3. 访问
+# http://localhost:3000
+```
+
+---
+
+## ⚙️ 环境变量
+
+| 变量 | 必填 | 说明 |
+|------|:----:|------|
+| `AI_API_KEY` | ✅ | AI 服务 API Key（仅服务端使用） |
+| `AI_BASE_URL` | ✅ | AI 接口地址，默认 `https://api.aipaibox.com` |
+| `AI_MODEL` | ✅ | 使用的模型名称 |
+| `AUTH_USERNAME` | ✅ | 默认管理员用户名 |
+| `AUTH_PASSWORD` | ✅ | 默认管理员密码 |
+| `AUTH_USERS` | | 多用户 JSON 配置（优先级高于上面单用户配置） |
+| `AUTH_ALLOW_REGISTRATION` | | 是否开启前端自助注册（默认 `true`） |
+| `SESSION_TTL_MS` | | 会话有效期，默认 24 小时 |
+| `DAYPLAN_IMAGE` | | Docker 镜像地址（docker-compose 使用） |
+
+---
+
+## 📁 数据存储
+
+```
+.data/
+├── auth-users.json              # 注册用户信息（密码哈希）
+└── users/
+    └── <username>/
+        └── tasks.json           # 用户任务数据
+```
+
+- 数据按用户隔离存储，重启后不丢失
+- Docker 部署时通过 volume 挂载 `.data` 目录持久化
+
+---
+
+## 🔄 CI/CD
+
+| 工作流 | 触发条件 | 说明 |
+|--------|---------|------|
+| **CI** | push / PR | 运行 `lint` + `build` 检查 |
+| **Docker Publish** | push 到 `main` 或 `v*` tag | 自动构建并推送镜像到 GHCR 和 Docker Hub |
+
+Docker 发布前会自动将旧的 `latest` 备份为 `bak` 标签，便于快速回滚。
+
+---
+
+## 📄 License
+
+MIT
