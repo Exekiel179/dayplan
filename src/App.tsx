@@ -14,18 +14,62 @@ import {
   Loader2,
   MousePointer2,
   Info,
-  LogOut
+  LogOut,
+  Clock3,
+  Link2
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Task, TaskStep } from './types';
+import { Task, TaskStep, TaskTimeline } from './types';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 const AUTH_TOKEN_KEY = 'dayplan_auth_token';
+
+function normalizeTask(rawTask: Task): Task {
+  const dependencyIds = Array.isArray((rawTask as Partial<Task>).dependency_ids)
+    ? (rawTask as Partial<Task>).dependency_ids!.filter((id): id is string => typeof id === 'string')
+    : [];
+
+  const timeline = (rawTask as Partial<Task>).timeline === 'long_term' ? 'long_term' : 'temporary';
+  const estimatedMinutes = Number((rawTask as Partial<Task>).estimated_minutes ?? 60);
+  const actualMinutes = Number((rawTask as Partial<Task>).actual_minutes ?? 0);
+
+  return {
+    ...rawTask,
+    timeline,
+    dependency_ids: dependencyIds,
+    estimated_minutes: Number.isFinite(estimatedMinutes) ? Math.max(0, estimatedMinutes) : 60,
+    actual_minutes: Number.isFinite(actualMinutes) ? Math.max(0, actualMinutes) : 0,
+  };
+}
+
+function getTimelineAccent(timeline: TaskTimeline) {
+  return timeline === 'long_term'
+    ? {
+        badge: 'text-cyan-200 bg-cyan-500/20 border-cyan-400/40',
+        ring: 'border-cyan-300/60',
+      }
+    : {
+        badge: 'text-amber-200 bg-amber-500/20 border-amber-400/40',
+        ring: 'border-amber-300/60',
+      };
+}
+
+function getDimensionColor(task: Task) {
+  const importance = task.x;
+  const urgency = 100 - task.y;
+  const intensity = Math.max(0, Math.min(1, (importance + urgency) / 200));
+  const lightness = 68 - intensity * 20;
+
+  if (importance >= 60 && urgency >= 60) return `hsl(350 86% ${lightness}%)`;
+  if (importance >= 60 && urgency < 60) return `hsl(155 72% ${lightness}%)`;
+  if (importance < 60 && urgency >= 60) return `hsl(38 90% ${lightness}%)`;
+  return `hsl(200 85% ${lightness}%)`;
+}
 
 function withAuthHeaders(token: string, headers: Record<string, string> = {}) {
   if (!token) return headers;
@@ -77,7 +121,7 @@ async function loadTasksFromApi(token: string) {
     throw new Error(`load tasks failed: ${response.status}`);
   }
   const data = await response.json();
-  return Array.isArray(data) ? (data as Task[]) : [];
+  return Array.isArray(data) ? (data as Task[]).map(normalizeTask) : [];
 }
 
 async function persistTasksToApi(tasks: Task[], token: string) {
@@ -200,6 +244,18 @@ export default function App() {
     const urgB = 100 - b.y;
     return (impB * urgB) - (impA * urgA);
   });
+
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+
+  const isTaskReady = (task: Task) =>
+    task.dependency_ids.length === 0
+    || task.dependency_ids.every((id) => taskById.get(id)?.status === 'completed');
+
+  const executableTasks = tasks.filter((task) => task.status === 'pending' && isTaskReady(task));
+  const blockedTasks = tasks.filter((task) => task.status === 'pending' && !isTaskReady(task));
+
+  const totalEstimatedMinutes = tasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
+  const totalActualMinutes = tasks.reduce((sum, task) => sum + task.actual_minutes, 0);
 
   // Track mouse for placement mode
   useEffect(() => {
@@ -356,6 +412,10 @@ export default function App() {
       x,
       y,
       status: 'pending',
+      timeline: 'temporary',
+      dependency_ids: [],
+      estimated_minutes: 60,
+      actual_minutes: 0,
       steps: [],
       created_at: Date.now()
     };
@@ -365,22 +425,35 @@ export default function App() {
   };
 
   const saveTask = (task: Task) => {
+    const normalizedTask = normalizeTask(task);
+    const cleanedDependencyIds = normalizedTask.dependency_ids
+      .filter((id) => id !== normalizedTask.id)
+      .filter((id, index, arr) => arr.indexOf(id) === index);
+    const finalTask = {
+      ...normalizedTask,
+      dependency_ids: cleanedDependencyIds,
+    };
     setTasks(prev => {
-      const exists = prev.find(t => t.id === task.id);
+      const exists = prev.find(t => t.id === finalTask.id);
       if (exists) {
-        return prev.map(t => t.id === task.id ? task : t);
+        return prev.map(t => t.id === finalTask.id ? finalTask : t);
       }
-      return [...prev, task];
+      return [...prev, finalTask];
     });
   };
 
   const deleteTask = (id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
+    setTasks(prev => prev
+      .filter(t => t.id !== id)
+      .map((task) => ({
+        ...task,
+        dependency_ids: task.dependency_ids.filter((depId) => depId !== id),
+      })));
     setSelectedTask(null);
   };
 
   const completeTask = (task: Task) => {
-    setTasks(prev => prev.filter(t => t.id !== task.id));
+    setTasks(prev => prev.map((t) => (t.id === task.id ? { ...t, status: 'completed' } : t)));
     setSelectedTask(null);
   };
 
@@ -422,6 +495,17 @@ export default function App() {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, x, y } : t));
   };
 
+  const toggleDependency = (task: Task, dependencyId: string) => {
+    const exists = task.dependency_ids.includes(dependencyId);
+    const dependencyIds = exists
+      ? task.dependency_ids.filter((id) => id !== dependencyId)
+      : [...task.dependency_ids, dependencyId];
+    setSelectedTask({
+      ...task,
+      dependency_ids: dependencyIds,
+    });
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginUsername.trim() || !loginPassword) {
@@ -454,9 +538,11 @@ export default function App() {
     }
   };
 
+  const selectedTaskReady = selectedTask ? isTaskReady(selectedTask) : false;
+
   if (isAuthChecking) {
     return (
-      <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center">
+      <div className="min-h-screen bg-[#0b1220] text-slate-100 flex items-center justify-center">
         <div className="text-sm font-semibold text-slate-300">正在验证登录状态...</div>
       </div>
     );
@@ -464,7 +550,7 @@ export default function App() {
 
   if (!authToken) {
     return (
-      <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[#0b1220] text-slate-100 flex items-center justify-center p-4">
         <form
           onSubmit={handleLogin}
           className="w-full max-w-sm rounded-2xl border border-slate-600/70 bg-slate-900 px-6 py-7 shadow-2xl"
@@ -528,19 +614,19 @@ export default function App() {
   }
 
   return (
-    <div className="relative isolate min-h-screen flex flex-col overflow-hidden bg-[#0f172a] text-slate-100 font-sans selection:bg-teal-500/30">
+    <div className="relative isolate min-h-screen flex flex-col overflow-hidden bg-[#0b1220] text-slate-100 font-sans selection:bg-teal-500/30">
 
       {/* Header */}
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/[0.05] glass-panel px-4 sm:px-6">
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-300/20 bg-slate-950/75 px-3 py-2 shadow-[0_10px_30px_rgba(2,6,23,0.45)]">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 via-teal-400 to-emerald-500 shadow-lg shadow-cyan-500/20 ring-1 ring-white/25">
+      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/[0.08] glass-panel px-4 sm:px-6">
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-300/20 bg-slate-900 px-3 py-2 shadow-[0_10px_30px_rgba(2,6,23,0.45)]">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-600 shadow-lg shadow-cyan-500/20 ring-1 ring-white/20">
             <LayoutGrid className="text-white w-5 h-5 stroke-[2.5]" />
           </div>
           <div className="leading-none">
-            <h1 className="text-lg font-bold tracking-tight text-glow sm:text-xl bg-gradient-to-r from-cyan-100 via-white to-teal-100 bg-clip-text text-transparent">
-              Quadrant Master
+            <h1 className="text-lg font-bold tracking-tight text-cyan-100 sm:text-xl">
+              Task Axis Planner
             </h1>
-            <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-100/80">Eisenhower Matrix</p>
+            <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-100/80">Importance x Urgency</p>
           </div>
         </div>
 
@@ -590,6 +676,21 @@ export default function App() {
         </div>
       )}
 
+      <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-4 sm:px-6">
+        <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-cyan-100">
+          可执行任务: <span className="font-bold">{executableTasks.length}</span>
+        </div>
+        <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-100">
+          阻塞任务: <span className="font-bold">{blockedTasks.length}</span>
+        </div>
+        <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-emerald-100">
+          预估用时: <span className="font-bold">{totalEstimatedMinutes}m</span>
+        </div>
+        <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-violet-100">
+          实际用时: <span className="font-bold">{totalActualMinutes}m</span>
+        </div>
+      </div>
+
       <main className="relative flex flex-1 overflow-hidden">
         {/* Left Collapsible Sidebar */}
         <motion.div
@@ -624,6 +725,28 @@ export default function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+            <div className="rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-100">执行列表</h3>
+                <span className="text-[10px] font-semibold text-cyan-200">{executableTasks.length}</span>
+              </div>
+              {executableTasks.length === 0 ? (
+                <p className="text-[11px] text-cyan-100/70">暂无可执行任务（等待前置任务完成）。</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {executableTasks.slice(0, 5).map((task) => (
+                    <button
+                      key={`ready-${task.id}`}
+                      onClick={() => setSelectedTask(task)}
+                      className="w-full rounded-lg border border-cyan-300/20 bg-slate-900/50 px-2 py-1.5 text-left text-[11px] font-semibold text-cyan-50 transition-colors hover:bg-slate-800/80"
+                    >
+                      {task.title || '未命名任务'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {sortedTasks.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-60">
                 <ListTodo className="w-8 h-8 mb-3 opacity-20" />
@@ -651,10 +774,10 @@ export default function App() {
                     )}>
                       {task.title || '未命名任务'}
                     </h3>
-                    <div className={cn(
-                      "w-2 h-2 rounded-full shrink-0 shadow-[0_0_8px_currentColor]",
-                      task.x > 50 ? (100 - task.y > 50 ? "bg-rose-400 text-rose-400" : "bg-amber-400 text-amber-400") : (100 - task.y > 50 ? "bg-sky-400 text-sky-400" : "bg-slate-400 text-slate-400")
-                    )} />
+                    <div
+                      className="h-2.5 w-2.5 rounded-full shrink-0 shadow-[0_0_10px_currentColor]"
+                      style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+                    />
                   </div>
                   <div className="relative mt-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -671,6 +794,16 @@ export default function App() {
                         {task.steps.filter(s => s.completed).length}/{task.steps.length}
                       </span>
                     </div>
+                    <span className={cn(
+                      "rounded-md border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide",
+                      getTimelineAccent(task.timeline).badge
+                    )}>
+                      {task.timeline === 'long_term' ? '长期' : '临时'}
+                    </span>
+                  </div>
+                  <div className="relative mt-2 flex items-center justify-between text-[10px] text-slate-400">
+                    <span>预估 {task.estimated_minutes}m / 实际 {task.actual_minutes}m</span>
+                    {task.dependency_ids.length > 0 && <span>依赖 {task.dependency_ids.length}</span>}
                   </div>
                 </div>
               ))
@@ -699,7 +832,7 @@ export default function App() {
                 className="absolute left-1/2 top-4 z-30 flex w-[calc(100%-1.5rem)] max-w-xl -translate-x-1/2 items-center gap-3 rounded-2xl bg-teal-900/65 px-4 py-3 text-teal-100 border border-teal-400/40 shadow-[0_0_30px_rgba(20,184,166,0.2)] sm:px-6"
               >
                 <MousePointer2 className="h-5 w-5 animate-bounce shrink-0 text-teal-300" />
-                <span className="text-sm font-semibold sm:text-base">请在象限中点击一个位置来放置任务</span>
+                <span className="text-sm font-semibold sm:text-base">请在坐标区点击一个位置来放置任务</span>
                 <button
                   onClick={() => setIsPlacementMode(false)}
                   className="ml-auto rounded-full p-1.5 hover:bg-white/10 transition-colors"
@@ -710,37 +843,27 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Quadrant Labels */}
-          <div className="pointer-events-none absolute inset-0 hidden grid-cols-2 grid-rows-2 md:grid">
-            {/* Q2: Top Left */}
-            <div className="border-r border-b border-white/[0.08] bg-sky-500/[0.05] flex items-start justify-start p-8">
-              <span className="text-xs font-bold text-sky-100 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-sky-400/20 border border-sky-200/30 shadow-[0_8px_20px_rgba(56,189,248,0.2)]">Q2 紧急 & 不重要</span>
-            </div>
-            {/* Q1: Top Right */}
-            <div className="border-b border-white/[0.08] bg-rose-500/[0.06] flex items-start justify-end p-8 text-right">
-              <span className="text-xs font-bold text-rose-100 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-rose-400/20 border border-rose-200/30 shadow-[0_8px_20px_rgba(251,113,133,0.18)]">Q1 重要 & 紧急</span>
-            </div>
-            {/* Q3: Bottom Left */}
-            <div className="border-r border-white/[0.08] bg-slate-500/[0.05] flex items-end justify-start p-8">
-              <span className="text-xs font-bold text-slate-200 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-slate-400/20 border border-slate-200/25 shadow-[0_8px_20px_rgba(148,163,184,0.18)]">Q3 不重要 & 不紧急</span>
-            </div>
-            {/* Q4: Bottom Right */}
-            <div className="bg-emerald-500/[0.06] flex items-end justify-end p-8 text-right">
-              <span className="text-xs font-bold text-emerald-100 uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl bg-emerald-400/20 border border-emerald-200/30 shadow-[0_8px_20px_rgba(52,211,153,0.2)]">Q4 重要 & 不紧急</span>
-            </div>
+          {/* Axis Guides */}
+          <div className="pointer-events-none absolute inset-0 hidden md:block">
+            <div className="absolute left-1/2 top-0 h-full w-px bg-cyan-200/25" />
+            <div className="absolute left-0 top-1/2 h-px w-full bg-cyan-200/25" />
+            <span className="absolute left-3 top-3 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">紧急度: 高</span>
+            <span className="absolute left-3 bottom-14 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">紧急度: 低</span>
+            <span className="absolute left-14 bottom-3 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">重要性: 低</span>
+            <span className="absolute right-3 bottom-3 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">重要性: 高</span>
           </div>
 
           {/* Axis Labels */}
           <div className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 flex-col items-center gap-4 lg:flex opacity-50">
-            <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-cyan-100/85 [writing-mode:vertical-lr]">重要性 (Importance)</div>
+            <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-cyan-100/85 [writing-mode:vertical-lr]">紧急度 (Urgency)</div>
             <div className="h-24 w-px bg-gradient-to-b from-transparent via-cyan-200/80 to-transparent" />
           </div>
           <div className="pointer-events-none absolute left-1/2 top-6 hidden -translate-x-1/2 items-center gap-4 lg:flex opacity-50">
             <div className="w-24 h-px bg-gradient-to-r from-transparent via-cyan-200/80 to-transparent" />
-            <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-cyan-100/85">紧急程度 (Urgency)</div>
+            <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-cyan-100/85">重要性 (Importance)</div>
           </div>
 
-          {/* The Quadrant Stage */}
+          {/* The Axis Stage */}
           <div
             ref={quadrantRef}
             onClick={handleQuadrantClick}
@@ -749,6 +872,37 @@ export default function App() {
               isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
             )}
           >
+            <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <defs>
+                <marker id="dependency-arrow-blocked" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" />
+                </marker>
+                <marker id="dependency-arrow-ready" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L8,4 L0,8 z" fill="#22c55e" />
+                </marker>
+              </defs>
+              {tasks.flatMap((task) =>
+                task.dependency_ids.map((dependencyId) => {
+                  const fromTask = taskById.get(dependencyId);
+                  if (!fromTask) return null;
+                  const edgeReady = fromTask.status === 'completed';
+                  return (
+                    <line
+                      key={`${dependencyId}-${task.id}`}
+                      x1={fromTask.x}
+                      y1={fromTask.y}
+                      x2={task.x}
+                      y2={task.y}
+                      stroke={edgeReady ? '#22c55e' : '#94a3b8'}
+                      strokeOpacity={edgeReady ? 0.8 : 0.55}
+                      strokeWidth={0.35}
+                      markerEnd={edgeReady ? 'url(#dependency-arrow-ready)' : 'url(#dependency-arrow-blocked)'}
+                    />
+                  );
+                })
+              )}
+            </svg>
+
             {/* Ghost Point */}
             {isPlacementMode && mousePos && (
               <div
@@ -765,7 +919,7 @@ export default function App() {
               <TaskPoint
                 key={task.id}
                 task={task}
-                onSelect={() => setSelectedTask(task)}
+                onOpen={() => setSelectedTask(task)}
                 onMove={updateTaskPosition}
               />
             ))}
@@ -788,7 +942,7 @@ export default function App() {
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
-              className="fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col bg-[linear-gradient(180deg,rgba(7,18,41,0.98),rgba(15,23,42,0.98))] shadow-2xl border-l border-white/10 sm:w-[400px]"
+              className="fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col bg-slate-900 shadow-2xl border-l border-white/10 sm:w-[400px]"
             >
               <div className="p-8 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
                 <div>
@@ -900,6 +1054,90 @@ export default function App() {
                       value={selectedTask.description}
                       onChange={(e) => setSelectedTask({ ...selectedTask, description: e.target.value })}
                     />
+                  </div>
+                </div>
+
+                {/* Task Meta Section */}
+                <div className="space-y-4 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setSelectedTask({ ...selectedTask, timeline: 'temporary' })}
+                      className={cn(
+                        "rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
+                        selectedTask.timeline === 'temporary'
+                          ? "border-amber-300/60 bg-amber-500/20 text-amber-100"
+                          : "border-white/15 bg-white/5 text-slate-300 hover:bg-white/10"
+                      )}
+                    >
+                      临时任务
+                    </button>
+                    <button
+                      onClick={() => setSelectedTask({ ...selectedTask, timeline: 'long_term' })}
+                      className={cn(
+                        "rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
+                        selectedTask.timeline === 'long_term'
+                          ? "border-cyan-300/60 bg-cyan-500/20 text-cyan-100"
+                          : "border-white/15 bg-white/5 text-slate-300 hover:bg-white/10"
+                      )}
+                    >
+                      长期任务
+                    </button>
+                    {!selectedTaskReady && (
+                      <span className="rounded-md border border-amber-400/35 bg-amber-500/15 px-2 py-1 text-[10px] font-bold text-amber-200">
+                        当前被前置任务阻塞
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="rounded-xl border border-white/10 bg-slate-950/60 p-3 text-xs text-slate-300">
+                      预计用时（分钟）
+                      <input
+                        type="number"
+                        min={0}
+                        value={selectedTask.estimated_minutes}
+                        onChange={(e) => setSelectedTask({ ...selectedTask, estimated_minutes: Math.max(0, Number(e.target.value) || 0) })}
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-sm text-white"
+                      />
+                    </label>
+                    <label className="rounded-xl border border-white/10 bg-slate-950/60 p-3 text-xs text-slate-300">
+                      实际用时（分钟）
+                      <input
+                        type="number"
+                        min={0}
+                        value={selectedTask.actual_minutes}
+                        onChange={(e) => setSelectedTask({ ...selectedTask, actual_minutes: Math.max(0, Number(e.target.value) || 0) })}
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-sm text-white"
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <h4 className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                      <Link2 className="h-3.5 w-3.5 text-cyan-300" />
+                      前置依赖（连线关系）
+                    </h4>
+                    <div className="max-h-32 space-y-1 overflow-y-auto pr-1">
+                      {tasks.filter((task) => task.id !== selectedTask.id).length === 0 ? (
+                        <p className="text-xs text-slate-500">暂无可关联任务。</p>
+                      ) : (
+                        tasks
+                          .filter((task) => task.id !== selectedTask.id)
+                          .map((task) => (
+                            <label
+                              key={`dep-${task.id}`}
+                              className="flex cursor-pointer items-center justify-between rounded-lg border border-white/10 bg-slate-950/50 px-2 py-1.5 text-xs text-slate-300"
+                            >
+                              <span className="truncate pr-2">{task.title || '未命名任务'}</span>
+                              <input
+                                type="checkbox"
+                                checked={selectedTask.dependency_ids.includes(task.id)}
+                                onChange={() => toggleDependency(selectedTask, task.id)}
+                              />
+                            </label>
+                          ))
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1043,10 +1281,16 @@ export default function App() {
                   {tasks.some(t => t.id === selectedTask.id) && (
                     <button
                       onClick={() => completeTask(selectedTask)}
-                      className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 px-6 py-2.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(20,184,166,0.3)] ring-1 ring-teal-400/50 transition-all hover:scale-[1.02] active:scale-95"
+                      disabled={!selectedTaskReady}
+                      className={cn(
+                        "flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-bold text-white transition-all",
+                        selectedTaskReady
+                          ? "bg-gradient-to-r from-teal-500 to-emerald-500 shadow-[0_0_20px_rgba(20,184,166,0.3)] ring-1 ring-teal-400/50 hover:scale-[1.02] active:scale-95"
+                          : "bg-slate-700/70 text-slate-300 cursor-not-allowed"
+                      )}
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      完成并移除
+                      标记完成
                     </button>
                   )}
                 </div>
@@ -1059,9 +1303,11 @@ export default function App() {
   );
 }
 
-function TaskPoint({ task, onSelect, onMove }: { task: Task, onSelect: () => void, onMove: (id: string, x: number, y: number) => void }) {
+function TaskPoint({ task, onOpen, onMove }: { task: Task, onOpen: () => void, onMove: (id: string, x: number, y: number) => void }) {
   const [isDragging, setIsDragging] = useState(false);
   const pointRef = useRef<HTMLDivElement>(null);
+  const timelineAccent = getTimelineAccent(task.timeline);
+  const nodeColor = getDimensionColor(task);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1097,6 +1343,8 @@ function TaskPoint({ task, onSelect, onMove }: { task: Task, onSelect: () => voi
   const progress = task.steps.length > 0
     ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100
     : 0;
+  const urgency = Math.round(100 - task.y);
+  const importance = Math.round(task.x);
 
   return (
     <motion.div
@@ -1110,7 +1358,10 @@ function TaskPoint({ task, onSelect, onMove }: { task: Task, onSelect: () => voi
         onMouseDown={handleMouseDown}
         onClick={(e) => {
           e.stopPropagation();
-          onSelect();
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onOpen();
         }}
         className={cn(
           "relative group cursor-grab active:cursor-grabbing p-4",
@@ -1118,32 +1369,51 @@ function TaskPoint({ task, onSelect, onMove }: { task: Task, onSelect: () => voi
         )}
       >
         {/* Progress Ring / Circle Backdrop */}
-        <div className="w-8 h-8 rounded-2xl flex items-center justify-center overflow-hidden relative transition-all duration-300 bg-slate-900/90 border border-white/20 shadow-[0_4px_20px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_20px_rgba(20,184,166,0.3)] group-hover:border-teal-400/50">
+        <div
+          className={cn(
+            "w-8 h-8 rounded-2xl flex items-center justify-center overflow-hidden relative transition-all duration-300 bg-slate-900/90 border shadow-[0_4px_20px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_20px_rgba(20,184,166,0.3)]",
+            timelineAccent.ring
+          )}
+        >
           <div
-            className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-teal-500/40 to-teal-500/10 transition-all duration-700"
-            style={{ height: `${progress}%` }}
+            className="absolute bottom-0 left-0 right-0 transition-all duration-700"
+            style={{
+              height: `${progress}%`,
+              background: `linear-gradient(to top, ${nodeColor}70, ${nodeColor}25)`,
+            }}
           />
-          {/* Core dot glow */}
-          <div className={cn(
-            "w-2.5 h-2.5 rounded-full transition-all duration-500 shadow-[0_0_10px_currentColor]",
-            progress === 100 ? "bg-emerald-400 text-emerald-400 scale-125 shadow-[0_0_20px_currentColor]" : "bg-teal-300 text-teal-300 group-hover:scale-110"
-          )} />
+          {/* Core dot */}
+          <div
+            className={cn(
+              "h-2.5 w-2.5 rounded-full transition-all duration-500 shadow-[0_0_10px_currentColor]",
+              progress === 100 && "scale-125"
+            )}
+            style={{ color: nodeColor, backgroundColor: nodeColor }}
+          />
+          <div
+            className={cn(
+              "absolute h-2.5 w-2.5 rounded-full transition-all duration-500 shadow-[0_0_12px_currentColor]",
+              progress === 100 ? "scale-125" : "group-hover:scale-110"
+            )}
+            style={{ color: nodeColor, backgroundColor: nodeColor }}
+          />
         </div>
 
-        {/* Floating Tooltip Label */}
-        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-          <motion.div
-            initial={{ y: 5 }}
-            animate={{ y: 0 }}
-            className="glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 border border-white/[0.05] shadow-2xl"
-          >
-            <span className="text-[11px] font-semibold text-white tracking-tight">{task.title || '未命名'}</span>
-            {progress > 0 && (
-              <span className="text-[9px] font-bold text-teal-300 bg-teal-500/20 px-1.5 py-0.5 rounded-md border border-teal-500/30">
-                {Math.round(progress)}%
+        {/* Always-visible label */}
+        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 whitespace-nowrap pointer-events-none">
+          <div className="rounded-xl border border-white/10 bg-slate-900/95 px-2 py-1 shadow-xl">
+            <div className="flex items-center gap-1.5">
+              <span className="max-w-[140px] truncate text-[11px] font-semibold text-white">{task.title || '未命名'}</span>
+              <span className={cn("rounded border px-1 py-0 text-[9px] font-bold", timelineAccent.badge)}>
+                {task.timeline === 'long_term' ? '长' : '临'}
               </span>
-            )}
-          </motion.div>
+            </div>
+            <div className="mt-0.5 flex items-center gap-2 text-[9px] text-slate-300">
+              <span>重:{importance}</span>
+              <span>急:{urgency}</span>
+              <span>{Math.round(progress)}%</span>
+            </div>
+          </div>
         </div>
       </div>
     </motion.div>
