@@ -843,26 +843,6 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Axis Guides */}
-          <div className="pointer-events-none absolute inset-0 hidden md:block">
-            <div className="absolute left-1/2 top-0 h-full w-px bg-cyan-200/25" />
-            <div className="absolute left-0 top-1/2 h-px w-full bg-cyan-200/25" />
-            <span className="absolute left-3 top-3 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">紧急度: 高</span>
-            <span className="absolute left-3 bottom-14 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">紧急度: 低</span>
-            <span className="absolute left-14 bottom-3 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">重要性: 低</span>
-            <span className="absolute right-3 bottom-3 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">重要性: 高</span>
-          </div>
-
-          {/* Axis Labels */}
-          <div className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 flex-col items-center gap-4 lg:flex opacity-50">
-            <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-cyan-100/85 [writing-mode:vertical-lr]">紧急度 (Urgency)</div>
-            <div className="h-24 w-px bg-gradient-to-b from-transparent via-cyan-200/80 to-transparent" />
-          </div>
-          <div className="pointer-events-none absolute left-1/2 top-6 hidden -translate-x-1/2 items-center gap-4 lg:flex opacity-50">
-            <div className="w-24 h-px bg-gradient-to-r from-transparent via-cyan-200/80 to-transparent" />
-            <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-cyan-100/85">重要性 (Importance)</div>
-          </div>
-
           {/* The Axis Stage */}
           <div
             ref={quadrantRef}
@@ -872,6 +852,14 @@ export default function App() {
               isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
             )}
           >
+            <div className="pointer-events-none absolute inset-0 z-[2]">
+              <div className="absolute left-1/2 top-0 h-full w-px bg-cyan-200/35" />
+              <div className="absolute left-0 top-1/2 h-px w-full bg-cyan-200/35" />
+              <span className="absolute left-2 top-2 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">紧急度: 高</span>
+              <span className="absolute left-2 bottom-12 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">紧急度: 低</span>
+              <span className="absolute left-12 bottom-2 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">重要性: 低</span>
+              <span className="absolute right-2 bottom-2 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">重要性: 高</span>
+            </div>
             <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
               <defs>
                 <marker id="dependency-arrow-blocked" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
