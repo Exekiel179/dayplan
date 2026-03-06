@@ -252,21 +252,45 @@ function getUserTasksFile(username) {
   return path.join(dataDir, 'users', safeUser, 'tasks.json');
 }
 
+function normalizeTaskPayload(payload) {
+  if (Array.isArray(payload)) {
+    return {
+      tasks: payload,
+      ability_dimensions: [],
+    };
+  }
+  if (payload && typeof payload === 'object') {
+    return {
+      tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
+      ability_dimensions: Array.isArray(payload.ability_dimensions)
+        ? payload.ability_dimensions
+          .filter((item) => typeof item === 'string')
+          .map((item) => item.trim())
+          .filter(Boolean)
+        : [],
+    };
+  }
+  return {
+    tasks: [],
+    ability_dimensions: [],
+  };
+}
+
 async function readTasks(username) {
   const userTasksFile = getUserTasksFile(username);
   try {
     const text = await fs.promises.readFile(userTasksFile, 'utf-8');
     const parsed = JSON.parse(text);
-    return Array.isArray(parsed) ? parsed : [];
+    return normalizeTaskPayload(parsed);
   } catch (error) {
     if (error && error.code === 'ENOENT') {
       try {
         const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
         const parsed = JSON.parse(text);
-        return Array.isArray(parsed) ? parsed : [];
+        return normalizeTaskPayload(parsed);
       } catch (legacyError) {
         if (legacyError && legacyError.code === 'ENOENT') {
-          return [];
+          return normalizeTaskPayload([]);
         }
         throw legacyError;
       }
@@ -275,10 +299,10 @@ async function readTasks(username) {
   }
 }
 
-async function writeTasks(username, tasks) {
+async function writeTasks(username, payload) {
   const userTasksFile = getUserTasksFile(username);
   await fs.promises.mkdir(path.dirname(userTasksFile), { recursive: true });
-  await fs.promises.writeFile(userTasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
+  await fs.promises.writeFile(userTasksFile, JSON.stringify(normalizeTaskPayload(payload), null, 2), 'utf-8');
 }
 
 function createSessionToken(username) {
@@ -395,8 +419,8 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
 
 app.put('/api/tasks', requireAuth, async (req, res) => {
   try {
-    if (!Array.isArray(req.body)) {
-      res.status(400).json({ error: 'payload must be an array' });
+    if (!Array.isArray(req.body) && !(req.body && typeof req.body === 'object')) {
+      res.status(400).json({ error: 'payload must be an array or object' });
       return;
     }
     await writeTasks(req.authUser, req.body);

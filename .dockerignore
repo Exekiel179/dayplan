@@ -4,6 +4,8 @@ build
 .git
 .gitignore
 .env.local
+.env
+.data
 .DS_Store
 *.log
 npm-debug.log*

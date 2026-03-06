@@ -29,6 +29,7 @@ View your app in AI Studio: https://ai.studio/apps/44359201-eb79-4716-a227-d07eb
 ## Secure Deployment (Docker)
 
 1. Create `.env` on the server:
+   - `DAYPLAN_IMAGE=exekiel179/dayplan:latest` (or `ghcr.io/<github-owner>/dayplan:latest`)
    - `AI_API_KEY=...`
    - `AI_BASE_URL=https://api.aipaibox.com`
    - `AI_MODEL=gemini-3.1-pro-preview`
@@ -36,10 +37,16 @@ View your app in AI Studio: https://ai.studio/apps/44359201-eb79-4716-a227-d07eb
    - `AUTH_PASSWORD=admin123456`
    - Optional: `AUTH_USERS=[{"username":"admin","password":"admin123456"},{"username":"alice","password":"alice123"}]`
    - Optional: `AUTH_ALLOW_REGISTRATION=true`
-2. Build and start:
-   - `docker compose --env-file .env up -d --build`
+2. Start:
+   - `docker compose --env-file .env pull`
+   - `docker compose --env-file .env up -d`
 3. Open:
    - `http://<your-server>:3000`
+
+If you want to run a locally built image instead of registry image:
+- `docker build -t dayplan-local:latest .`
+- set `DAYPLAN_IMAGE=dayplan-local:latest`
+- `docker compose --env-file .env up -d`
 
 The frontend now calls your own backend endpoint `/api/ai/plan`, so the API key stays on the server and is not exposed to browser users.
 
@@ -52,3 +59,15 @@ The frontend supports self-service registration (can be disabled via `AUTH_ALLOW
 - Registered accounts are stored at `.data/auth-users.json` (password hash + salt).
 - Legacy `.data/tasks.json` is still read as fallback for backward compatibility.
 - This storage is independent of browser port/origin, so restarting the app or changing ports will not lose tasks.
+
+## GitHub Automation
+
+- CI: `.github/workflows/ci.yml` runs `npm run lint` and `npm run build` on push/PR.
+- Docker publish: `.github/workflows/docker-publish.yml` publishes images to:
+  - `ghcr.io/<owner>/dayplan` (always, on `main` and tag `v*`)
+  - `<dockerhub-user>/dayplan` (if secrets are configured)
+  - Before pushing the new `latest`, workflow backs up previous `latest` as `bak`.
+
+Set repository secrets for DockerHub publish:
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`

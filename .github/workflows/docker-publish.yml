@@ -1,0 +1,106 @@
+name: Publish Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-ghcr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (GHCR)
+        id: meta_ghcr
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/dayplan
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Backup current latest to bak (GHCR)
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/dayplan"
+          docker pull "${IMAGE}:latest" || exit 0
+          docker tag "${IMAGE}:latest" "${IMAGE}:bak"
+          docker push "${IMAGE}:bak"
+
+      - name: Build and push (GHCR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta_ghcr.outputs.tags }}
+          labels: ${{ steps.meta_ghcr.outputs.labels }}
+
+  publish-dockerhub:
+    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker metadata (DockerHub)
+        id: meta_dockerhub
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/dayplan
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Backup current latest to bak (DockerHub)
+        run: |
+          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/dayplan"
+          docker pull "${IMAGE}:latest" || exit 0
+          docker tag "${IMAGE}:latest" "${IMAGE}:bak"
+          docker push "${IMAGE}:bak"
+
+      - name: Build and push (DockerHub)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta_dockerhub.outputs.tags }}
+          labels: ${{ steps.meta_dockerhub.outputs.labels }}

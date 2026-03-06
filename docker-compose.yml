@@ -1,6 +1,8 @@
+name: dayplan
+
 services:
   app:
-    image: exekiel179/dayplan:latest
+    image: ${DAYPLAN_IMAGE:-exekiel179/dayplan:latest}
     container_name: dayplan-app
     restart: unless-stopped
     ports:

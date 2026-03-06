@@ -5,6 +5,7 @@ import {
   X,
   CheckCircle2,
   Circle,
+  GripVertical,
   Sparkles,
   ChevronRight,
   ListTodo,
@@ -21,7 +22,7 @@ import {
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Task, TaskStep, TaskTimeline } from './types';
+import { LongTermCadence, Task, TaskStep, TaskTimeline, UserTaskData } from './types';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -29,22 +30,185 @@ function cn(...inputs: ClassValue[]) {
 
 const AUTH_TOKEN_KEY = 'dayplan_auth_token';
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function toSafeTimestamp(value: unknown): number | null {
+  const ts = Number(value);
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+  return ts;
+}
+
+function normalizeLongTermCadence(value: unknown): LongTermCadence {
+  if (value === 'weekly' || value === 'interval') return value;
+  return 'daily';
+}
+
+function normalizeAbilityGains(value: unknown) {
+  if (!value || typeof value !== 'object') return {};
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, amount]) => {
+    const name = key.trim();
+    if (!name) return acc;
+    const numeric = Number(amount);
+    if (!Number.isFinite(numeric) || numeric <= 0) return acc;
+    acc[name] = Math.floor(numeric);
+    return acc;
+  }, {});
+}
+
 function normalizeTask(rawTask: Task): Task {
-  const dependencyIds = Array.isArray((rawTask as Partial<Task>).dependency_ids)
-    ? (rawTask as Partial<Task>).dependency_ids!.filter((id): id is string => typeof id === 'string')
+  const partial = rawTask as Partial<Task>;
+  const dependencyIds = Array.isArray(partial.dependency_ids)
+    ? partial.dependency_ids.filter((id): id is string => typeof id === 'string')
     : [];
 
-  const timeline = (rawTask as Partial<Task>).timeline === 'long_term' ? 'long_term' : 'temporary';
-  const estimatedMinutes = Number((rawTask as Partial<Task>).estimated_minutes ?? 60);
-  const actualMinutes = Number((rawTask as Partial<Task>).actual_minutes ?? 0);
+  const timeline = partial.timeline === 'long_term' ? 'long_term' : 'temporary';
+  const estimatedMinutes = Number(partial.estimated_minutes ?? 60);
+  const actualMinutes = Number(partial.actual_minutes ?? 0);
+  const stepList = Array.isArray(partial.steps)
+    ? partial.steps.map((step, idx) => {
+        const rawStep = step as Partial<TaskStep>;
+        return {
+          id: typeof rawStep?.id === 'string' && rawStep.id.trim() ? rawStep.id : `step-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+          text: typeof rawStep?.text === 'string' ? rawStep.text : '',
+          completed: Boolean(rawStep?.completed),
+        };
+      })
+    : [];
+  const status = partial.status === 'completed' ? 'completed' : 'pending';
+  const completionCountRaw = Number(partial.completion_count ?? (status === 'completed' ? 1 : 0));
+  const completionCount = Number.isFinite(completionCountRaw) ? Math.max(0, Math.floor(completionCountRaw)) : 0;
+  const longTermInterval = Number(partial.long_term_interval_days ?? 3);
+  const normalizedLongTermInterval = Number.isFinite(longTermInterval) ? clamp(Math.round(longTermInterval), 2, 365) : 3;
 
   return {
-    ...rawTask,
+    ...(partial as Task),
+    id: typeof partial.id === 'string' ? partial.id : Math.random().toString(36).slice(2, 11),
+    title: typeof partial.title === 'string' ? partial.title : '',
+    description: typeof partial.description === 'string' ? partial.description : '',
+    x: Number.isFinite(Number(partial.x)) ? clamp(Number(partial.x), 0, 100) : 50,
+    y: Number.isFinite(Number(partial.y)) ? clamp(Number(partial.y), 0, 100) : 50,
+    status,
     timeline,
     dependency_ids: dependencyIds,
     estimated_minutes: Number.isFinite(estimatedMinutes) ? Math.max(0, estimatedMinutes) : 60,
     actual_minutes: Number.isFinite(actualMinutes) ? Math.max(0, actualMinutes) : 0,
+    deadline_at: toSafeTimestamp(partial.deadline_at),
+    use_countdown_urgency: Boolean(partial.use_countdown_urgency),
+    long_term_cadence: normalizeLongTermCadence(partial.long_term_cadence),
+    long_term_interval_days: normalizedLongTermInterval,
+    last_completed_at: toSafeTimestamp(partial.last_completed_at),
+    next_due_at: toSafeTimestamp(partial.next_due_at),
+    archived_at: toSafeTimestamp(partial.archived_at),
+    completion_count: completionCount,
+    ability_gains: normalizeAbilityGains(partial.ability_gains),
+    ai_plan: typeof partial.ai_plan === 'string' ? partial.ai_plan : '',
+    steps: stepList,
+    created_at: Number.isFinite(Number(partial.created_at)) ? Number(partial.created_at) : Date.now(),
   };
+}
+
+function collectAbilityDimensions(tasks: Task[]) {
+  const result = new Set<string>();
+  tasks.forEach((task) => {
+    Object.keys(task.ability_gains || {}).forEach((name) => {
+      if (name.trim()) result.add(name.trim());
+    });
+  });
+  return [...result];
+}
+
+function normalizeTaskPayload(payload: unknown): UserTaskData {
+  if (Array.isArray(payload)) {
+    const tasks = payload.map((task) => normalizeTask(task as Task));
+    return {
+      tasks,
+      ability_dimensions: collectAbilityDimensions(tasks),
+    };
+  }
+  if (payload && typeof payload === 'object') {
+    const raw = payload as Partial<UserTaskData>;
+    const tasks = Array.isArray(raw.tasks)
+      ? raw.tasks.map((task) => normalizeTask(task as Task))
+      : [];
+    const baseDimensions = Array.isArray(raw.ability_dimensions)
+      ? raw.ability_dimensions
+        .filter((name): name is string => typeof name === 'string')
+        .map((name) => name.trim())
+        .filter(Boolean)
+      : [];
+    const merged = new Set([...baseDimensions, ...collectAbilityDimensions(tasks)]);
+    return {
+      tasks,
+      ability_dimensions: [...merged],
+    };
+  }
+  return { tasks: [], ability_dimensions: [] };
+}
+
+function formatDateTime(ts?: number | null) {
+  if (!ts) return '未设置';
+  return new Date(ts).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function toDateTimeLocalValue(ts?: number | null) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  d.setMinutes(0, 0, 0);
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function parseDateTimeLocalValue(value: string) {
+  if (!value) return null;
+  const ts = new Date(value).getTime();
+  if (!Number.isFinite(ts)) return null;
+  const d = new Date(ts);
+  d.setMinutes(0, 0, 0);
+  return d.getTime();
+}
+
+function getCountdownText(deadlineAt: number, now: number) {
+  const diffMs = deadlineAt - now;
+  const absMs = Math.abs(diffMs);
+  const totalHours = Math.floor(absMs / 3600000);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  const prefix = diffMs >= 0 ? '剩余' : '超时';
+  if (days > 0) return `${prefix} ${days}天${String(hours).padStart(2, '0')}小时`;
+  return `${prefix} ${String(hours).padStart(2, '0')}小时`;
+}
+
+function getLongTermCycleMs(task: Task) {
+  if (task.long_term_cadence === 'weekly') return 7 * 24 * 3600000;
+  if (task.long_term_cadence === 'interval') {
+    const days = clamp(Math.round(task.long_term_interval_days || 3), 2, 365);
+    return days * 24 * 3600000;
+  }
+  return 24 * 3600000;
+}
+
+function getTaskRenderY(task: Task, now: number) {
+  if (task.timeline !== 'temporary' || !task.use_countdown_urgency || !task.deadline_at) return task.y;
+  const remaining = task.deadline_at - now;
+  if (remaining <= 0) return 2;
+  const maxWindowMs = 72 * 3600000;
+  const urgencyRatio = 1 - Math.min(1, remaining / maxWindowMs);
+  const minY = 4;
+  return clamp(task.y - (task.y - minY) * urgencyRatio, minY, 100);
+}
+
+function isLongTermDue(task: Task, now: number) {
+  if (task.timeline !== 'long_term') return true;
+  if (!task.next_due_at) return true;
+  return task.next_due_at <= now;
 }
 
 function getTimelineAccent(timeline: TaskTimeline) {
@@ -121,14 +285,14 @@ async function loadTasksFromApi(token: string) {
     throw new Error(`load tasks failed: ${response.status}`);
   }
   const data = await response.json();
-  return Array.isArray(data) ? (data as Task[]).map(normalizeTask) : [];
+  return normalizeTaskPayload(data);
 }
 
-async function persistTasksToApi(tasks: Task[], token: string) {
+async function persistTasksToApi(payload: UserTaskData, token: string) {
   const response = await fetch('/api/tasks', {
     method: 'PUT',
     headers: withAuthHeaders(token, { 'Content-Type': 'application/json' }),
-    body: JSON.stringify(tasks),
+    body: JSON.stringify(payload),
   });
   if (response.status === 401) {
     throw new Error('UNAUTHORIZED');
@@ -206,6 +370,8 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [abilityDimensions, setAbilityDimensions] = useState<string[]>([]);
+  const [newAbilityDimension, setNewAbilityDimension] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
@@ -217,6 +383,8 @@ export default function App() {
   const [aiError, setAiError] = useState('');
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
   const [storageError, setStorageError] = useState('');
+  const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
+  const [nowTs, setNowTs] = useState(Date.now());
 
   const quadrantRef = useRef<HTMLDivElement>(null);
   const hasHydratedRef = useRef(false);
@@ -225,6 +393,7 @@ export default function App() {
     setAuthToken('');
     setAuthUser('');
     setTasks([]);
+    setAbilityDimensions([]);
     setSelectedTask(null);
     setIsLoadingTasks(false);
     setStorageError('');
@@ -233,29 +402,58 @@ export default function App() {
     }
   };
 
-  // Sorting logic for tasks in the sidebar
-  // Importance = x, Urgency = 100 - y
-  const sortedTasks = [...tasks].sort((a, b) => {
+  const activeTasks = tasks.filter((task) => task.status === 'pending');
+  const archivedTasks = tasks.filter((task) => task.status === 'completed');
+  const longTermTasks = activeTasks.filter((task) => task.timeline === 'long_term');
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+
+  const isDependencySatisfied = (dependencyTask?: Task) => {
+    if (!dependencyTask) return false;
+    if (dependencyTask.status === 'completed') return true;
+    return dependencyTask.timeline === 'long_term' && Boolean(dependencyTask.last_completed_at);
+  };
+
+  const isTaskReady = (task: Task) =>
+    task.dependency_ids.length === 0
+    || task.dependency_ids.every((id) => isDependencySatisfied(taskById.get(id)));
+
+  const sortedTasks = [...activeTasks].sort((a, b) => {
     const impA = a.x;
     const impB = b.x;
     if (impB !== impA) return impB - impA;
 
-    const urgA = 100 - a.y;
-    const urgB = 100 - b.y;
+    const urgA = 100 - getTaskRenderY(a, nowTs);
+    const urgB = 100 - getTaskRenderY(b, nowTs);
     return (impB * urgB) - (impA * urgA);
   });
 
-  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const executableTasks = activeTasks.filter((task) => isTaskReady(task) && isLongTermDue(task, nowTs));
+  const blockedTasks = activeTasks.filter((task) => !isTaskReady(task) || !isLongTermDue(task, nowTs));
 
-  const isTaskReady = (task: Task) =>
-    task.dependency_ids.length === 0
-    || task.dependency_ids.every((id) => taskById.get(id)?.status === 'completed');
+  const totalEstimatedMinutes = activeTasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
+  const totalActualMinutes = activeTasks.reduce((sum, task) => sum + task.actual_minutes, 0);
 
-  const executableTasks = tasks.filter((task) => task.status === 'pending' && isTaskReady(task));
-  const blockedTasks = tasks.filter((task) => task.status === 'pending' && !isTaskReady(task));
+  const abilityScores = abilityDimensions.reduce<Record<string, number>>((acc, dim) => {
+    acc[dim] = 0;
+    return acc;
+  }, {});
+  tasks.forEach((task) => {
+    const gains = task.ability_gains || {};
+    const completionTimes = Math.max(0, task.completion_count || 0);
+    Object.entries(gains).forEach(([dim, gain]) => {
+      if (!(dim in abilityScores)) {
+        abilityScores[dim] = 0;
+      }
+      abilityScores[dim] += completionTimes * Math.max(0, Math.floor(gain));
+    });
+  });
 
-  const totalEstimatedMinutes = tasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
-  const totalActualMinutes = tasks.reduce((sum, task) => sum + task.actual_minutes, 0);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowTs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Track mouse for placement mode
   useEffect(() => {
@@ -343,9 +541,10 @@ export default function App() {
 
     setIsLoadingTasks(true);
     loadTasksFromApi(authToken)
-      .then((loadedTasks) => {
+      .then((loadedData) => {
         if (canceled) return;
-        setTasks(loadedTasks);
+        setTasks(loadedData.tasks);
+        setAbilityDimensions(loadedData.ability_dimensions);
         setStorageError('');
       })
       .catch((e) => {
@@ -378,7 +577,10 @@ export default function App() {
     }
 
     const timer = window.setTimeout(() => {
-      persistTasksToApi(tasks, authToken)
+      persistTasksToApi({
+        tasks,
+        ability_dimensions: abilityDimensions,
+      }, authToken)
         .then(() => setStorageError(''))
         .catch((e) => {
           console.error("Failed to persist tasks", e);
@@ -392,7 +594,7 @@ export default function App() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [tasks, isLoadingTasks, authToken]);
+  }, [tasks, abilityDimensions, isLoadingTasks, authToken]);
 
   const handleAddTask = () => {
     setIsPlacementMode(true);
@@ -416,6 +618,15 @@ export default function App() {
       dependency_ids: [],
       estimated_minutes: 60,
       actual_minutes: 0,
+      deadline_at: null,
+      use_countdown_urgency: false,
+      long_term_cadence: 'daily',
+      long_term_interval_days: 3,
+      last_completed_at: null,
+      next_due_at: null,
+      archived_at: null,
+      completion_count: 0,
+      ability_gains: {},
       steps: [],
       created_at: Date.now()
     };
@@ -429,9 +640,16 @@ export default function App() {
     const cleanedDependencyIds = normalizedTask.dependency_ids
       .filter((id) => id !== normalizedTask.id)
       .filter((id, index, arr) => arr.indexOf(id) === index);
+    const shouldArchive = normalizedTask.timeline === 'temporary' && normalizedTask.status === 'completed';
     const finalTask = {
       ...normalizedTask,
       dependency_ids: cleanedDependencyIds,
+      status: normalizedTask.timeline === 'long_term' ? 'pending' : normalizedTask.status,
+      next_due_at: normalizedTask.timeline === 'long_term'
+        ? (normalizedTask.next_due_at || Date.now())
+        : null,
+      archived_at: shouldArchive ? (normalizedTask.archived_at || Date.now()) : null,
+      completion_count: Math.max(0, normalizedTask.completion_count || 0),
     };
     setTasks(prev => {
       const exists = prev.find(t => t.id === finalTask.id);
@@ -442,18 +660,111 @@ export default function App() {
     });
   };
 
-  const deleteTask = (id: string) => {
-    setTasks(prev => prev
-      .filter(t => t.id !== id)
-      .map((task) => ({
+  const deleteTask = (id: string, options: { allowLongTerm?: boolean } = {}) => {
+    setTasks((prev) => {
+      const target = prev.find((task) => task.id === id);
+      if (!target) return prev;
+      if (target.timeline === 'long_term' && !options.allowLongTerm) {
+        return prev;
+      }
+      return prev
+        .filter((task) => task.id !== id)
+        .map((task) => ({
+          ...task,
+          dependency_ids: task.dependency_ids.filter((depId) => depId !== id),
+        }));
+    });
+    setSelectedTask((prev) => (prev?.id === id ? null : prev));
+  };
+
+  const restoreArchivedTask = (id: string) => {
+    setTasks((prev) => prev.map((task) => {
+      if (task.id !== id) return task;
+      return {
         ...task,
-        dependency_ids: task.dependency_ids.filter((depId) => depId !== id),
-      })));
-    setSelectedTask(null);
+        status: 'pending',
+        archived_at: null,
+      };
+    }));
+  };
+
+  const addAbilityDimension = () => {
+    const name = newAbilityDimension.trim();
+    if (!name) return;
+    if (abilityDimensions.includes(name)) {
+      setNewAbilityDimension('');
+      return;
+    }
+    setAbilityDimensions((prev) => [...prev, name]);
+    setNewAbilityDimension('');
+  };
+
+  const removeAbilityDimension = (name: string) => {
+    setAbilityDimensions((prev) => prev.filter((item) => item !== name));
+    setTasks((prev) => prev.map((task) => {
+      const nextGains = { ...(task.ability_gains || {}) };
+      delete nextGains[name];
+      return { ...task, ability_gains: nextGains };
+    }));
+    setSelectedTask((prev) => {
+      if (!prev) return prev;
+      const nextGains = { ...(prev.ability_gains || {}) };
+      delete nextGains[name];
+      return { ...prev, ability_gains: nextGains };
+    });
+  };
+
+  const updateSelectedTaskAbilityGain = (dimension: string, value: number) => {
+    if (!selectedTask) return;
+    const sanitizedValue = Math.max(0, Math.floor(value || 0));
+    const nextGains = { ...(selectedTask.ability_gains || {}) };
+    if (sanitizedValue <= 0) {
+      delete nextGains[dimension];
+    } else {
+      nextGains[dimension] = sanitizedValue;
+    }
+    setSelectedTask({ ...selectedTask, ability_gains: nextGains });
+  };
+
+  const moveSelectedStep = (fromIdx: number, toIdx: number) => {
+    if (!selectedTask) return;
+    if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
+    if (fromIdx >= selectedTask.steps.length || toIdx >= selectedTask.steps.length) return;
+    const reordered = [...selectedTask.steps];
+    const [moving] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moving);
+    setSelectedTask({
+      ...selectedTask,
+      steps: reordered,
+    });
   };
 
   const completeTask = (task: Task) => {
-    setTasks(prev => prev.map((t) => (t.id === task.id ? { ...t, status: 'completed' } : t)));
+    const now = Date.now();
+    setTasks((prev) => prev.map((item) => {
+      if (item.id !== task.id) return item;
+      const mergedTask = normalizeTask({ ...item, ...task });
+
+      if (mergedTask.timeline === 'long_term') {
+        const nextDueAt = now + getLongTermCycleMs(mergedTask);
+        return {
+          ...mergedTask,
+          status: 'pending',
+          archived_at: null,
+          completion_count: (mergedTask.completion_count || 0) + 1,
+          last_completed_at: now,
+          next_due_at: nextDueAt,
+          steps: mergedTask.steps.map((step) => ({ ...step, completed: false })),
+        };
+      }
+      return {
+        ...mergedTask,
+        status: 'completed',
+        archived_at: now,
+        last_completed_at: now,
+        completion_count: Math.max(1, (mergedTask.completion_count || 0) + 1),
+      };
+    }));
     setSelectedTask(null);
   };
 
@@ -492,7 +803,14 @@ export default function App() {
   };
 
   const updateTaskPosition = (id: string, x: number, y: number) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, x, y } : t));
+    setTasks(prev => prev.map((task) => {
+      if (task.id !== id) return task;
+      return {
+        ...task,
+        x,
+        y,
+      };
+    }));
   };
 
   const toggleDependency = (task: Task, dependencyId: string) => {
@@ -539,6 +857,7 @@ export default function App() {
   };
 
   const selectedTaskReady = selectedTask ? isTaskReady(selectedTask) : false;
+  const selectedTaskIsPersisted = selectedTask ? tasks.some((task) => task.id === selectedTask.id) : false;
 
   if (isAuthChecking) {
     return (
@@ -644,9 +963,9 @@ export default function App() {
             className="relative rounded-xl p-2.5 transition-all hover:bg-white/5 active:scale-95 group border border-transparent hover:border-white/10"
           >
             <ListTodo className="h-5 w-5 text-slate-300 group-hover:text-teal-400 transition-colors" />
-            {tasks.length > 0 && (
+            {(activeTasks.length + archivedTasks.length) > 0 && (
               <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-teal-500 text-[9px] font-bold text-white shadow-[0_0_10px_rgba(20,184,166,0.5)]">
-                {tasks.length}
+                {activeTasks.length + archivedTasks.length}
               </span>
             )}
           </button>
@@ -676,7 +995,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-4 sm:px-6">
+      <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-5 sm:px-6">
         <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-cyan-100">
           可执行任务: <span className="font-bold">{executableTasks.length}</span>
         </div>
@@ -688,6 +1007,9 @@ export default function App() {
         </div>
         <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-violet-100">
           实际用时: <span className="font-bold">{totalActualMinutes}m</span>
+        </div>
+        <div className="rounded-lg border border-slate-300/30 bg-slate-500/10 px-3 py-2 text-slate-100">
+          已归档: <span className="font-bold">{archivedTasks.length}</span>
         </div>
       </div>
 
@@ -805,6 +1127,27 @@ export default function App() {
                     <span>预估 {task.estimated_minutes}m / 实际 {task.actual_minutes}m</span>
                     {task.dependency_ids.length > 0 && <span>依赖 {task.dependency_ids.length}</span>}
                   </div>
+                  {task.timeline === 'temporary' && task.deadline_at && (
+                    <div className={cn(
+                      "relative mt-2 rounded-lg border px-2 py-1 text-[10px] font-semibold",
+                      task.deadline_at <= nowTs
+                        ? "border-rose-400/40 bg-rose-500/20 text-rose-100"
+                        : "border-amber-400/35 bg-amber-500/20 text-amber-100"
+                    )}>
+                      <Clock3 className="mr-1 inline h-3 w-3" />
+                      {getCountdownText(task.deadline_at, nowTs)}
+                    </div>
+                  )}
+                  {task.timeline === 'long_term' && task.next_due_at && (
+                    <div className={cn(
+                      "relative mt-2 rounded-lg border px-2 py-1 text-[10px] font-semibold",
+                      task.next_due_at <= nowTs
+                        ? "border-cyan-400/40 bg-cyan-500/20 text-cyan-100"
+                        : "border-slate-400/40 bg-slate-500/20 text-slate-100"
+                    )}>
+                      {task.next_due_at <= nowTs ? '当前周期可执行' : `下次周期：${formatDateTime(task.next_due_at)}`}
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -869,18 +1212,19 @@ export default function App() {
                   <path d="M0,0 L8,4 L0,8 z" fill="#22c55e" />
                 </marker>
               </defs>
-              {tasks.flatMap((task) =>
+              {activeTasks.flatMap((task) =>
                 task.dependency_ids.map((dependencyId) => {
                   const fromTask = taskById.get(dependencyId);
                   if (!fromTask) return null;
-                  const edgeReady = fromTask.status === 'completed';
+                  if (fromTask.status === 'completed') return null;
+                  const edgeReady = isDependencySatisfied(fromTask);
                   return (
                     <line
                       key={`${dependencyId}-${task.id}`}
                       x1={fromTask.x}
-                      y1={fromTask.y}
+                      y1={getTaskRenderY(fromTask, nowTs)}
                       x2={task.x}
-                      y2={task.y}
+                      y2={getTaskRenderY(task, nowTs)}
                       stroke={edgeReady ? '#22c55e' : '#94a3b8'}
                       strokeOpacity={edgeReady ? 0.8 : 0.55}
                       strokeWidth={0.35}
@@ -903,10 +1247,11 @@ export default function App() {
               </div>
             )}
 
-            {tasks.map(task => (
+            {activeTasks.map(task => (
               <TaskPoint
                 key={task.id}
                 task={task}
+                nowTs={nowTs}
                 onOpen={() => setSelectedTask(task)}
                 onMove={updateTaskPosition}
               />
@@ -935,7 +1280,7 @@ export default function App() {
               <div className="p-8 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
                 <div>
                   <h2 className="text-xl font-bold text-white">任务清单</h2>
-                  <p className="text-xs text-slate-400 mt-1">共 {tasks.length} 个进行中的任务</p>
+                  <p className="text-xs text-slate-400 mt-1">进行中 {activeTasks.length} / 归档 {archivedTasks.length}</p>
                 </div>
                 <button
                   onClick={() => setIsTaskListOpen(false)}
@@ -945,41 +1290,161 @@ export default function App() {
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-                {tasks.length === 0 ? (
+                <div className="rounded-2xl border border-violet-300/20 bg-violet-500/10 p-4">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-violet-100">能力维度</h3>
+                  <div className="mt-3 space-y-2">
+                    {abilityDimensions.length === 0 ? (
+                      <p className="text-xs text-violet-100/70">还没有能力维度，先创建一个。</p>
+                    ) : (
+                      abilityDimensions.map((dimension) => (
+                        <div key={dimension} className="flex items-center justify-between rounded-lg border border-violet-300/20 bg-slate-950/60 px-2 py-1.5">
+                          <div>
+                            <p className="text-xs font-semibold text-violet-100">{dimension}</p>
+                            <p className="text-[10px] text-violet-100/70">当前能力值 {abilityScores[dimension] || 0}</p>
+                          </div>
+                          <button
+                            onClick={() => removeAbilityDimension(dimension)}
+                            className="rounded-lg p-1 text-violet-100/70 transition-colors hover:bg-violet-500/20 hover:text-white"
+                            title="删除维度"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      value={newAbilityDimension}
+                      onChange={(e) => setNewAbilityDimension(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addAbilityDimension();
+                        }
+                      }}
+                      placeholder="新增能力维度"
+                      className="flex-1 rounded-lg border border-violet-300/25 bg-slate-950/70 px-2 py-1.5 text-xs text-violet-50 placeholder:text-violet-100/40"
+                    />
+                    <button
+                      onClick={addAbilityDimension}
+                      className="rounded-lg border border-violet-300/30 bg-violet-500/20 px-2.5 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/30"
+                    >
+                      添加
+                    </button>
+                  </div>
+                </div>
+
+                {activeTasks.length === 0 && archivedTasks.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
                     <div className="w-16 h-16 bg-white/[0.03] rounded-3xl flex items-center justify-center mb-6 ring-1 ring-white/5 shadow-inner">
                       <ListTodo className="w-8 h-8 opacity-40" />
                     </div>
-                    <p className="font-semibold text-sm">暂无进行中的任务</p>
+                    <p className="font-semibold text-sm">暂无任务</p>
                     <p className="text-xs mt-2 opacity-60">点击“新建任务”开始规划</p>
                   </div>
                 ) : (
-                  [...tasks].sort((a, b) => b.created_at - a.created_at).map(task => (
-                    <div
-                      key={task.id}
-                      onClick={() => {
-                        setSelectedTask(task);
-                        setIsTaskListOpen(false);
-                      }}
-                      className="p-5 border border-white/10 rounded-2xl hover:border-teal-500/50 hover:bg-teal-500/5 hover:shadow-[0_0_20px_rgba(20,184,166,0.1)] transition-all cursor-pointer group bg-white/[0.02]"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <h3 className="font-semibold text-slate-200 group-hover:text-white transition-colors line-clamp-2 leading-snug">{task.title || '未命名任务'}</h3>
-                        <ChevronRight className="w-5 h-5 text-slate-500 group-hover:translate-x-1 group-hover:text-teal-400 transition-all shrink-0" />
-                      </div>
-                      <div className="mt-5 flex items-center gap-4">
-                        <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden shadow-inner">
+                  <>
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-100">进行中任务</h3>
+                      {activeTasks.length === 0 ? (
+                        <p className="text-xs text-slate-400">暂无进行中任务。</p>
+                      ) : (
+                        [...activeTasks].sort((a, b) => b.created_at - a.created_at).map(task => (
                           <div
-                            className="h-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-500 shadow-[0_0_10px_rgba(20,184,166,0.5)]"
-                            style={{ width: `${task.steps.length > 0 ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100 : 0}%` }}
-                          />
-                        </div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white/[0.05] px-2 py-0.5 rounded-md">
-                          {task.steps.filter(s => s.completed).length}/{task.steps.length}
-                        </span>
-                      </div>
+                            key={task.id}
+                            onClick={() => {
+                              setSelectedTask(task);
+                              setIsTaskListOpen(false);
+                            }}
+                            className="p-5 border border-white/10 rounded-2xl hover:border-teal-500/50 hover:bg-teal-500/5 hover:shadow-[0_0_20px_rgba(20,184,166,0.1)] transition-all cursor-pointer group bg-white/[0.02]"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <h3 className="font-semibold text-slate-200 group-hover:text-white transition-colors line-clamp-2 leading-snug">{task.title || '未命名任务'}</h3>
+                              <ChevronRight className="w-5 h-5 text-slate-500 group-hover:translate-x-1 group-hover:text-teal-400 transition-all shrink-0" />
+                            </div>
+                            <div className="mt-5 flex items-center gap-4">
+                              <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden shadow-inner">
+                                <div
+                                  className="h-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-500 shadow-[0_0_10px_rgba(20,184,166,0.5)]"
+                                  style={{ width: `${task.steps.length > 0 ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100 : 0}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white/[0.05] px-2 py-0.5 rounded-md">
+                                {task.steps.filter(s => s.completed).length}/{task.steps.length}
+                              </span>
+                            </div>
+                            {task.timeline === 'temporary' && task.deadline_at && (
+                              <p className={cn(
+                                "mt-3 rounded-lg border px-2 py-1 text-[10px] font-bold",
+                                task.deadline_at <= nowTs
+                                  ? "border-rose-400/40 bg-rose-500/20 text-rose-100"
+                                  : "border-amber-400/35 bg-amber-500/20 text-amber-100"
+                              )}>
+                                <Clock3 className="mr-1 inline h-3 w-3" />
+                                {getCountdownText(task.deadline_at, nowTs)}
+                              </p>
+                            )}
+                          </div>
+                        ))
+                      )}
                     </div>
-                  ))
+
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-100">长期任务管理（唯一删除入口）</h3>
+                      {longTermTasks.length === 0 ? (
+                        <p className="text-xs text-slate-400">暂无长期任务。</p>
+                      ) : (
+                        longTermTasks.map((task) => (
+                          <div key={`long-${task.id}`} className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-semibold text-cyan-50">{task.title || '未命名任务'}</p>
+                              <button
+                                onClick={() => deleteTask(task.id, { allowLongTerm: true })}
+                                className="rounded-lg p-1 text-cyan-100/70 transition-colors hover:bg-rose-500/20 hover:text-rose-200"
+                                title="删除长期任务"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            <p className="mt-1 text-[10px] text-cyan-100/70">上次完成：{formatDateTime(task.last_completed_at)}</p>
+                            <p className="text-[10px] text-cyan-100/70">下次周期：{formatDateTime(task.next_due_at)}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-300">已归档任务</h3>
+                      {archivedTasks.length === 0 ? (
+                        <p className="text-xs text-slate-400">暂无已归档任务。</p>
+                      ) : (
+                        [...archivedTasks].sort((a, b) => (b.archived_at || 0) - (a.archived_at || 0)).map((task) => (
+                          <div key={`archive-${task.id}`} className="rounded-xl border border-slate-300/20 bg-slate-800/60 p-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-xs font-semibold text-slate-100">{task.title || '未命名任务'}</p>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => restoreArchivedTask(task.id)}
+                                  className="rounded-lg border border-slate-300/25 bg-slate-700/60 px-2 py-1 text-[10px] font-semibold text-slate-100 hover:bg-slate-700"
+                                >
+                                  恢复
+                                </button>
+                                <button
+                                  onClick={() => deleteTask(task.id, { allowLongTerm: true })}
+                                  className="rounded-lg p-1 text-slate-200/70 transition-colors hover:bg-rose-500/20 hover:text-rose-200"
+                                  title="永久删除"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                            <p className="mt-1 text-[10px] text-slate-300">归档时间：{formatDateTime(task.archived_at)}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
             </motion.div>
@@ -1049,7 +1514,11 @@ export default function App() {
                 <div className="space-y-4 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <button
-                      onClick={() => setSelectedTask({ ...selectedTask, timeline: 'temporary' })}
+                      onClick={() => setSelectedTask({
+                        ...selectedTask,
+                        timeline: 'temporary',
+                        next_due_at: null,
+                      })}
                       className={cn(
                         "rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
                         selectedTask.timeline === 'temporary'
@@ -1060,7 +1529,15 @@ export default function App() {
                       临时任务
                     </button>
                     <button
-                      onClick={() => setSelectedTask({ ...selectedTask, timeline: 'long_term' })}
+                      onClick={() => setSelectedTask({
+                        ...selectedTask,
+                        timeline: 'long_term',
+                        status: 'pending',
+                        archived_at: null,
+                        long_term_cadence: selectedTask.long_term_cadence || 'daily',
+                        long_term_interval_days: selectedTask.long_term_interval_days || 3,
+                        next_due_at: selectedTask.next_due_at || Date.now(),
+                      })}
                       className={cn(
                         "rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
                         selectedTask.timeline === 'long_term'
@@ -1098,6 +1575,117 @@ export default function App() {
                         className="mt-2 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-sm text-white"
                       />
                     </label>
+                  </div>
+
+                  {selectedTask.timeline === 'long_term' && (
+                    <div className="space-y-3 rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-3">
+                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-100">长期任务周期</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {(['daily', 'weekly', 'interval'] as LongTermCadence[]).map((cadence) => (
+                          <button
+                            key={cadence}
+                            onClick={() => setSelectedTask({
+                              ...selectedTask,
+                              long_term_cadence: cadence,
+                              long_term_interval_days: selectedTask.long_term_interval_days || 3,
+                            })}
+                            className={cn(
+                              "rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
+                              selectedTask.long_term_cadence === cadence
+                                ? "border-cyan-300/60 bg-cyan-500/25 text-cyan-50"
+                                : "border-cyan-300/25 bg-slate-950/60 text-cyan-100/80 hover:bg-slate-900"
+                            )}
+                          >
+                            {cadence === 'daily' ? '每日' : cadence === 'weekly' ? '每周' : '每几天'}
+                          </button>
+                        ))}
+                      </div>
+                      {selectedTask.long_term_cadence === 'interval' && (
+                        <label className="block text-xs text-cyan-100/90">
+                          间隔天数
+                          <input
+                            type="number"
+                            min={2}
+                            max={365}
+                            value={selectedTask.long_term_interval_days || 3}
+                            onChange={(e) => setSelectedTask({
+                              ...selectedTask,
+                              long_term_interval_days: clamp(Number(e.target.value) || 3, 2, 365),
+                            })}
+                            className="mt-2 w-full rounded-lg border border-cyan-300/30 bg-slate-950/70 px-2 py-1.5 text-sm text-white"
+                          />
+                        </label>
+                      )}
+                      <div className="rounded-lg border border-cyan-300/20 bg-slate-950/60 px-2 py-2 text-[11px] text-cyan-50">
+                        <p>上次完成：{formatDateTime(selectedTask.last_completed_at)}</p>
+                        <p className="mt-1">
+                          下次周期：{formatDateTime(selectedTask.next_due_at)}
+                          {!isLongTermDue(selectedTask, nowTs) && <span className="ml-2 text-cyan-200/80">尚未到期</span>}
+                        </p>
+                        <p className="mt-1 text-cyan-100/80">完成按钮只会完成本次并自动进入下一周期，不会删除任务。</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedTask.timeline === 'temporary' && (
+                    <div className="space-y-3 rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
+                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-amber-100">截止时间与倒计时</h4>
+                      <label className="block text-xs text-amber-100/90">
+                        截止时间（精确到小时）
+                        <input
+                          type="datetime-local"
+                          step={3600}
+                          value={toDateTimeLocalValue(selectedTask.deadline_at)}
+                          onChange={(e) => {
+                            const parsed = parseDateTimeLocalValue(e.target.value);
+                            setSelectedTask({ ...selectedTask, deadline_at: parsed });
+                          }}
+                          className="mt-2 w-full rounded-lg border border-amber-300/30 bg-slate-950/70 px-2 py-1.5 text-sm text-white"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 rounded-lg border border-amber-300/30 bg-slate-950/60 px-2 py-2 text-xs text-amber-100/90">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedTask.use_countdown_urgency)}
+                          onChange={(e) => setSelectedTask({ ...selectedTask, use_countdown_urgency: e.target.checked })}
+                        />
+                        使用倒计时作为紧急指标（自动向上浮动）
+                      </label>
+                      {selectedTask.deadline_at && (
+                        <div className={cn(
+                          "rounded-lg border px-3 py-2 text-sm font-bold",
+                          selectedTask.deadline_at <= nowTs
+                            ? "border-rose-400/40 bg-rose-500/20 text-rose-100"
+                            : "border-amber-400/40 bg-amber-500/25 text-amber-50"
+                        )}>
+                          <Clock3 className="mr-1 inline h-4 w-4" />
+                          {getCountdownText(selectedTask.deadline_at, nowTs)}（截止：{formatDateTime(selectedTask.deadline_at)}）
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-2 rounded-xl border border-violet-300/20 bg-violet-500/10 p-3">
+                    <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-violet-100">能力提升加分</h4>
+                    {abilityDimensions.length === 0 ? (
+                      <p className="text-xs text-violet-100/75">请先在任务清单侧栏创建能力维度。</p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {abilityDimensions.map((dimension) => (
+                          <label key={dimension} className="rounded-lg border border-violet-300/30 bg-slate-950/65 p-2 text-xs text-violet-50">
+                            {dimension}
+                            <input
+                              type="number"
+                              min={0}
+                              value={selectedTask.ability_gains?.[dimension] || 0}
+                              onChange={(e) => updateSelectedTaskAbilityGain(dimension, Number(e.target.value) || 0)}
+                              className="mt-1 w-full rounded border border-violet-300/25 bg-slate-900 px-2 py-1 text-sm text-white"
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-[11px] text-violet-100/75">能力值初始为 0。任务完成一次，就按该值增加一次。</p>
                   </div>
 
                   <div>
@@ -1187,8 +1775,34 @@ export default function App() {
                         initial={{ x: -10, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         key={step.id}
-                        className="flex items-center gap-4 group bg-white/[0.02] border border-white/[0.05] p-3 rounded-2xl hover:bg-white/[0.05] hover:border-white/10 transition-all"
+                        draggable
+                        onDragStart={(event) => {
+                          const e = event as unknown as React.DragEvent<HTMLDivElement>;
+                          e.dataTransfer.effectAllowed = 'move';
+                          setDraggedStepId(step.id);
+                        }}
+                        onDragEnd={() => setDraggedStepId(null)}
+                        onDragOver={(event) => {
+                          const e = event as unknown as React.DragEvent<HTMLDivElement>;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDrop={(event) => {
+                          const e = event as unknown as React.DragEvent<HTMLDivElement>;
+                          e.preventDefault();
+                          if (!draggedStepId) return;
+                          const fromIdx = selectedTask.steps.findIndex((item) => item.id === draggedStepId);
+                          moveSelectedStep(fromIdx, idx);
+                          setDraggedStepId(null);
+                        }}
+                        className={cn(
+                          "flex items-center gap-4 group bg-white/[0.02] border p-3 rounded-2xl hover:bg-white/[0.05] transition-all",
+                          draggedStepId === step.id ? "border-teal-400/70 bg-teal-500/10" : "border-white/[0.05] hover:border-white/10"
+                        )}
                       >
+                        <span className="cursor-grab text-slate-500 hover:text-slate-300" title="拖拽排序">
+                          <GripVertical className="h-4 w-4" />
+                        </span>
                         <button
                           onClick={() => {
                             const newSteps = [...selectedTask.steps];
@@ -1250,10 +1864,20 @@ export default function App() {
               <div className="flex flex-col gap-3 border-t border-white/[0.05] bg-white/[0.02] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
                 <button
                   onClick={() => deleteTask(selectedTask.id)}
-                  className="flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-rose-400 transition-all hover:bg-rose-500/10 sm:justify-start"
+                  disabled={selectedTask.timeline === 'long_term' && selectedTaskIsPersisted}
+                  className={cn(
+                    "flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-all sm:justify-start",
+                    selectedTask.timeline === 'long_term' && selectedTaskIsPersisted
+                      ? "text-slate-500 cursor-not-allowed bg-white/5"
+                      : "text-rose-400 hover:bg-rose-500/10"
+                  )}
                 >
                   <Trash2 className="w-4 h-4" />
-                  {tasks.some(t => t.id === selectedTask.id) ? '放弃任务' : '取消创建'}
+                  {!selectedTaskIsPersisted
+                    ? '取消创建'
+                    : selectedTask.timeline === 'long_term'
+                      ? '长期任务请到任务清单删除'
+                      : '删除任务'}
                 </button>
                 <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
                   <button
@@ -1264,21 +1888,21 @@ export default function App() {
                     className="flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-white/10"
                   >
                     <Save className="w-4 h-4" />
-                    {tasks.some(t => t.id === selectedTask.id) ? '保存更改' : '确认创建'}
+                    {selectedTaskIsPersisted ? '保存更改' : '确认创建'}
                   </button>
-                  {tasks.some(t => t.id === selectedTask.id) && (
+                  {selectedTaskIsPersisted && selectedTask.status === 'pending' && (
                     <button
                       onClick={() => completeTask(selectedTask)}
-                      disabled={!selectedTaskReady}
+                      disabled={!selectedTaskReady || (selectedTask.timeline === 'long_term' && !isLongTermDue(selectedTask, nowTs))}
                       className={cn(
                         "flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-bold text-white transition-all",
-                        selectedTaskReady
+                        selectedTaskReady && (selectedTask.timeline !== 'long_term' || isLongTermDue(selectedTask, nowTs))
                           ? "bg-gradient-to-r from-teal-500 to-emerald-500 shadow-[0_0_20px_rgba(20,184,166,0.3)] ring-1 ring-teal-400/50 hover:scale-[1.02] active:scale-95"
                           : "bg-slate-700/70 text-slate-300 cursor-not-allowed"
                       )}
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      标记完成
+                      {selectedTask.timeline === 'long_term' ? '完成本次周期' : '标记完成并归档'}
                     </button>
                   )}
                 </div>
@@ -1291,7 +1915,17 @@ export default function App() {
   );
 }
 
-function TaskPoint({ task, onOpen, onMove }: { task: Task, onOpen: () => void, onMove: (id: string, x: number, y: number) => void }) {
+function TaskPoint({
+  task,
+  nowTs,
+  onOpen,
+  onMove
+}: {
+  task: Task,
+  nowTs: number,
+  onOpen: () => void,
+  onMove: (id: string, x: number, y: number) => void
+}) {
   const [isDragging, setIsDragging] = useState(false);
   const pointRef = useRef<HTMLDivElement>(null);
   const timelineAccent = getTimelineAccent(task.timeline);
@@ -1331,7 +1965,8 @@ function TaskPoint({ task, onOpen, onMove }: { task: Task, onOpen: () => void, o
   const progress = task.steps.length > 0
     ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100
     : 0;
-  const urgency = Math.round(100 - task.y);
+  const renderY = getTaskRenderY(task, nowTs);
+  const urgency = Math.round(100 - renderY);
   const importance = Math.round(task.x);
 
   return (
@@ -1339,7 +1974,7 @@ function TaskPoint({ task, onOpen, onMove }: { task: Task, onOpen: () => void, o
       ref={pointRef}
       layoutId={task.id}
       initial={{ scale: 0, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1, left: `${task.x}%`, top: `${task.y}%` }}
+      animate={{ scale: 1, opacity: 1, left: `${task.x}%`, top: `${renderY}%` }}
       className="absolute -translate-x-1/2 -translate-y-1/2 z-10"
     >
       <div
@@ -1401,6 +2036,16 @@ function TaskPoint({ task, onOpen, onMove }: { task: Task, onOpen: () => void, o
               <span>急:{urgency}</span>
               <span>{Math.round(progress)}%</span>
             </div>
+            {task.timeline === 'temporary' && task.deadline_at && (
+              <div className={cn(
+                "mt-1 rounded border px-1 py-0.5 text-[9px] font-bold",
+                task.deadline_at <= nowTs
+                  ? "border-rose-400/60 bg-rose-500/30 text-rose-100"
+                  : "border-amber-400/60 bg-amber-500/30 text-amber-100"
+              )}>
+                {getCountdownText(task.deadline_at, nowTs)}
+              </div>
+            )}
           </div>
         </div>
       </div>
