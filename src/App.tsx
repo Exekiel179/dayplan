@@ -214,8 +214,8 @@ function isLongTermDue(task: Task, now: number) {
 function getTimelineAccent(timeline: TaskTimeline) {
   return timeline === 'long_term'
     ? {
-        badge: 'text-cyan-200 bg-cyan-500/20 border-cyan-400/40',
-        ring: 'border-cyan-300/60',
+        badge: 'text-teal-200 bg-teal-500/20 border-teal-400/40',
+        ring: 'border-teal-300/60',
       }
     : {
         badge: 'text-amber-200 bg-amber-500/20 border-amber-400/40',
@@ -911,7 +911,7 @@ export default function App() {
           <button
             type="submit"
             disabled={isLoggingIn}
-            className="mt-5 w-full rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-5 w-full rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isLoggingIn ? (authMode === 'register' ? '注册中...' : '登录中...') : (authMode === 'register' ? '注册并登录' : '登录')}
           </button>
@@ -938,14 +938,14 @@ export default function App() {
       {/* Header */}
       <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/[0.08] glass-panel px-4 sm:px-6">
         <div className="flex items-center gap-3 rounded-2xl border border-slate-300/20 bg-slate-900 px-3 py-2 shadow-[0_10px_30px_rgba(2,6,23,0.45)]">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-600 shadow-lg shadow-cyan-500/20 ring-1 ring-white/20">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-600 shadow-lg shadow-teal-500/20 ring-1 ring-white/20">
             <LayoutGrid className="text-white w-5 h-5 stroke-[2.5]" />
           </div>
           <div className="leading-none">
-            <h1 className="text-lg font-bold tracking-tight text-cyan-100 sm:text-xl">
+            <h1 className="text-lg font-bold tracking-tight text-teal-100 sm:text-xl">
               Task Axis Planner
             </h1>
-            <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-100/80">Importance x Urgency</p>
+            <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-teal-100/80">Importance x Urgency</p>
           </div>
         </div>
 
@@ -979,7 +979,7 @@ export default function App() {
                 : "bg-white/10 text-white hover:bg-white/20 active:scale-95 border border-white/10"
             )}
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-teal-500/10 to-teal-500/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+            <div className="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-teal-500/10 to-teal-500/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-300" />
             <Plus className="h-4 w-4 hidden sm:block transition-transform group-hover:rotate-90" />
             <span>新建任务</span>
           </button>
@@ -996,7 +996,7 @@ export default function App() {
       )}
 
       <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-5 sm:px-6">
-        <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-cyan-100">
+        <div className="rounded-lg border border-teal-400/30 bg-teal-500/10 px-3 py-2 text-teal-100">
           可执行任务: <span className="font-bold">{executableTasks.length}</span>
         </div>
         <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-100">
@@ -1047,20 +1047,20 @@ export default function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-            <div className="rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-3">
+            <div className="rounded-2xl border border-teal-400/30 bg-teal-500/10 p-3">
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-100">执行列表</h3>
-                <span className="text-[10px] font-semibold text-cyan-200">{executableTasks.length}</span>
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-teal-100">执行列表</h3>
+                <span className="text-[10px] font-semibold text-teal-200">{executableTasks.length}</span>
               </div>
               {executableTasks.length === 0 ? (
-                <p className="text-[11px] text-cyan-100/70">暂无可执行任务（等待前置任务完成）。</p>
+                <p className="text-[11px] text-teal-100/70">暂无可执行任务（等待前置任务完成）。</p>
               ) : (
                 <div className="space-y-1.5">
                   {executableTasks.slice(0, 5).map((task) => (
                     <button
                       key={`ready-${task.id}`}
                       onClick={() => setSelectedTask(task)}
-                      className="w-full rounded-lg border border-cyan-300/20 bg-slate-900/50 px-2 py-1.5 text-left text-[11px] font-semibold text-cyan-50 transition-colors hover:bg-slate-800/80"
+                      className="w-full rounded-lg border border-teal-300/20 bg-slate-900/50 px-2 py-1.5 text-left text-[11px] font-semibold text-teal-50 transition-colors hover:bg-slate-800/80"
                     >
                       {task.title || '未命名任务'}
                     </button>
@@ -1142,7 +1142,7 @@ export default function App() {
                     <div className={cn(
                       "relative mt-2 rounded-lg border px-2 py-1 text-[10px] font-semibold",
                       task.next_due_at <= nowTs
-                        ? "border-cyan-400/40 bg-cyan-500/20 text-cyan-100"
+                        ? "border-teal-400/40 bg-teal-500/20 text-teal-100"
                         : "border-slate-400/40 bg-slate-500/20 text-slate-100"
                     )}>
                       {task.next_due_at <= nowTs ? '当前周期可执行' : `下次周期：${formatDateTime(task.next_due_at)}`}
@@ -1196,12 +1196,12 @@ export default function App() {
             )}
           >
             <div className="pointer-events-none absolute inset-0 z-[2]">
-              <div className="absolute left-1/2 top-0 h-full w-px bg-cyan-200/35" />
-              <div className="absolute left-0 top-1/2 h-px w-full bg-cyan-200/35" />
-              <span className="absolute left-2 top-2 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">紧急度: 高</span>
-              <span className="absolute left-2 bottom-12 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">紧急度: 低</span>
-              <span className="absolute left-12 bottom-2 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">重要性: 低</span>
-              <span className="absolute right-2 bottom-2 rounded-md border border-cyan-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan-100">重要性: 高</span>
+              <div className="absolute left-1/2 top-0 h-full w-px bg-teal-200/35" />
+              <div className="absolute left-0 top-1/2 h-px w-full bg-teal-200/35" />
+              <span className="absolute left-2 top-2 rounded-md border border-teal-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-teal-100">紧急度: 高</span>
+              <span className="absolute left-2 bottom-12 rounded-md border border-teal-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-teal-100">紧急度: 低</span>
+              <span className="absolute left-12 bottom-2 rounded-md border border-teal-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-teal-100">重要性: 低</span>
+              <span className="absolute right-2 bottom-2 rounded-md border border-teal-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-teal-100">重要性: 高</span>
             </div>
             <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
               <defs>
@@ -1346,18 +1346,19 @@ export default function App() {
                 ) : (
                   <>
                     <div className="space-y-3">
-                      <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-100">进行中任务</h3>
+                      <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-teal-100">进行中任务</h3>
                       {activeTasks.length === 0 ? (
                         <p className="text-xs text-slate-400">暂无进行中任务。</p>
                       ) : (
                         [...activeTasks].sort((a, b) => b.created_at - a.created_at).map(task => (
-                          <div
+                          <button
+                            type="button"
                             key={task.id}
                             onClick={() => {
                               setSelectedTask(task);
                               setIsTaskListOpen(false);
                             }}
-                            className="p-5 border border-white/10 rounded-2xl hover:border-teal-500/50 hover:bg-teal-500/5 hover:shadow-[0_0_20px_rgba(20,184,166,0.1)] transition-all cursor-pointer group bg-white/[0.02]"
+                            className="w-full p-5 border border-white/10 rounded-2xl text-left hover:border-teal-500/50 hover:bg-teal-500/5 hover:shadow-[0_0_20px_rgba(20,184,166,0.1)] transition-all cursor-pointer group bg-white/[0.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                           >
                             <div className="flex items-start justify-between gap-4">
                               <h3 className="font-semibold text-slate-200 group-hover:text-white transition-colors line-clamp-2 leading-snug">{task.title || '未命名任务'}</h3>
@@ -1385,30 +1386,30 @@ export default function App() {
                                 {getCountdownText(task.deadline_at, nowTs)}
                               </p>
                             )}
-                          </div>
+                          </button>
                         ))
                       )}
                     </div>
 
                     <div className="space-y-3">
-                      <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-100">长期任务管理（唯一删除入口）</h3>
+                      <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-teal-100">长期任务管理（唯一删除入口）</h3>
                       {longTermTasks.length === 0 ? (
                         <p className="text-xs text-slate-400">暂无长期任务。</p>
                       ) : (
                         longTermTasks.map((task) => (
-                          <div key={`long-${task.id}`} className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-3">
+                          <div key={`long-${task.id}`} className="rounded-xl border border-teal-300/20 bg-teal-500/10 p-3">
                             <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-semibold text-cyan-50">{task.title || '未命名任务'}</p>
+                              <p className="text-xs font-semibold text-teal-50">{task.title || '未命名任务'}</p>
                               <button
                                 onClick={() => deleteTask(task.id, { allowLongTerm: true })}
-                                className="rounded-lg p-1 text-cyan-100/70 transition-colors hover:bg-rose-500/20 hover:text-rose-200"
+                                className="rounded-lg p-1 text-teal-100/70 transition-colors hover:bg-rose-500/20 hover:text-rose-200"
                                 title="删除长期任务"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
-                            <p className="mt-1 text-[10px] text-cyan-100/70">上次完成：{formatDateTime(task.last_completed_at)}</p>
-                            <p className="text-[10px] text-cyan-100/70">下次周期：{formatDateTime(task.next_due_at)}</p>
+                            <p className="mt-1 text-[10px] text-teal-100/70">上次完成：{formatDateTime(task.last_completed_at)}</p>
+                            <p className="text-[10px] text-teal-100/70">下次周期：{formatDateTime(task.next_due_at)}</p>
                           </div>
                         ))
                       )}
@@ -1495,7 +1496,7 @@ export default function App() {
                   <input
                     type="text"
                     placeholder="给任务起个名字..."
-                    className="w-full text-3xl font-bold border-none bg-transparent focus:ring-0 p-0 placeholder:text-slate-600 text-white"
+                    className="w-full rounded-md border-none bg-transparent p-0 text-3xl font-bold text-white placeholder:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                     value={selectedTask.title}
                     onChange={(e) => setSelectedTask({ ...selectedTask, title: e.target.value })}
                   />
@@ -1503,7 +1504,7 @@ export default function App() {
                     <Info className="w-5 h-5 shrink-0 mt-0.5 text-slate-500" />
                     <textarea
                       placeholder="添加一些详细描述，AI 会根据这些信息为你规划..."
-                      className="w-full min-h-[100px] border-none bg-transparent focus:ring-0 p-0 text-slate-300 resize-none placeholder:text-slate-600 text-base leading-relaxed"
+                      className="w-full min-h-[100px] rounded-md border-none bg-transparent p-0 text-base leading-relaxed text-slate-300 placeholder:text-slate-600 resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                       value={selectedTask.description}
                       onChange={(e) => setSelectedTask({ ...selectedTask, description: e.target.value })}
                     />
@@ -1541,7 +1542,7 @@ export default function App() {
                       className={cn(
                         "rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
                         selectedTask.timeline === 'long_term'
-                          ? "border-cyan-300/60 bg-cyan-500/20 text-cyan-100"
+                          ? "border-teal-300/60 bg-teal-500/20 text-teal-100"
                           : "border-white/15 bg-white/5 text-slate-300 hover:bg-white/10"
                       )}
                     >
@@ -1578,8 +1579,8 @@ export default function App() {
                   </div>
 
                   {selectedTask.timeline === 'long_term' && (
-                    <div className="space-y-3 rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-3">
-                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-100">长期任务周期</h4>
+                    <div className="space-y-3 rounded-xl border border-teal-300/20 bg-teal-500/10 p-3">
+                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-teal-100">长期任务周期</h4>
                       <div className="flex flex-wrap gap-2">
                         {(['daily', 'weekly', 'interval'] as LongTermCadence[]).map((cadence) => (
                           <button
@@ -1592,8 +1593,8 @@ export default function App() {
                             className={cn(
                               "rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
                               selectedTask.long_term_cadence === cadence
-                                ? "border-cyan-300/60 bg-cyan-500/25 text-cyan-50"
-                                : "border-cyan-300/25 bg-slate-950/60 text-cyan-100/80 hover:bg-slate-900"
+                                ? "border-teal-300/60 bg-teal-500/25 text-teal-50"
+                                : "border-teal-300/25 bg-slate-950/60 text-teal-100/80 hover:bg-slate-900"
                             )}
                           >
                             {cadence === 'daily' ? '每日' : cadence === 'weekly' ? '每周' : '每几天'}
@@ -1601,7 +1602,7 @@ export default function App() {
                         ))}
                       </div>
                       {selectedTask.long_term_cadence === 'interval' && (
-                        <label className="block text-xs text-cyan-100/90">
+                        <label className="block text-xs text-teal-100/90">
                           间隔天数
                           <input
                             type="number"
@@ -1612,17 +1613,17 @@ export default function App() {
                               ...selectedTask,
                               long_term_interval_days: clamp(Number(e.target.value) || 3, 2, 365),
                             })}
-                            className="mt-2 w-full rounded-lg border border-cyan-300/30 bg-slate-950/70 px-2 py-1.5 text-sm text-white"
+                            className="mt-2 w-full rounded-lg border border-teal-300/30 bg-slate-950/70 px-2 py-1.5 text-sm text-white"
                           />
                         </label>
                       )}
-                      <div className="rounded-lg border border-cyan-300/20 bg-slate-950/60 px-2 py-2 text-[11px] text-cyan-50">
+                      <div className="rounded-lg border border-teal-300/20 bg-slate-950/60 px-2 py-2 text-[11px] text-teal-50">
                         <p>上次完成：{formatDateTime(selectedTask.last_completed_at)}</p>
                         <p className="mt-1">
                           下次周期：{formatDateTime(selectedTask.next_due_at)}
-                          {!isLongTermDue(selectedTask, nowTs) && <span className="ml-2 text-cyan-200/80">尚未到期</span>}
+                          {!isLongTermDue(selectedTask, nowTs) && <span className="ml-2 text-teal-200/80">尚未到期</span>}
                         </p>
-                        <p className="mt-1 text-cyan-100/80">完成按钮只会完成本次并自动进入下一周期，不会删除任务。</p>
+                        <p className="mt-1 text-teal-100/80">完成按钮只会完成本次并自动进入下一周期，不会删除任务。</p>
                       </div>
                     </div>
                   )}
@@ -1690,7 +1691,7 @@ export default function App() {
 
                   <div>
                     <h4 className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                      <Link2 className="h-3.5 w-3.5 text-cyan-300" />
+                      <Link2 className="h-3.5 w-3.5 text-teal-300" />
                       前置依赖（连线关系）
                     </h4>
                     <div className="max-h-32 space-y-1 overflow-y-auto pr-1">
@@ -1730,7 +1731,7 @@ export default function App() {
                         disabled={isGeneratingPlan || !selectedTask.title}
                         className="group relative overflow-hidden rounded-xl bg-white/[0.05] border border-white/10 px-4 py-2 text-xs font-bold text-teal-300 transition-all hover:bg-white/10 hover:border-teal-500/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                       >
-                        <div className="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-teal-500/10 to-teal-500/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+                        <div className="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-teal-500/10 to-teal-500/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-300" />
                         {isGeneratingPlan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                         生成智能计划
                       </button>
@@ -1753,8 +1754,9 @@ export default function App() {
                       </button>
                     </div>
                   ) : (
-                    <div
-                      className="relative overflow-hidden border border-white/[0.05] bg-white/[0.02] rounded-[2rem] p-12 text-center group hover:border-teal-500/30 transition-all cursor-pointer"
+                    <button
+                      type="button"
+                      className="group relative cursor-pointer overflow-hidden rounded-[2rem] border border-white/[0.05] bg-white/[0.02] p-12 text-center transition-all hover:border-teal-500/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                       onClick={() => generateAIPlan(selectedTask)}
                     >
                       <div className="absolute inset-0 bg-gradient-to-br from-teal-500/0 via-teal-500/0 to-teal-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -1762,7 +1764,7 @@ export default function App() {
                         <Sparkles className="w-8 h-8 text-slate-500 group-hover:text-teal-400 transition-colors" />
                       </div>
                       <p className="text-sm font-semibold text-slate-400 group-hover:text-teal-100 transition-colors">点击“生成计划”获取 AI 的专业建议</p>
-                    </div>
+                    </button>
                   )}
                 </div>
 
@@ -1827,7 +1829,7 @@ export default function App() {
                             setSelectedTask({ ...selectedTask, steps: newSteps });
                           }}
                           className={cn(
-                            "flex-1 border-none bg-transparent focus:ring-0 p-0 text-sm font-medium transition-all",
+                            "flex-1 rounded-md border-none bg-transparent p-0 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
                             step.completed ? "text-slate-500 line-through" : "text-slate-200"
                           )}
                         />
@@ -2052,3 +2054,4 @@ function TaskPoint({
     </motion.div>
   );
 }
+
