@@ -60,25 +60,42 @@ jobs:
           labels: ${{ steps.meta_ghcr.outputs.labels }}
 
   publish-dockerhub:
-    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check DockerHub credentials
+        id: dockerhub_check
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "DockerHub credentials not configured; skipping DockerHub publish steps."
+          fi
+
       - name: Set up QEMU
+        if: steps.dockerhub_check.outputs.enabled == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.dockerhub_check.outputs.enabled == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to DockerHub
+        if: steps.dockerhub_check.outputs.enabled == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Docker metadata (DockerHub)
+        if: steps.dockerhub_check.outputs.enabled == 'true'
         id: meta_dockerhub
         uses: docker/metadata-action@v5
         with:
@@ -90,6 +107,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Backup current latest to bak (DockerHub)
+        if: steps.dockerhub_check.outputs.enabled == 'true'
         run: |
           IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/dayplan"
           docker pull "${IMAGE}:latest" || exit 0
@@ -97,6 +115,7 @@ jobs:
           docker push "${IMAGE}:bak"
 
       - name: Build and push (DockerHub)
+        if: steps.dockerhub_check.outputs.enabled == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
