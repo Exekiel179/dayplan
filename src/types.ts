@@ -45,8 +45,16 @@ export interface DailyEnergyCheckin {
   updated_at: number;
 }
 
+export interface DailyRestSession {
+  is_resting: boolean;
+  started_at: number | null;
+  recovered_energy: number;
+  updated_at: number;
+}
+
 export interface WellbeingSettings {
   daily_checkins: Record<string, DailyEnergyCheckin>;
+  daily_rest_sessions: Record<string, DailyRestSession>;
 }
 
 export interface UserTaskData {

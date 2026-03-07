@@ -259,6 +259,7 @@ function normalizeTaskPayload(payload) {
       ability_dimensions: [],
       wellbeing: {
         daily_checkins: {},
+        daily_rest_sessions: {},
       },
     };
   }
@@ -289,9 +290,31 @@ function normalizeTaskPayload(payload) {
                   },
                 ])
             ),
+            daily_rest_sessions: payload.wellbeing.daily_rest_sessions && typeof payload.wellbeing.daily_rest_sessions === 'object'
+              ? Object.fromEntries(
+                  Object.entries(payload.wellbeing.daily_rest_sessions)
+                    .filter(([key, value]) =>
+                      typeof key === 'string'
+                      && value
+                      && typeof value === 'object'
+                    )
+                    .map(([key, value]) => [
+                      key,
+                      {
+                        is_resting: Boolean(value.is_resting),
+                        started_at: Number.isFinite(Number(value.started_at)) ? Number(value.started_at) : null,
+                        recovered_energy: Number.isFinite(Number(value.recovered_energy))
+                          ? Math.max(0, Math.min(100, Number(value.recovered_energy)))
+                          : 0,
+                        updated_at: Number.isFinite(Number(value.updated_at)) ? Number(value.updated_at) : Date.now(),
+                      },
+                    ])
+                )
+              : {},
           }
         : {
             daily_checkins: {},
+            daily_rest_sessions: {},
           },
     };
   }
@@ -300,6 +323,7 @@ function normalizeTaskPayload(payload) {
     ability_dimensions: [],
     wellbeing: {
       daily_checkins: {},
+      daily_rest_sessions: {},
     },
   };
 }

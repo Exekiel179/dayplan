@@ -33,6 +33,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import {
   DailyEnergyCheckin,
+  DailyRestSession,
   LongTermCadence,
   Task,
   TaskCollaborationLevel,
@@ -50,6 +51,7 @@ function cn(...inputs: ClassValue[]) {
 const AUTH_TOKEN_KEY = 'dayplan_auth_token';
 const THEME_STORAGE_KEY = 'dayplan_theme';
 const DEFAULT_INITIAL_ENERGY = 72;
+const REST_RECOVERY_PER_HOUR = 6;
 const ENERGY_DELTA_OPTIONS = [
   { value: -2, label: '很耗能' },
   { value: -1, label: '偏耗能' },
@@ -120,9 +122,15 @@ function normalizeTrackingAccumulatedMs(value: unknown) {
   return Math.round(numeric);
 }
 
+function normalizeRecoveredEnergy(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
+  return clamp(numeric, 0, 100);
+}
+
 function normalizeWellbeing(value: unknown): WellbeingSettings {
   if (!value || typeof value !== 'object') {
-    return { daily_checkins: {} };
+    return { daily_checkins: {}, daily_rest_sessions: {} };
   }
 
   const raw = value as Partial<WellbeingSettings>;
@@ -139,9 +147,23 @@ function normalizeWellbeing(value: unknown): WellbeingSettings {
         return acc;
       }, {})
     : {};
+  const dailyRestSessions = raw.daily_rest_sessions && typeof raw.daily_rest_sessions === 'object'
+    ? Object.entries(raw.daily_rest_sessions).reduce<Record<string, DailyRestSession>>((acc, [dayKey, session]) => {
+        if (!session || typeof session !== 'object') return acc;
+        const partial = session as Partial<DailyRestSession>;
+        acc[dayKey] = {
+          is_resting: Boolean(partial.is_resting),
+          started_at: Number.isFinite(Number(partial.started_at)) ? Number(partial.started_at) : null,
+          recovered_energy: normalizeRecoveredEnergy(partial.recovered_energy),
+          updated_at: Number.isFinite(Number(partial.updated_at)) ? Number(partial.updated_at) : Date.now(),
+        };
+        return acc;
+      }, {})
+    : {};
 
   return {
     daily_checkins: dailyCheckins,
+    daily_rest_sessions: dailyRestSessions,
   };
 }
 
@@ -191,6 +213,12 @@ function getTaskLiveEnergyBurn(task: Task, now: number) {
   if (!task.tracking_started_at) return 0;
   const elapsedHours = Math.max(0, now - task.tracking_started_at) / 3600000;
   return getTaskEnergyBurnRate(task) * elapsedHours;
+}
+
+function getLiveRestRecovery(session: DailyRestSession | undefined, now: number) {
+  if (!session?.is_resting || !session.started_at) return 0;
+  const elapsedHours = Math.max(0, now - session.started_at) / 3600000;
+  return elapsedHours * REST_RECOVERY_PER_HOUR;
 }
 
 function stopTrackingTaskState(task: Task, now: number): Task {
@@ -338,6 +366,7 @@ function buildWellbeingSuggestions({
   completedToday,
   dropCandidates,
   runningTasks,
+  isResting,
 }: {
   pressureScore: number;
   energyScore: number;
@@ -345,8 +374,13 @@ function buildWellbeingSuggestions({
   completedToday: number;
   dropCandidates: Task[];
   runningTasks: Task[];
+  isResting: boolean;
 }) {
   const suggestions: string[] = [];
+
+  if (isResting) {
+    suggestions.push('你正在休息中，先不要重新开新任务，让精力再回一点再继续。');
+  }
 
   if (pressureScore >= 80) {
     suggestions.push('压力已经接近过载，今天只保留 1 到 2 个最高价值任务，其余延后。');
@@ -455,7 +489,7 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
     return {
       tasks,
       ability_dimensions: collectAbilityDimensions(tasks),
-      wellbeing: { daily_checkins: {} },
+      wellbeing: { daily_checkins: {}, daily_rest_sessions: {} },
     };
   }
   if (payload && typeof payload === 'object') {
@@ -476,7 +510,7 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
       wellbeing: normalizeWellbeing(raw.wellbeing),
     };
   }
-  return { tasks: [], ability_dimensions: [], wellbeing: { daily_checkins: {} } };
+  return { tasks: [], ability_dimensions: [], wellbeing: { daily_checkins: {}, daily_rest_sessions: {} } };
 }
 
 function formatDateTime(ts?: number | null) {
@@ -708,7 +742,7 @@ export default function App() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [abilityDimensions, setAbilityDimensions] = useState<string[]>([]);
-  const [wellbeing, setWellbeing] = useState<WellbeingSettings>({ daily_checkins: {} });
+  const [wellbeing, setWellbeing] = useState<WellbeingSettings>({ daily_checkins: {}, daily_rest_sessions: {} });
   const [newAbilityDimension, setNewAbilityDimension] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
@@ -741,7 +775,7 @@ export default function App() {
     setAuthUser('');
     setTasks([]);
     setAbilityDimensions([]);
-    setWellbeing({ daily_checkins: {} });
+    setWellbeing({ daily_checkins: {}, daily_rest_sessions: {} });
     setSelectedTask(null);
     setIsLoadingTasks(false);
     setStorageError('');
@@ -804,6 +838,12 @@ export default function App() {
     100
   );
   const todayInitialEnergy = wellbeing.daily_checkins[todayKey]?.initial_energy ?? DEFAULT_INITIAL_ENERGY;
+  const todayRestSession = wellbeing.daily_rest_sessions[todayKey] ?? {
+    is_resting: false,
+    started_at: null,
+    recovered_energy: 0,
+    updated_at: nowTs,
+  };
   const completedTodayTasks = tasks.filter((task) => task.last_completed_at && getDayKey(task.last_completed_at) === todayKey);
   const completionBoost = completedTodayTasks.length * 6;
   const energyDeltaBoost = completedTodayTasks.reduce((sum, task) => sum + (task.energy_delta || 0) * 8, 0);
@@ -812,8 +852,10 @@ export default function App() {
     : 0;
   const liveEnergyBurn = runningTasks.reduce((sum, task) => sum + getTaskLiveEnergyBurn(task, nowTs), 0);
   const liveEnergyBurnRate = runningTasks.reduce((sum, task) => sum + getTaskEnergyBurnRate(task), 0);
+  const liveRestRecovery = getLiveRestRecovery(todayRestSession, nowTs);
+  const totalRestRecovery = normalizeRecoveredEnergy(todayRestSession.recovered_energy) + liveRestRecovery;
   const energyScore = clamp(
-    Math.round(todayInitialEnergy - pressureScore * 0.45 + completionBoost + energyDeltaBoost + progressBoost - liveEnergyBurn),
+    Math.round(todayInitialEnergy - pressureScore * 0.45 + completionBoost + energyDeltaBoost + progressBoost - liveEnergyBurn + totalRestRecovery),
     0,
     100
   );
@@ -837,6 +879,7 @@ export default function App() {
     completedToday: completedTodayTasks.length,
     dropCandidates,
     runningTasks,
+    isResting: todayRestSession.is_resting,
   });
 
   const abilityScores = abilityDimensions.reduce<Record<string, number>>((acc, dim) => {
@@ -1092,6 +1135,42 @@ export default function App() {
     setSelectedTask((prev) => (prev?.id === task.id ? nextTask : prev));
   };
 
+  const toggleRestMode = () => {
+    const now = Date.now();
+    setTasks((prev) => prev.map((task) => stopTrackingTaskState(task, now)));
+    setSelectedTask((prev) => (prev ? stopTrackingTaskState(prev, now) : prev));
+    setWellbeing((prev) => {
+      const currentSession = prev.daily_rest_sessions[todayKey];
+      const liveRecovery = getLiveRestRecovery(currentSession, now);
+      const recoveredEnergy = clamp(
+        Math.round(normalizeRecoveredEnergy(currentSession?.recovered_energy) + liveRecovery),
+        0,
+        100
+      );
+      const nextSession: DailyRestSession = currentSession?.is_resting
+        ? {
+            is_resting: false,
+            started_at: null,
+            recovered_energy: recoveredEnergy,
+            updated_at: now,
+          }
+        : {
+            is_resting: true,
+            started_at: now,
+            recovered_energy,
+            updated_at: now,
+          };
+
+      return {
+        ...prev,
+        daily_rest_sessions: {
+          ...prev.daily_rest_sessions,
+          [todayKey]: nextSession,
+        },
+      };
+    });
+  };
+
   const deleteTask = (id: string, options: { allowLongTerm?: boolean } = {}) => {
     setTasks((prev) => {
       const target = prev.find((task) => task.id === id);
@@ -1134,6 +1213,7 @@ export default function App() {
   const updateTodayInitialEnergy = (value: number) => {
     const nextValue = clamp(Math.round(value), 0, 100);
     setWellbeing((prev) => ({
+      ...prev,
       daily_checkins: {
         ...prev.daily_checkins,
         [todayKey]: {
@@ -1597,8 +1677,26 @@ export default function App() {
                     />
                   </div>
                   <p className="mt-2 text-[11px] text-current/80">
-                    已完成 {completedTodayTasks.length} 项，实时消耗 {liveEnergyBurn.toFixed(1)}，当前速率 {liveEnergyBurnRate.toFixed(0)}/小时。
+                    已完成 {completedTodayTasks.length} 项，实时消耗 {liveEnergyBurn.toFixed(1)}，休息恢复 {totalRestRecovery.toFixed(1)}，当前速率 {liveEnergyBurnRate.toFixed(0)}/小时。
                   </p>
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <div className="text-[11px] text-current/80">
+                      {todayRestSession.is_resting ? '休息中，精力正在缓慢恢复。' : '需要缓冲时，可以开休息模式回一点精力。'}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={toggleRestMode}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-[11px] font-bold transition-colors",
+                        todayRestSession.is_resting
+                          ? "border-emerald-400/40 bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30"
+                          : "border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
+                      )}
+                    >
+                      <Coffee className="h-3.5 w-3.5" />
+                      {todayRestSession.is_resting ? '结束休息' : '开始休息'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1614,7 +1712,7 @@ export default function App() {
                 </h3>
               </div>
               <span className="rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-sm font-bold text-cyan-100">
-                {runningTasks.length} 正在做
+                {todayRestSession.is_resting ? '休息中' : `${runningTasks.length} 正在做`}
               </span>
             </div>
 
