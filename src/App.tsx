@@ -17,18 +17,55 @@ import {
   Info,
   LogOut,
   Clock3,
-  Link2
+  Link2,
+  Gauge,
+  BatteryMedium,
+  Coffee,
+  TrendingUp,
+  Play,
+  Pause,
+  Activity,
+  SunMedium,
+  MoonStar
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { LongTermCadence, Task, TaskStep, TaskTimeline, UserTaskData } from './types';
+import {
+  DailyEnergyCheckin,
+  LongTermCadence,
+  Task,
+  TaskCollaborationLevel,
+  TaskCognitiveLoad,
+  TaskStep,
+  TaskTimeline,
+  UserTaskData,
+  WellbeingSettings,
+} from './types';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 const AUTH_TOKEN_KEY = 'dayplan_auth_token';
+const THEME_STORAGE_KEY = 'dayplan_theme';
+const DEFAULT_INITIAL_ENERGY = 72;
+const ENERGY_DELTA_OPTIONS = [
+  { value: -2, label: '很耗能' },
+  { value: -1, label: '偏耗能' },
+  { value: 0, label: '中性' },
+  { value: 1, label: '有成就感' },
+  { value: 2, label: '恢复状态' },
+] as const;
+const COGNITIVE_LOAD_OPTIONS: { value: TaskCognitiveLoad; label: string }[] = [
+  { value: 'low', label: '认知负荷低' },
+  { value: 'high', label: '认知负荷高' },
+];
+const COLLABORATION_LEVEL_OPTIONS: { value: TaskCollaborationLevel; label: string }[] = [
+  { value: 'low', label: '协作程度低' },
+  { value: 'high', label: '协作程度高' },
+];
+type AppTheme = 'night' | 'day';
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -55,6 +92,293 @@ function normalizeAbilityGains(value: unknown) {
     acc[name] = Math.floor(numeric);
     return acc;
   }, {});
+}
+
+function normalizeStressScore(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 3;
+  return clamp(Math.round(numeric), 1, 5);
+}
+
+function normalizeEnergyDelta(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return clamp(Math.round(numeric), -2, 2);
+}
+
+function normalizeCognitiveLoad(value: unknown): TaskCognitiveLoad {
+  return value === 'high' ? 'high' : 'low';
+}
+
+function normalizeCollaborationLevel(value: unknown): TaskCollaborationLevel {
+  return value === 'high' ? 'high' : 'low';
+}
+
+function normalizeTrackingAccumulatedMs(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
+  return Math.round(numeric);
+}
+
+function normalizeWellbeing(value: unknown): WellbeingSettings {
+  if (!value || typeof value !== 'object') {
+    return { daily_checkins: {} };
+  }
+
+  const raw = value as Partial<WellbeingSettings>;
+  const dailyCheckins = raw.daily_checkins && typeof raw.daily_checkins === 'object'
+    ? Object.entries(raw.daily_checkins).reduce<Record<string, DailyEnergyCheckin>>((acc, [dayKey, checkin]) => {
+        if (!checkin || typeof checkin !== 'object') return acc;
+        const partial = checkin as Partial<DailyEnergyCheckin>;
+        const initialEnergy = Number(partial.initial_energy);
+        if (!Number.isFinite(initialEnergy)) return acc;
+        acc[dayKey] = {
+          initial_energy: clamp(Math.round(initialEnergy), 0, 100),
+          updated_at: Number.isFinite(Number(partial.updated_at)) ? Number(partial.updated_at) : Date.now(),
+        };
+        return acc;
+      }, {})
+    : {};
+
+  return {
+    daily_checkins: dailyCheckins,
+  };
+}
+
+function getDayKey(ts: number) {
+  const date = new Date(ts);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getTaskProgress(task: Task) {
+  if (task.steps.length === 0) return task.status === 'completed' ? 1 : 0;
+  return task.steps.filter((step) => step.completed).length / task.steps.length;
+}
+
+function getTrackedMs(task: Task, now: number) {
+  const accumulated = normalizeTrackingAccumulatedMs(task.tracking_accumulated_ms);
+  if (!task.tracking_started_at) return accumulated;
+  return accumulated + Math.max(0, now - task.tracking_started_at);
+}
+
+function getDisplayedActualMinutes(task: Task, now: number) {
+  return Math.max(0, task.actual_minutes) + Math.floor(getTrackedMs(task, now) / 60000);
+}
+
+function formatDurationFromMs(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+  }
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+function getTaskEnergyBurnRate(task: Task) {
+  let burn = 5 + (task.stress_score || 3) * 2;
+  if (task.cognitive_load === 'high') burn += 6;
+  if (task.collaboration_level === 'high') burn += 3;
+  if (task.use_countdown_urgency && task.deadline_at) burn += 2;
+  return burn;
+}
+
+function getTaskLiveEnergyBurn(task: Task, now: number) {
+  if (!task.tracking_started_at) return 0;
+  const elapsedHours = Math.max(0, now - task.tracking_started_at) / 3600000;
+  return getTaskEnergyBurnRate(task) * elapsedHours;
+}
+
+function stopTrackingTaskState(task: Task, now: number): Task {
+  if (!task.tracking_started_at) return task;
+  return {
+    ...task,
+    tracking_accumulated_ms: getTrackedMs(task, now),
+    tracking_started_at: null,
+  };
+}
+
+function getPressureTone(score: number) {
+  if (score >= 80) return { label: '过载', card: 'border-rose-400/30 bg-rose-500/12 text-rose-100', bar: 'from-rose-500 to-orange-400' };
+  if (score >= 60) return { label: '偏高', card: 'border-amber-400/30 bg-amber-500/12 text-amber-100', bar: 'from-amber-400 to-orange-300' };
+  if (score >= 35) return { label: '可控', card: 'border-teal-400/30 bg-teal-500/12 text-teal-100', bar: 'from-teal-400 to-emerald-300' };
+  return { label: '轻松', card: 'border-sky-400/30 bg-sky-500/12 text-sky-100', bar: 'from-sky-400 to-cyan-300' };
+}
+
+function getEnergyTone(score: number) {
+  if (score <= 30) return { label: '偏低', card: 'border-rose-400/30 bg-rose-500/12 text-rose-100', bar: 'from-rose-500 to-fuchsia-400' };
+  if (score <= 55) return { label: '一般', card: 'border-amber-400/30 bg-amber-500/12 text-amber-100', bar: 'from-amber-400 to-yellow-300' };
+  if (score <= 75) return { label: '稳定', card: 'border-teal-400/30 bg-teal-500/12 text-teal-100', bar: 'from-teal-400 to-emerald-300' };
+  return { label: '充足', card: 'border-emerald-400/30 bg-emerald-500/12 text-emerald-100', bar: 'from-emerald-400 to-lime-300' };
+}
+
+function getEnergyDeltaLabel(value: number) {
+  return ENERGY_DELTA_OPTIONS.find((option) => option.value === value)?.label || '中性';
+}
+
+function getCognitiveLoadLabel(value: TaskCognitiveLoad) {
+  return value === 'high' ? '认知高' : '认知低';
+}
+
+function getCollaborationLevelLabel(value: TaskCollaborationLevel) {
+  return value === 'high' ? '协作高' : '协作低';
+}
+
+function getTaskUrgencyScore(task: Task, now: number) {
+  if (task.timeline !== 'temporary' || !task.deadline_at) return Math.round(100 - task.y);
+  if (task.deadline_at <= now) return 100;
+  const remainingHours = (task.deadline_at - now) / 3600000;
+  if (remainingHours <= 6) return 92;
+  if (remainingHours <= 12) return 82;
+  if (remainingHours <= 24) return 72;
+  return Math.round(100 - task.y);
+}
+
+function scoreTaskForMoment(task: Task, energyScore: number, pressureScore: number, now: number) {
+  let score = task.x * 0.7 + getTaskUrgencyScore(task, now) * 0.55;
+
+  if (energyScore <= 40) {
+    score += task.cognitive_load === 'low' ? 18 : -16;
+    score += task.collaboration_level === 'low' ? 8 : -4;
+  } else if (energyScore >= 70) {
+    score += task.cognitive_load === 'high' ? 14 : 4;
+    score += task.collaboration_level === 'high' ? 6 : 2;
+  } else {
+    score += task.cognitive_load === 'low' ? 6 : 10;
+  }
+
+  if (pressureScore >= 70) {
+    score += (task.stress_score || 3) <= 3 ? 10 : -8;
+  } else {
+    score += (task.stress_score || 3) >= 4 ? 4 : 0;
+  }
+
+  if (task.timeline === 'temporary' && task.deadline_at && task.deadline_at <= now) {
+    score += 18;
+  }
+
+  if (task.tracking_started_at) {
+    score += 14;
+  }
+
+  return score;
+}
+
+function buildRecommendationReason(task: Task, energyScore: number, now: number) {
+  const reasons: string[] = [];
+  if (task.tracking_started_at) {
+    reasons.push('你已经在做这项任务，继续推进最能减少切换损耗');
+  }
+  if (energyScore <= 40 && task.cognitive_load === 'low') {
+    reasons.push('当前精力下更容易启动');
+  }
+  if (energyScore >= 70 && task.cognitive_load === 'high') {
+    reasons.push('适合在高状态时集中攻坚');
+  }
+  if (task.collaboration_level === 'high') {
+    reasons.push('需要沟通对齐，最好主动推进');
+  }
+  if (task.timeline === 'temporary' && task.deadline_at) {
+    if (task.deadline_at <= now) {
+      reasons.push('已经超时，应尽快处理');
+    } else if ((task.deadline_at - now) <= 12 * 3600000) {
+      reasons.push('截止时间临近');
+    }
+  }
+  if (reasons.length === 0) {
+    reasons.push(task.x >= 60 ? '重要性较高，值得优先推进' : '启动成本低，适合尽快完成');
+  }
+  return reasons[0];
+}
+
+function buildBundleSuggestions(tasks: Task[], energyScore: number) {
+  const bundles: { title: string; description: string }[] = [];
+  const lowLoadBatch = tasks.filter((task) => task.cognitive_load === 'low' && task.collaboration_level === 'low').slice(0, 3);
+  if (lowLoadBatch.length >= 2) {
+    bundles.push({
+      title: '轻量任务可连续清空',
+      description: `${lowLoadBatch.map((task) => task.title || '未命名任务').join('、')} 适合放进同一个 30 到 45 分钟清理时段，减少切换成本。`,
+    });
+  }
+
+  const collaborationBatch = tasks.filter((task) => task.collaboration_level === 'high').slice(0, 3);
+  if (collaborationBatch.length >= 2) {
+    bundles.push({
+      title: '协作任务可集中沟通',
+      description: `${collaborationBatch.map((task) => task.title || '未命名任务').join('、')} 适合放在同一段消息回复、同步会或确认窗口中处理。`,
+    });
+  }
+
+  const deepWorkBatch = tasks.filter((task) => task.cognitive_load === 'high' && task.collaboration_level === 'low').slice(0, 2);
+  if (deepWorkBatch.length >= 2 && energyScore >= 55) {
+    bundles.push({
+      title: '深度任务适合同一专注块',
+      description: `${deepWorkBatch.map((task) => task.title || '未命名任务').join('、')} 适合串成一个 60 到 90 分钟深度工作块，中途不要穿插协作型事务。`,
+    });
+  }
+
+  if (bundles.length === 0) {
+    bundles.push({
+      title: '暂不建议打包',
+      description: '当前任务类型比较分散，建议按优先级逐个推进，避免把高认知和高协作任务混在一起。',
+    });
+  }
+
+  return bundles.slice(0, 3);
+}
+
+function buildWellbeingSuggestions({
+  pressureScore,
+  energyScore,
+  totalTasks,
+  completedToday,
+  dropCandidates,
+  runningTasks,
+}: {
+  pressureScore: number;
+  energyScore: number;
+  totalTasks: number;
+  completedToday: number;
+  dropCandidates: Task[];
+  runningTasks: Task[];
+}) {
+  const suggestions: string[] = [];
+
+  if (pressureScore >= 80) {
+    suggestions.push('压力已经接近过载，今天只保留 1 到 2 个最高价值任务，其余延后。');
+  } else if (pressureScore >= 60) {
+    suggestions.push('任务负荷偏高，建议把重任务拆成 25 到 40 分钟短冲刺。');
+  } else if (totalTasks === 0) {
+    suggestions.push('今天待办较轻，可以安排一次复盘或推进长期任务。');
+  } else {
+    suggestions.push('当前节奏可控，优先推进最重要且最靠近截止时间的任务。');
+  }
+
+  if (energyScore <= 30) {
+    suggestions.push('精力偏低，先休息、补水或短暂散步，再决定是否继续处理任务。');
+  } else if (energyScore <= 55) {
+    suggestions.push('精力一般，优先处理低阻力任务，避免临时开启新坑。');
+  } else {
+    suggestions.push('精力尚可，可以先完成一项高价值任务，拉高今天的掌控感。');
+  }
+
+  if (completedToday >= 3) {
+    suggestions.push('今天已经完成了多项任务，建议预留一个缓冲时段，避免后半段透支。');
+  }
+
+  if (runningTasks.length > 1) {
+    suggestions.push(`你同时在做 ${runningTasks.length} 项任务，若感觉切换频繁，先收束到 ${runningTasks[0].title || '最关键任务'}。`);
+  }
+
+  if (dropCandidates.length > 0) {
+    suggestions.push(`可考虑延后：${dropCandidates.map((task) => task.title || '未命名任务').join('、')}。`);
+  }
+
+  return suggestions.slice(0, 4);
 }
 
 function normalizeTask(rawTask: Task): Task {
@@ -103,6 +427,12 @@ function normalizeTask(rawTask: Task): Task {
     archived_at: toSafeTimestamp(partial.archived_at),
     completion_count: completionCount,
     ability_gains: normalizeAbilityGains(partial.ability_gains),
+    stress_score: normalizeStressScore(partial.stress_score),
+    energy_delta: normalizeEnergyDelta(partial.energy_delta),
+    cognitive_load: normalizeCognitiveLoad(partial.cognitive_load),
+    collaboration_level: normalizeCollaborationLevel(partial.collaboration_level),
+    tracking_started_at: toSafeTimestamp(partial.tracking_started_at),
+    tracking_accumulated_ms: normalizeTrackingAccumulatedMs(partial.tracking_accumulated_ms),
     ai_plan: typeof partial.ai_plan === 'string' ? partial.ai_plan : '',
     steps: stepList,
     created_at: Number.isFinite(Number(partial.created_at)) ? Number(partial.created_at) : Date.now(),
@@ -125,6 +455,7 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
     return {
       tasks,
       ability_dimensions: collectAbilityDimensions(tasks),
+      wellbeing: { daily_checkins: {} },
     };
   }
   if (payload && typeof payload === 'object') {
@@ -142,9 +473,10 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
     return {
       tasks,
       ability_dimensions: [...merged],
+      wellbeing: normalizeWellbeing(raw.wellbeing),
     };
   }
-  return { tasks: [], ability_dimensions: [] };
+  return { tasks: [], ability_dimensions: [], wellbeing: { daily_checkins: {} } };
 }
 
 function formatDateTime(ts?: number | null) {
@@ -359,6 +691,11 @@ async function validateSession(token: string) {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<AppTheme>(() => {
+    if (typeof window === 'undefined') return 'night';
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === 'day' ? 'day' : 'night';
+  });
   const [authToken, setAuthToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) || '' : ''));
   const [authUser, setAuthUser] = useState('');
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -371,12 +708,14 @@ export default function App() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [abilityDimensions, setAbilityDimensions] = useState<string[]>([]);
+  const [wellbeing, setWellbeing] = useState<WellbeingSettings>({ daily_checkins: {} });
   const [newAbilityDimension, setNewAbilityDimension] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isPlacementMode, setIsPlacementMode] = useState(false);
   const [isSideNavOpen, setIsSideNavOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true));
+  const [isSuggestionOpen, setIsSuggestionOpen] = useState(true);
   const [sideNavWidth, setSideNavWidth] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
@@ -389,11 +728,20 @@ export default function App() {
   const quadrantRef = useRef<HTMLDivElement>(null);
   const hasHydratedRef = useRef(false);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.theme = theme;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    }
+  }, [theme]);
+
   const clearAuth = () => {
     setAuthToken('');
     setAuthUser('');
     setTasks([]);
     setAbilityDimensions([]);
+    setWellbeing({ daily_checkins: {} });
     setSelectedTask(null);
     setIsLoadingTasks(false);
     setStorageError('');
@@ -405,6 +753,7 @@ export default function App() {
   const activeTasks = tasks.filter((task) => task.status === 'pending');
   const archivedTasks = tasks.filter((task) => task.status === 'completed');
   const longTermTasks = activeTasks.filter((task) => task.timeline === 'long_term');
+  const runningTasks = activeTasks.filter((task) => Boolean(task.tracking_started_at));
   const taskById = new Map(tasks.map((task) => [task.id, task]));
 
   const isDependencySatisfied = (dependencyTask?: Task) => {
@@ -431,7 +780,64 @@ export default function App() {
   const blockedTasks = activeTasks.filter((task) => !isTaskReady(task) || !isLongTermDue(task, nowTs));
 
   const totalEstimatedMinutes = activeTasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
-  const totalActualMinutes = activeTasks.reduce((sum, task) => sum + task.actual_minutes, 0);
+  const totalActualMinutes = activeTasks.reduce((sum, task) => sum + getDisplayedActualMinutes(task, nowTs), 0);
+  const todayKey = getDayKey(nowTs);
+  const dueTodayTasks = activeTasks.filter((task) => task.timeline === 'temporary' || isLongTermDue(task, nowTs));
+  const dueTodayEstimatedMinutes = dueTodayTasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
+  const overdueTodayTasks = dueTodayTasks.filter((task) => task.timeline === 'temporary' && Boolean(task.deadline_at) && (task.deadline_at || 0) <= nowTs);
+  const nearDeadlineTasks = dueTodayTasks.filter((task) => {
+    if (task.timeline !== 'temporary' || !task.deadline_at || task.deadline_at <= nowTs) return false;
+    return (task.deadline_at - nowTs) <= 12 * 3600000;
+  });
+  const averageStressScore = dueTodayTasks.length > 0
+    ? dueTodayTasks.reduce((sum, task) => sum + (task.stress_score || 3), 0) / dueTodayTasks.length
+    : 0;
+  const pressureScore = clamp(
+    Math.round(
+      Math.min(28, dueTodayTasks.length * 5)
+      + Math.min(24, dueTodayEstimatedMinutes / 20)
+      + Math.min(20, averageStressScore * 4)
+      + Math.min(20, overdueTodayTasks.length * 12 + nearDeadlineTasks.length * 5)
+      + Math.min(12, blockedTasks.length * 4)
+    ),
+    0,
+    100
+  );
+  const todayInitialEnergy = wellbeing.daily_checkins[todayKey]?.initial_energy ?? DEFAULT_INITIAL_ENERGY;
+  const completedTodayTasks = tasks.filter((task) => task.last_completed_at && getDayKey(task.last_completed_at) === todayKey);
+  const completionBoost = completedTodayTasks.length * 6;
+  const energyDeltaBoost = completedTodayTasks.reduce((sum, task) => sum + (task.energy_delta || 0) * 8, 0);
+  const progressBoost = dueTodayTasks.length > 0
+    ? Math.round((dueTodayTasks.reduce((sum, task) => sum + getTaskProgress(task), 0) / dueTodayTasks.length) * 10)
+    : 0;
+  const liveEnergyBurn = runningTasks.reduce((sum, task) => sum + getTaskLiveEnergyBurn(task, nowTs), 0);
+  const liveEnergyBurnRate = runningTasks.reduce((sum, task) => sum + getTaskEnergyBurnRate(task), 0);
+  const energyScore = clamp(
+    Math.round(todayInitialEnergy - pressureScore * 0.45 + completionBoost + energyDeltaBoost + progressBoost - liveEnergyBurn),
+    0,
+    100
+  );
+  const pressureTone = getPressureTone(pressureScore);
+  const energyTone = getEnergyTone(energyScore);
+  const dropCandidates = dueTodayTasks
+    .filter((task) => task.x < 45 && (task.stress_score || 3) >= 4)
+    .sort((a, b) => (b.stress_score || 3) - (a.stress_score || 3))
+    .slice(0, 2);
+  const recommendedNowTasks = [...executableTasks]
+    .sort((a, b) => scoreTaskForMoment(b, energyScore, pressureScore, nowTs) - scoreTaskForMoment(a, energyScore, pressureScore, nowTs))
+    .slice(0, 3);
+  const bundleSuggestions = buildBundleSuggestions(
+    [...executableTasks].sort((a, b) => scoreTaskForMoment(b, energyScore, pressureScore, nowTs) - scoreTaskForMoment(a, energyScore, pressureScore, nowTs)),
+    energyScore
+  );
+  const wellbeingSuggestions = buildWellbeingSuggestions({
+    pressureScore,
+    energyScore,
+    totalTasks: dueTodayTasks.length,
+    completedToday: completedTodayTasks.length,
+    dropCandidates,
+    runningTasks,
+  });
 
   const abilityScores = abilityDimensions.reduce<Record<string, number>>((acc, dim) => {
     acc[dim] = 0;
@@ -447,6 +853,10 @@ export default function App() {
       abilityScores[dim] += completionTimes * Math.max(0, Math.floor(gain));
     });
   });
+  const abilityTotalScore = Object.values(abilityScores).reduce((sum, value) => sum + value, 0);
+  const abilityHighlights = Object.entries(abilityScores)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -545,6 +955,7 @@ export default function App() {
         if (canceled) return;
         setTasks(loadedData.tasks);
         setAbilityDimensions(loadedData.ability_dimensions);
+        setWellbeing(loadedData.wellbeing);
         setStorageError('');
       })
       .catch((e) => {
@@ -580,6 +991,7 @@ export default function App() {
       persistTasksToApi({
         tasks,
         ability_dimensions: abilityDimensions,
+        wellbeing,
       }, authToken)
         .then(() => setStorageError(''))
         .catch((e) => {
@@ -594,7 +1006,7 @@ export default function App() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [tasks, abilityDimensions, isLoadingTasks, authToken]);
+  }, [tasks, abilityDimensions, wellbeing, isLoadingTasks, authToken]);
 
   const handleAddTask = () => {
     setIsPlacementMode(true);
@@ -627,6 +1039,12 @@ export default function App() {
       archived_at: null,
       completion_count: 0,
       ability_gains: {},
+      stress_score: 3,
+      energy_delta: 0,
+      cognitive_load: 'low',
+      collaboration_level: 'low',
+      tracking_started_at: null,
+      tracking_accumulated_ms: 0,
       steps: [],
       created_at: Date.now()
     };
@@ -658,6 +1076,20 @@ export default function App() {
       }
       return [...prev, finalTask];
     });
+  };
+
+  const toggleTaskTracking = (task: Task) => {
+    const now = Date.now();
+    const nextTask = task.tracking_started_at
+      ? stopTrackingTaskState(task, now)
+      : {
+          ...task,
+          tracking_started_at: now,
+          tracking_accumulated_ms: normalizeTrackingAccumulatedMs(task.tracking_accumulated_ms),
+        };
+
+    setTasks((prev) => prev.map((item) => (item.id === task.id ? nextTask : item)));
+    setSelectedTask((prev) => (prev?.id === task.id ? nextTask : prev));
   };
 
   const deleteTask = (id: string, options: { allowLongTerm?: boolean } = {}) => {
@@ -697,6 +1129,19 @@ export default function App() {
     }
     setAbilityDimensions((prev) => [...prev, name]);
     setNewAbilityDimension('');
+  };
+
+  const updateTodayInitialEnergy = (value: number) => {
+    const nextValue = clamp(Math.round(value), 0, 100);
+    setWellbeing((prev) => ({
+      daily_checkins: {
+        ...prev.daily_checkins,
+        [todayKey]: {
+          initial_energy: nextValue,
+          updated_at: Date.now(),
+        },
+      },
+    }));
   };
 
   const removeAbilityDimension = (name: string) => {
@@ -743,7 +1188,7 @@ export default function App() {
     const now = Date.now();
     setTasks((prev) => prev.map((item) => {
       if (item.id !== task.id) return item;
-      const mergedTask = normalizeTask({ ...item, ...task });
+      const mergedTask = stopTrackingTaskState(normalizeTask({ ...item, ...task }), now);
 
       if (mergedTask.timeline === 'long_term') {
         const nextDueAt = now + getLongTermCycleMs(mergedTask);
@@ -861,7 +1306,7 @@ export default function App() {
 
   if (isAuthChecking) {
     return (
-      <div className="min-h-screen bg-[#0b1220] text-slate-100 flex items-center justify-center">
+      <div className="app-shell min-h-screen text-slate-100 flex items-center justify-center">
         <div className="text-sm font-semibold text-slate-300">正在验证登录状态...</div>
       </div>
     );
@@ -869,10 +1314,18 @@ export default function App() {
 
   if (!authToken) {
     return (
-      <div className="min-h-screen bg-[#0b1220] text-slate-100 flex items-center justify-center p-4">
+      <div className="app-shell relative min-h-screen text-slate-100 flex items-center justify-center p-4">
+        <button
+          type="button"
+          onClick={() => setTheme((prev) => (prev === 'night' ? 'day' : 'night'))}
+          className="theme-toggle absolute right-4 top-4 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold"
+        >
+          {theme === 'night' ? <SunMedium className="h-4 w-4" /> : <MoonStar className="h-4 w-4" />}
+          {theme === 'night' ? '白天模式' : '夜间模式'}
+        </button>
         <form
           onSubmit={handleLogin}
-          className="w-full max-w-sm rounded-2xl border border-slate-600/70 bg-slate-900 px-6 py-7 shadow-2xl"
+          className="auth-card w-full max-w-sm rounded-[1.75rem] px-6 py-7 shadow-2xl"
         >
           <h1 className="text-xl font-bold text-white">{authMode === 'register' ? '注册账号' : '账号登录'}</h1>
           <p className="mt-2 text-xs text-slate-400">
@@ -933,11 +1386,11 @@ export default function App() {
   }
 
   return (
-    <div className="relative isolate min-h-screen flex flex-col overflow-hidden bg-[#0b1220] text-slate-100 font-sans selection:bg-teal-500/30">
+    <div className="app-shell relative isolate min-h-screen flex flex-col overflow-hidden text-slate-100 font-sans selection:bg-teal-500/30">
 
       {/* Header */}
       <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/[0.08] glass-panel px-4 sm:px-6">
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-300/20 bg-slate-900 px-3 py-2 shadow-[0_10px_30px_rgba(2,6,23,0.45)]">
+        <div className="brand-shell flex items-center gap-3 rounded-2xl px-3 py-2 shadow-[0_10px_30px_rgba(2,6,23,0.45)]">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-600 shadow-lg shadow-teal-500/20 ring-1 ring-white/20">
             <LayoutGrid className="text-white w-5 h-5 stroke-[2.5]" />
           </div>
@@ -951,6 +1404,15 @@ export default function App() {
 
         <div className="flex items-center gap-3 sm:gap-4">
           <span className="hidden text-xs font-semibold text-slate-300 sm:block">用户：{authUser || loginUsername}</span>
+          <button
+            type="button"
+            onClick={() => setTheme((prev) => (prev === 'night' ? 'day' : 'night'))}
+            className="theme-toggle inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold"
+            title={theme === 'night' ? '切换到白天莫兰迪模式' : '切换到夜间模式'}
+          >
+            {theme === 'night' ? <SunMedium className="h-4 w-4" /> : <MoonStar className="h-4 w-4" />}
+            <span className="hidden sm:inline">{theme === 'night' ? '昼' : '夜'}</span>
+          </button>
           <button
             onClick={clearAuth}
             className="rounded-xl border border-white/15 bg-white/5 p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
@@ -995,7 +1457,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-5 sm:px-6">
+      <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-6 sm:px-6">
         <div className="rounded-lg border border-teal-400/30 bg-teal-500/10 px-3 py-2 text-teal-100">
           可执行任务: <span className="font-bold">{executableTasks.length}</span>
         </div>
@@ -1008,10 +1470,332 @@ export default function App() {
         <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-violet-100">
           实际用时: <span className="font-bold">{totalActualMinutes}m</span>
         </div>
+        <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-cyan-100">
+          正在做: <span className="font-bold">{runningTasks.length}</span>
+        </div>
         <div className="rounded-lg border border-slate-300/30 bg-slate-500/10 px-3 py-2 text-slate-100">
           已归档: <span className="font-bold">{archivedTasks.length}</span>
         </div>
       </div>
+
+      <section
+        className={cn(
+          "z-10 grid gap-3 border-b border-white/[0.08] bg-slate-950/70 px-4 py-3 sm:px-6",
+          isSuggestionOpen
+            ? "xl:grid-cols-[minmax(0,1.75fr)_minmax(340px,0.95fr)]"
+            : "xl:grid-cols-[minmax(0,1fr)_84px]"
+        )}
+      >
+        <div className="grid gap-3 content-start">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">今夜状态总览</p>
+                <h3 className="mt-1 text-lg font-bold text-white">精力、压力与能力 OA</h3>
+                <p className="mt-1 text-[11px] text-slate-400">把关键状态集中看，减少视线跳转。</p>
+              </div>
+              <span className="rounded-xl border border-white/10 bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+                {todayKey}
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1.18fr_0.92fr]">
+              <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">起始精力与能力 OA</p>
+                    <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                      <BatteryMedium className="h-4 w-4 text-emerald-300" />
+                      先校准状态，再看能力积累
+                    </h4>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-lg font-bold text-emerald-100">
+                      {todayInitialEnergy}
+                    </span>
+                    <span className="rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1 text-lg font-bold text-violet-100">
+                      OA {abilityTotalScore}
+                    </span>
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={todayInitialEnergy}
+                  onChange={(e) => updateTodayInitialEnergy(Number(e.target.value))}
+                  className="mt-4 w-full accent-emerald-400"
+                />
+                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+                  <span>低电量</span>
+                  <span>{todayKey}</span>
+                  <span>高状态</span>
+                </div>
+                <div className="mt-4 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">能力 OA</p>
+                      <h5 className="mt-1 text-sm font-semibold text-white">当前累计能力</h5>
+                    </div>
+                    <span className="rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1 text-base font-bold text-violet-100">
+                      {abilityTotalScore}
+                    </span>
+                  </div>
+                  {abilityHighlights.length === 0 ? (
+                    <p className="mt-3 text-[11px] text-violet-100/75">还没有能力维度，去任务清单里加一个后这里会自动汇总。</p>
+                  ) : (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      {abilityHighlights.map(([name, value]) => (
+                        <div key={`ability-top-${name}`} className="rounded-xl border border-violet-300/25 bg-slate-950/60 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-violet-50">{name}</div>
+                          <div className="mt-1 text-lg font-bold text-white">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                <div className={cn("rounded-2xl border p-4", pressureTone.card)}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">压力值</p>
+                      <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                        <Gauge className="h-4 w-4" />
+                        {pressureTone.label}
+                      </h4>
+                    </div>
+                    <span className="text-2xl font-black text-white">{pressureScore}</span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/25">
+                    <div
+                      className={cn("h-full rounded-full bg-gradient-to-r", pressureTone.bar)}
+                      style={{ width: `${pressureScore}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-[11px] text-current/80">
+                    待处理 {dueTodayTasks.length} 项，预计 {dueTodayEstimatedMinutes} 分钟，已超时 {overdueTodayTasks.length} 项。
+                  </p>
+                </div>
+
+                <div className={cn("rounded-2xl border p-4", energyTone.card)}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">当前精力</p>
+                      <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                        <TrendingUp className="h-4 w-4" />
+                        {energyTone.label}
+                      </h4>
+                    </div>
+                    <span className="text-2xl font-black text-white">{energyScore}</span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/25">
+                    <div
+                      className={cn("h-full rounded-full bg-gradient-to-r", energyTone.bar)}
+                      style={{ width: `${energyScore}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-[11px] text-current/80">
+                    已完成 {completedTodayTasks.length} 项，实时消耗 {liveEnergyBurn.toFixed(1)}，当前速率 {liveEnergyBurnRate.toFixed(0)}/小时。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">执行中</p>
+                <h3 className="mt-1 flex items-center gap-2 text-lg font-bold text-white">
+                  <Activity className="h-4 w-4 text-cyan-300" />
+                  当前计时与执行列表
+                </h3>
+              </div>
+              <span className="rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-sm font-bold text-cyan-100">
+                {runningTasks.length} 正在做
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3 xl:grid-cols-[0.88fr_1.12fr]">
+              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-100">当前计时</h4>
+                  <span className="text-[10px] font-semibold text-cyan-200">{runningTasks.length}</span>
+                </div>
+                {runningTasks.length === 0 ? (
+                  <p className="text-[11px] text-cyan-100/70">还没有标记“现在正在做”的任务。</p>
+                ) : (
+                  <div className="space-y-2">
+                    {runningTasks.slice(0, 4).map((task) => (
+                      <div key={`running-top-${task.id}`} className="rounded-xl border border-cyan-300/20 bg-slate-900/55 px-2.5 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTask(task)}
+                            className="truncate text-left text-[11px] font-semibold text-cyan-50"
+                          >
+                            {task.title || '未命名任务'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleTaskTracking(task)}
+                            className="rounded-lg border border-cyan-300/25 bg-cyan-500/15 p-1 text-cyan-100 transition-colors hover:bg-cyan-500/25"
+                            title="暂停计时"
+                          >
+                            <Pause className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between text-[10px] text-cyan-100/80">
+                          <span>{formatDurationFromMs(getTrackedMs(task, nowTs))}</span>
+                          <span>耗能 {getTaskLiveEnergyBurn(task, nowTs).toFixed(1)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-teal-400/25 bg-teal-500/10 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-teal-100">执行列表</h4>
+                  <span className="text-[10px] font-semibold text-teal-200">{executableTasks.length}</span>
+                </div>
+                {executableTasks.length === 0 ? (
+                  <p className="text-[11px] text-teal-100/70">暂无可执行任务（等待前置任务完成）。</p>
+                ) : (
+                  <div className="space-y-2">
+                    {executableTasks.slice(0, 5).map((task) => (
+                      <div key={`ready-top-${task.id}`} className="rounded-xl border border-teal-300/20 bg-slate-900/50 px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTask(task)}
+                            className="truncate text-left text-[11px] font-semibold text-teal-50"
+                          >
+                            {task.title || '未命名任务'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleTaskTracking(task)}
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold transition-colors",
+                              task.tracking_started_at
+                                ? "border-cyan-300/40 bg-cyan-500/20 text-cyan-100"
+                                : "border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
+                            )}
+                          >
+                            {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                            {task.tracking_started_at ? '暂停' : '开始'}
+                          </button>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-300">
+                          <span>预估 {task.estimated_minutes}m</span>
+                          <span>实际 {getDisplayedActualMinutes(task, nowTs)}m</span>
+                          <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={cn("rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-all duration-300", !isSuggestionOpen && "suggestion-rail px-2 py-4")}>
+          <div className="flex items-center justify-between gap-3">
+            <div className={cn(!isSuggestionOpen && "xl:hidden")}>
+              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">建议窗口</p>
+              <h3 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                <Coffee className="h-4 w-4 text-amber-300" />
+                今日节奏建议
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsSuggestionOpen((prev) => !prev)}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-xl border border-white/10 bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-slate-300 transition-colors hover:bg-slate-900",
+                !isSuggestionOpen && "xl:h-full xl:w-full xl:flex-col xl:justify-center xl:px-2 xl:py-4"
+              )}
+            >
+              <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isSuggestionOpen && "rotate-90")} />
+              <span className={cn(!isSuggestionOpen && "suggestion-rail-label")}>
+                {isSuggestionOpen ? '收起' : '建议'}
+              </span>
+            </button>
+          </div>
+
+          {isSuggestionOpen ? (
+            <>
+              <div className="mt-4 space-y-2">
+                {wellbeingSuggestions.map((suggestion, index) => (
+                  <div
+                    key={`${todayKey}-${index}`}
+                    className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm leading-6 text-slate-200"
+                  >
+                    {suggestion}
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 border-t border-white/10 pt-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">当下建议先做</p>
+                <div className="mt-3 space-y-2">
+                  {recommendedNowTasks.length === 0 ? (
+                    <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-400">
+                      当前没有可执行任务，先解除阻塞项或安排休息。
+                    </div>
+                  ) : (
+                    recommendedNowTasks.map((task, index) => (
+                      <button
+                        key={`recommend-${task.id}`}
+                        onClick={() => setSelectedTask(task)}
+                        className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-left transition-colors hover:bg-slate-900"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-semibold text-white">{index + 1}. {task.title || '未命名任务'}</span>
+                          <span className="rounded-md border border-teal-400/25 bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold text-teal-100">
+                            {(task.stress_score || 3)}/5
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                          <span className="rounded-md border border-sky-400/25 bg-sky-500/10 px-1.5 py-0.5 text-sky-100">
+                            {getCognitiveLoadLabel(task.cognitive_load || 'low')}
+                          </span>
+                          <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-1.5 py-0.5 text-violet-100">
+                            {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-[11px] leading-5 text-slate-300">
+                          {buildRecommendationReason(task, energyScore, nowTs)}
+                        </p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 border-t border-white/10 pt-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">可一起处理的任务</p>
+                <div className="mt-3 space-y-2">
+                  {bundleSuggestions.map((bundle, index) => (
+                    <div
+                      key={`bundle-${index}`}
+                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2"
+                    >
+                      <div className="text-sm font-semibold text-white">{bundle.title}</div>
+                      <p className="mt-1 text-[11px] leading-5 text-slate-300">{bundle.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </section>
 
       <main className="relative flex flex-1 overflow-hidden">
         {/* Left Collapsible Sidebar */}
@@ -1047,28 +1831,6 @@ export default function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-            <div className="rounded-2xl border border-teal-400/30 bg-teal-500/10 p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-teal-100">执行列表</h3>
-                <span className="text-[10px] font-semibold text-teal-200">{executableTasks.length}</span>
-              </div>
-              {executableTasks.length === 0 ? (
-                <p className="text-[11px] text-teal-100/70">暂无可执行任务（等待前置任务完成）。</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {executableTasks.slice(0, 5).map((task) => (
-                    <button
-                      key={`ready-${task.id}`}
-                      onClick={() => setSelectedTask(task)}
-                      className="w-full rounded-lg border border-teal-300/20 bg-slate-900/50 px-2 py-1.5 text-left text-[11px] font-semibold text-teal-50 transition-colors hover:bg-slate-800/80"
-                    >
-                      {task.title || '未命名任务'}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {sortedTasks.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-60">
                 <ListTodo className="w-8 h-8 mb-3 opacity-20" />
@@ -1124,8 +1886,45 @@ export default function App() {
                     </span>
                   </div>
                   <div className="relative mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>预估 {task.estimated_minutes}m / 实际 {task.actual_minutes}m</span>
-                    {task.dependency_ids.length > 0 && <span>依赖 {task.dependency_ids.length}</span>}
+                    <span>预估 {task.estimated_minutes}m / 实际 {getDisplayedActualMinutes(task, nowTs)}m</span>
+                    <div className="flex items-center gap-2">
+                      {task.dependency_ids.length > 0 && <span>依赖 {task.dependency_ids.length}</span>}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleTaskTracking(task);
+                        }}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold transition-colors",
+                          task.tracking_started_at
+                            ? "border-cyan-300/40 bg-cyan-500/20 text-cyan-100"
+                            : "border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
+                        )}
+                      >
+                        {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                        {task.tracking_started_at ? '暂停' : '开始'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="relative mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                    <span className="rounded-md border border-rose-400/25 bg-rose-500/10 px-1.5 py-0.5 text-rose-100">
+                      压力 {(task.stress_score || 3)}/5
+                    </span>
+                    <span className="rounded-md border border-emerald-400/25 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-100">
+                      精力 {getEnergyDeltaLabel(task.energy_delta || 0)}
+                    </span>
+                    <span className="rounded-md border border-sky-400/25 bg-sky-500/10 px-1.5 py-0.5 text-sky-100">
+                      {getCognitiveLoadLabel(task.cognitive_load || 'low')}
+                    </span>
+                    <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-1.5 py-0.5 text-violet-100">
+                      {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+                    </span>
+                    {task.tracking_started_at && (
+                      <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
+                        计时中 {formatDurationFromMs(getTrackedMs(task, nowTs))}
+                      </span>
+                    )}
                   </div>
                   {task.timeline === 'temporary' && task.deadline_at && (
                     <div className={cn(
@@ -1195,13 +1994,19 @@ export default function App() {
               isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
             )}
           >
+            <div className="pointer-events-none absolute inset-0 z-0 quadrant-tints">
+              <div className="quadrant-tint quadrant-tint-nw" />
+              <div className="quadrant-tint quadrant-tint-ne" />
+              <div className="quadrant-tint quadrant-tint-sw" />
+              <div className="quadrant-tint quadrant-tint-se" />
+            </div>
             <div className="pointer-events-none absolute inset-0 z-[2]">
               <div className="absolute left-1/2 top-0 h-full w-px bg-teal-200/35" />
               <div className="absolute left-0 top-1/2 h-px w-full bg-teal-200/35" />
-              <span className="absolute left-2 top-2 rounded-md border border-teal-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-teal-100">紧急度: 高</span>
-              <span className="absolute left-2 bottom-12 rounded-md border border-teal-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-teal-100">紧急度: 低</span>
-              <span className="absolute left-12 bottom-2 rounded-md border border-teal-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-teal-100">重要性: 低</span>
-              <span className="absolute right-2 bottom-2 rounded-md border border-teal-400/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-teal-100">重要性: 高</span>
+              <span className="axis-label absolute left-2 top-2 rounded-md px-2 py-1 text-[10px] font-semibold text-teal-100">紧急度: 高</span>
+              <span className="axis-label absolute left-2 bottom-12 rounded-md px-2 py-1 text-[10px] font-semibold text-teal-100">紧急度: 低</span>
+              <span className="axis-label absolute left-12 bottom-2 rounded-md px-2 py-1 text-[10px] font-semibold text-teal-100">重要性: 低</span>
+              <span className="axis-label absolute right-2 bottom-2 rounded-md px-2 py-1 text-[10px] font-semibold text-teal-100">重要性: 高</span>
             </div>
             <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
               <defs>
@@ -1351,18 +2156,40 @@ export default function App() {
                         <p className="text-xs text-slate-400">暂无进行中任务。</p>
                       ) : (
                         [...activeTasks].sort((a, b) => b.created_at - a.created_at).map(task => (
-                          <button
-                            type="button"
+                          <div
                             key={task.id}
-                            onClick={() => {
-                              setSelectedTask(task);
-                              setIsTaskListOpen(false);
-                            }}
-                            className="w-full p-5 border border-white/10 rounded-2xl text-left hover:border-teal-500/50 hover:bg-teal-500/5 hover:shadow-[0_0_20px_rgba(20,184,166,0.1)] transition-all cursor-pointer group bg-white/[0.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                            className="w-full p-5 border border-white/10 rounded-2xl text-left hover:border-teal-500/50 hover:bg-teal-500/5 hover:shadow-[0_0_20px_rgba(20,184,166,0.1)] transition-all group bg-white/[0.02]"
                           >
-                            <div className="flex items-start justify-between gap-4">
-                              <h3 className="font-semibold text-slate-200 group-hover:text-white transition-colors line-clamp-2 leading-snug">{task.title || '未命名任务'}</h3>
-                              <ChevronRight className="w-5 h-5 text-slate-500 group-hover:translate-x-1 group-hover:text-teal-400 transition-all shrink-0" />
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => {
+                                setSelectedTask(task);
+                                setIsTaskListOpen(false);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setSelectedTask(task);
+                                  setIsTaskListOpen(false);
+                                }
+                              }}
+                              className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 rounded-xl"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <h3 className="font-semibold text-slate-200 group-hover:text-white transition-colors line-clamp-2 leading-snug">{task.title || '未命名任务'}</h3>
+                                <ChevronRight className="w-5 h-5 text-slate-500 group-hover:translate-x-1 group-hover:text-teal-400 transition-all shrink-0" />
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-semibold">
+                              <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
+                                实际 {getDisplayedActualMinutes(task, nowTs)}m
+                              </span>
+                              {task.tracking_started_at && (
+                                <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
+                                  计时中 {formatDurationFromMs(getTrackedMs(task, nowTs))}
+                                </span>
+                              )}
                             </div>
                             <div className="mt-5 flex items-center gap-4">
                               <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden shadow-inner">
@@ -1386,7 +2213,22 @@ export default function App() {
                                 {getCountdownText(task.deadline_at, nowTs)}
                               </p>
                             )}
-                          </button>
+                            <div className="mt-3 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => toggleTaskTracking(task)}
+                                className={cn(
+                                  "inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors",
+                                  task.tracking_started_at
+                                    ? "border-cyan-300/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30"
+                                    : "border-white/15 bg-white/5 text-slate-100 hover:bg-white/10"
+                                )}
+                              >
+                                {task.tracking_started_at ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                                {task.tracking_started_at ? '暂停计时' : '标记正在做'}
+                              </button>
+                            </div>
+                          </div>
                         ))
                       )}
                     </div>
@@ -1576,6 +2418,136 @@ export default function App() {
                         className="mt-2 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-sm text-white"
                       />
                     </label>
+                  </div>
+
+                  <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-100">正在做 / 计时</h4>
+                        <p className="mt-2 text-sm font-semibold text-white">
+                          {selectedTask.tracking_started_at ? '计时进行中' : '当前未计时'}
+                        </p>
+                        <p className="mt-1 text-[11px] leading-5 text-cyan-100/80">
+                          已累计 {formatDurationFromMs(getTrackedMs(selectedTask, nowTs))}，折算实际用时 {getDisplayedActualMinutes(selectedTask, nowTs)} 分钟。
+                        </p>
+                        <p className="mt-1 text-[11px] leading-5 text-cyan-100/80">
+                          当前实时精力消耗速率 {getTaskEnergyBurnRate(selectedTask)}/小时。
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleTaskTracking(selectedTask)}
+                        className={cn(
+                          "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all",
+                          selectedTask.tracking_started_at
+                            ? "border border-cyan-300/40 bg-cyan-500/20 text-cyan-50 hover:bg-cyan-500/30"
+                            : "border border-white/15 bg-white/5 text-white hover:bg-white/10"
+                        )}
+                      >
+                        {selectedTask.tracking_started_at ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        {selectedTask.tracking_started_at ? '暂停计时' : '开始计时'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                    <div className="rounded-xl border border-rose-300/20 bg-rose-500/10 p-3">
+                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-rose-100">任务压力量表</h4>
+                      <div className="mt-3 grid grid-cols-5 gap-2">
+                        {[1, 2, 3, 4, 5].map((score) => (
+                          <button
+                            key={`stress-${score}`}
+                            type="button"
+                            onClick={() => setSelectedTask({ ...selectedTask, stress_score: score })}
+                            className={cn(
+                              "rounded-xl border px-2 py-2 text-xs font-bold transition-all",
+                              (selectedTask.stress_score || 3) === score
+                                ? "border-rose-300/60 bg-rose-500/30 text-white"
+                                : "border-rose-200/20 bg-slate-950/60 text-rose-100/70 hover:bg-slate-900"
+                            )}
+                          >
+                            {score}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] leading-5 text-rose-100/80">
+                        1 表示轻松，5 表示高压。系统会把它纳入今日压力值计算。
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-3">
+                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-100">完成后精力影响</h4>
+                      <div className="mt-3 grid grid-cols-5 gap-2">
+                        {ENERGY_DELTA_OPTIONS.map((option) => (
+                          <button
+                            key={`energy-${option.value}`}
+                            type="button"
+                            onClick={() => setSelectedTask({ ...selectedTask, energy_delta: option.value })}
+                            className={cn(
+                              "rounded-xl border px-2 py-2 text-[11px] font-bold transition-all",
+                              (selectedTask.energy_delta || 0) === option.value
+                                ? "border-emerald-300/60 bg-emerald-500/30 text-white"
+                                : "border-emerald-200/20 bg-slate-950/60 text-emerald-100/75 hover:bg-slate-900"
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] leading-5 text-emerald-100/80">
+                        当前设置：{getEnergyDeltaLabel(selectedTask.energy_delta || 0)}。完成任务后会参与今日精力估算。
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                    <div className="rounded-xl border border-sky-300/20 bg-sky-500/10 p-3">
+                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-sky-100">认知负荷</h4>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {COGNITIVE_LOAD_OPTIONS.map((option) => (
+                          <button
+                            key={`cognitive-${option.value}`}
+                            type="button"
+                            onClick={() => setSelectedTask({ ...selectedTask, cognitive_load: option.value })}
+                            className={cn(
+                              "rounded-xl border px-3 py-2 text-xs font-bold transition-all",
+                              (selectedTask.cognitive_load || 'low') === option.value
+                                ? "border-sky-300/60 bg-sky-500/30 text-white"
+                                : "border-sky-200/20 bg-slate-950/60 text-sky-100/75 hover:bg-slate-900"
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] leading-5 text-sky-100/80">
+                        高认知任务更适合在精力充足时进入深度工作块。
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-violet-300/20 bg-violet-500/10 p-3">
+                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-violet-100">协作化程度</h4>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {COLLABORATION_LEVEL_OPTIONS.map((option) => (
+                          <button
+                            key={`collaboration-${option.value}`}
+                            type="button"
+                            onClick={() => setSelectedTask({ ...selectedTask, collaboration_level: option.value })}
+                            className={cn(
+                              "rounded-xl border px-3 py-2 text-xs font-bold transition-all",
+                              (selectedTask.collaboration_level || 'low') === option.value
+                                ? "border-violet-300/60 bg-violet-500/30 text-white"
+                                : "border-violet-200/20 bg-slate-950/60 text-violet-100/75 hover:bg-slate-900"
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] leading-5 text-violet-100/80">
+                        高协作任务会被建议集中到同一段沟通时间里处理。
+                      </p>
+                    </div>
                   </div>
 
                   {selectedTask.timeline === 'long_term' && (
@@ -1996,7 +2968,7 @@ function TaskPoint({
         {/* Progress Ring / Circle Backdrop */}
         <div
           className={cn(
-            "w-8 h-8 rounded-2xl flex items-center justify-center overflow-hidden relative transition-all duration-300 bg-slate-900/90 border shadow-[0_4px_20px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_20px_rgba(20,184,166,0.3)]",
+            "task-point-shell w-8 h-8 rounded-2xl flex items-center justify-center overflow-hidden relative transition-all duration-300 border shadow-[0_4px_20px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_20px_rgba(20,184,166,0.3)]",
             timelineAccent.ring
           )}
         >
@@ -2026,14 +2998,14 @@ function TaskPoint({
 
         {/* Always-visible label */}
         <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 whitespace-nowrap pointer-events-none">
-          <div className="rounded-xl border border-white/10 bg-slate-900/95 px-2 py-1 shadow-xl">
+          <div className="task-point-label rounded-xl border px-2 py-1 shadow-xl">
             <div className="flex items-center gap-1.5">
-              <span className="max-w-[140px] truncate text-[11px] font-semibold text-white">{task.title || '未命名'}</span>
+              <span className="max-w-[140px] truncate text-[11px] font-semibold task-point-title">{task.title || '未命名'}</span>
               <span className={cn("rounded border px-1 py-0 text-[9px] font-bold", timelineAccent.badge)}>
                 {task.timeline === 'long_term' ? '长' : '临'}
               </span>
             </div>
-            <div className="mt-0.5 flex items-center gap-2 text-[9px] text-slate-300">
+            <div className="task-point-meta mt-0.5 flex items-center gap-2 text-[9px]">
               <span>重:{importance}</span>
               <span>急:{urgency}</span>
               <span>{Math.round(progress)}%</span>

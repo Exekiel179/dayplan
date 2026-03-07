@@ -6,6 +6,8 @@ export interface TaskStep {
 
 export type TaskTimeline = 'temporary' | 'long_term';
 export type LongTermCadence = 'daily' | 'weekly' | 'interval';
+export type TaskCognitiveLoad = 'low' | 'high';
+export type TaskCollaborationLevel = 'low' | 'high';
 
 export interface Task {
   id: string;
@@ -27,12 +29,28 @@ export interface Task {
   archived_at?: number | null;
   completion_count?: number;
   ability_gains?: Record<string, number>;
+  stress_score?: number;
+  energy_delta?: number;
+  cognitive_load?: TaskCognitiveLoad;
+  collaboration_level?: TaskCollaborationLevel;
+  tracking_started_at?: number | null;
+  tracking_accumulated_ms?: number;
   ai_plan?: string;
   steps: TaskStep[];
   created_at: number;
 }
 
+export interface DailyEnergyCheckin {
+  initial_energy: number;
+  updated_at: number;
+}
+
+export interface WellbeingSettings {
+  daily_checkins: Record<string, DailyEnergyCheckin>;
+}
+
 export interface UserTaskData {
   tasks: Task[];
   ability_dimensions: string[];
+  wellbeing: WellbeingSettings;
 }

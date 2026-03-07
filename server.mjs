@@ -257,6 +257,9 @@ function normalizeTaskPayload(payload) {
     return {
       tasks: payload,
       ability_dimensions: [],
+      wellbeing: {
+        daily_checkins: {},
+      },
     };
   }
   if (payload && typeof payload === 'object') {
@@ -268,11 +271,36 @@ function normalizeTaskPayload(payload) {
           .map((item) => item.trim())
           .filter(Boolean)
         : [],
+      wellbeing: payload.wellbeing && typeof payload.wellbeing === 'object' && payload.wellbeing.daily_checkins && typeof payload.wellbeing.daily_checkins === 'object'
+        ? {
+            daily_checkins: Object.fromEntries(
+              Object.entries(payload.wellbeing.daily_checkins)
+                .filter(([key, value]) =>
+                  typeof key === 'string'
+                  && value
+                  && typeof value === 'object'
+                  && Number.isFinite(Number(value.initial_energy))
+                )
+                .map(([key, value]) => [
+                  key,
+                  {
+                    initial_energy: Math.max(0, Math.min(100, Math.round(Number(value.initial_energy)))),
+                    updated_at: Number.isFinite(Number(value.updated_at)) ? Number(value.updated_at) : Date.now(),
+                  },
+                ])
+            ),
+          }
+        : {
+            daily_checkins: {},
+          },
     };
   }
   return {
     tasks: [],
     ability_dimensions: [],
+    wellbeing: {
+      daily_checkins: {},
+    },
   };
 }
 
