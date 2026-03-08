@@ -56,6 +56,7 @@ const AUTH_TOKEN_KEY = 'dayplan_auth_token';
 const THEME_STORAGE_KEY = 'dayplan_theme';
 const DEFAULT_INITIAL_ENERGY = 72;
 const REST_RECOVERY_PER_HOUR = 6;
+const MOTIVATION_SETTLE_INTERVAL_MS = 5000;
 const ENERGY_DELTA_OPTIONS = [
   { value: -2, label: '很耗能' },
   { value: -1, label: '偏耗能' },
@@ -71,7 +72,7 @@ const COLLABORATION_LEVEL_OPTIONS: { value: TaskCollaborationLevel; label: strin
   { value: 'low', label: '协作程度低' },
   { value: 'high', label: '协作程度高' },
 ];
-type AppTheme = 'night' | 'day';
+type AppTheme = 'night' | 'day' | 'stardew';
 type AbilityModuleOption = {
   id: string;
   label: string;
@@ -80,6 +81,12 @@ type AbilityModuleOption = {
   kind: 'ability' | 'special';
   gainPerHour?: number;
 };
+
+const THEME_OPTIONS: { id: AppTheme; label: string; shortLabel: string }[] = [
+  { id: 'night', label: '夜间霓光', shortLabel: '夜' },
+  { id: 'day', label: '白昼莫兰迪', shortLabel: '昼' },
+  { id: 'stardew', label: '星露谷', shortLabel: '谷' },
+];
 
 const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
   {
@@ -219,6 +226,13 @@ function getMotivationMode(moduleId: string) {
 
 function formatMetricValue(value: number) {
   if (!Number.isFinite(value)) return '0';
+  const absolute = Math.abs(value);
+  if (absolute > 0 && absolute < 1) {
+    return value.toFixed(2);
+  }
+  if (absolute < 10 && Math.abs(value - Math.round(value)) >= 0.01) {
+    return value.toFixed(1);
+  }
   if (Math.abs(value - Math.round(value)) < 0.01) {
     return Math.round(value).toLocaleString('zh-CN');
   }
@@ -838,7 +852,7 @@ export default function App() {
   const [theme, setTheme] = useState<AppTheme>(() => {
     if (typeof window === 'undefined') return 'night';
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    return stored === 'day' ? 'day' : 'night';
+    return stored === 'day' || stored === 'stardew' ? stored : 'night';
   });
   const [authToken, setAuthToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) || '' : ''));
   const [authUser, setAuthUser] = useState('');
@@ -1020,10 +1034,6 @@ export default function App() {
       value + (abilityModule.special_totals[buildAbilityModuleId(dim)] || 0),
     ])
   );
-  const abilityTotalScore = Object.values(abilityScores).reduce((sum, value) => sum + value, 0);
-  const abilityHighlights = Object.entries(abilityScores)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4);
   const abilityModuleOptions = buildAbilityModuleOptions(abilityDimensions);
   const abilityDimensionModules = abilityModuleOptions.filter((module) => module.kind === 'ability');
   const activeAbilityModule = abilityModuleOptions.find((module) => module.id === abilityModule.active_module_id) || abilityModuleOptions[0] || SPECIAL_ABILITY_MODULES[0];
@@ -1036,6 +1046,14 @@ export default function App() {
   const activeAbilityModuleScore = activeSpecialAbilityModule
     ? activeModuleStoredScore + activeModuleLiveGain
     : (abilityScores[activeAbilityDimension] || 0) + activeModuleLiveGain;
+  const liveAbilityScores = { ...abilityScores };
+  if (!activeSpecialAbilityModule && activeAbilityDimension) {
+    liveAbilityScores[activeAbilityDimension] = (liveAbilityScores[activeAbilityDimension] || 0) + activeModuleLiveGain;
+  }
+  const abilityTotalScore = Object.values(liveAbilityScores).reduce((sum, value) => sum + value, 0);
+  const abilityHighlights = Object.entries(liveAbilityScores)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4);
   const statusSummary = pressureScore >= 70
     ? (energyScore >= 60 ? '高压高能，适合短冲刺推进' : '高压低能，优先降载和缓冲')
     : (energyScore >= 60 ? '状态良好，可以先吃掉高价值任务' : '低压低能，适合整理和恢复');
@@ -1256,6 +1274,21 @@ export default function App() {
     }));
   }, [abilityModule.active_module_id, abilityModuleOptions, totalTrackedMsAllTasks]);
 
+  useEffect(() => {
+    if (runningTasks.length === 0) return;
+    if (totalTrackedMsAllTasks <= abilityModule.tracked_ms_baseline) return;
+    if ((nowTs - abilityModule.updated_at) < MOTIVATION_SETTLE_INTERVAL_MS) return;
+    settleAbilityModuleProgress(undefined, nowTs);
+  }, [
+    abilityDimensions,
+    abilityModule.tracked_ms_baseline,
+    abilityModule.updated_at,
+    nowTs,
+    runningTasks.length,
+    tasks,
+    totalTrackedMsAllTasks,
+  ]);
+
   const handleAddTask = () => {
     setIsPlacementMode(true);
   };
@@ -1335,9 +1368,17 @@ export default function App() {
       if (delta > 0 && activeModuleOption) {
         nextTotals[activeModuleOption.id] = Number(((nextTotals[activeModuleOption.id] || 0) + delta).toFixed(2));
       }
+      const resolvedModuleId = nextModuleId ?? prev.active_module_id;
+      if (
+        delta <= 0
+        && resolvedModuleId === prev.active_module_id
+        && trackedMsAtMoment === prev.tracked_ms_baseline
+      ) {
+        return prev;
+      }
 
       return {
-        active_module_id: nextModuleId ?? prev.active_module_id,
+        active_module_id: resolvedModuleId,
         special_totals: nextTotals,
         tracked_ms_baseline: trackedMsAtMoment,
         updated_at: settledAt,
@@ -1364,6 +1405,7 @@ export default function App() {
 
   const toggleTaskTracking = (task: Task) => {
     const now = Date.now();
+    settleAbilityModuleProgress(undefined, now);
     const nextTask = task.tracking_started_at
       ? stopTrackingTaskState(task, now)
       : {
@@ -1626,6 +1668,30 @@ export default function App() {
   const selectedTaskReady = selectedTask ? isTaskReady(selectedTask) : false;
   const selectedTaskIsPersisted = selectedTask ? tasks.some((task) => task.id === selectedTask.id) : false;
 
+  const renderThemeIcon = (themeId: AppTheme) => {
+    if (themeId === 'night') return <MoonStar className="h-4 w-4" />;
+    if (themeId === 'day') return <SunMedium className="h-4 w-4" />;
+    return <Sparkles className="h-4 w-4" />;
+  };
+
+  const renderThemeSwitcher = (mode: 'compact' | 'full' = 'compact') => (
+    <div className={cn("theme-switcher", mode === 'compact' && "theme-switcher-compact")}>
+      {THEME_OPTIONS.map((option) => (
+        <button
+          key={`theme-${option.id}`}
+          type="button"
+          title={option.label}
+          onClick={() => setTheme(option.id)}
+          data-active={theme === option.id ? 'true' : 'false'}
+          className="theme-segment inline-flex items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-semibold transition-colors"
+        >
+          {renderThemeIcon(option.id)}
+          <span>{mode === 'full' ? option.label : option.shortLabel}</span>
+        </button>
+      ))}
+    </div>
+  );
+
   const renderMotivationScene = () => {
     if (activeMotivationMode === 'special:mokugyo') {
       return (
@@ -1701,14 +1767,9 @@ export default function App() {
   if (!authToken) {
     return (
       <div className="app-shell relative min-h-screen text-slate-100 flex items-center justify-center p-4">
-        <button
-          type="button"
-          onClick={() => setTheme((prev) => (prev === 'night' ? 'day' : 'night'))}
-          className="theme-toggle absolute right-4 top-4 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold"
-        >
-          {theme === 'night' ? <SunMedium className="h-4 w-4" /> : <MoonStar className="h-4 w-4" />}
-          {theme === 'night' ? '白天模式' : '夜间模式'}
-        </button>
+        <div className="absolute right-4 top-4">
+          {renderThemeSwitcher('full')}
+        </div>
         <form
           onSubmit={handleLogin}
           className="auth-card w-full max-w-sm rounded-[1.75rem] px-6 py-7 shadow-2xl"
@@ -1790,15 +1851,7 @@ export default function App() {
 
         <div className="flex items-center gap-3 sm:gap-4">
           <span className="hidden text-xs font-semibold text-slate-300 sm:block">用户：{authUser || loginUsername}</span>
-          <button
-            type="button"
-            onClick={() => setTheme((prev) => (prev === 'night' ? 'day' : 'night'))}
-            className="theme-toggle inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold"
-            title={theme === 'night' ? '切换到白天莫兰迪模式' : '切换到夜间模式'}
-          >
-            {theme === 'night' ? <SunMedium className="h-4 w-4" /> : <MoonStar className="h-4 w-4" />}
-            <span className="hidden sm:inline">{theme === 'night' ? '昼' : '夜'}</span>
-          </button>
+          {renderThemeSwitcher('compact')}
           <button
             onClick={clearAuth}
             className="rounded-xl border border-white/15 bg-white/5 p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
@@ -2125,8 +2178,8 @@ export default function App() {
             </div>
 
             {topTaskPanelView === 'execution' ? (
-              <div className="mt-4 grid gap-3 xl:grid-cols-[0.88fr_1.12fr]">
-                <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3">
+              <div className="mt-4 grid gap-3 xl:grid-cols-[0.88fr_1.12fr] xl:items-stretch">
+                <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3 flex min-h-0 flex-col">
                   <div className="mb-2 flex items-center justify-between">
                     <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-100">{'\u5f53\u524d\u8ba1\u65f6'}</h4>
                     <span className="text-[10px] font-semibold text-cyan-200">{runningTasks.length}</span>
@@ -2134,8 +2187,8 @@ export default function App() {
                   {runningTasks.length === 0 ? (
                     <p className="text-[11px] text-cyan-100/70">{'\u8fd8\u6ca1\u6709\u6807\u8bb0\u201c\u73b0\u5728\u6b63\u5728\u505a\u201d\u7684\u4efb\u52a1\u3002'}</p>
                   ) : (
-                    <div className="space-y-2">
-                      {runningTasks.slice(0, 4).map((task) => (
+                    <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto pr-1 max-h-[22rem]">
+                      {runningTasks.map((task) => (
                         <div key={`running-top-${task.id}`} className="rounded-xl border border-cyan-300/20 bg-slate-900/55 px-2.5 py-2">
                           <div className="flex items-center justify-between gap-2">
                             <button
@@ -2164,7 +2217,7 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="rounded-2xl border border-teal-400/25 bg-teal-500/10 p-3">
+                <div className="rounded-2xl border border-teal-400/25 bg-teal-500/10 p-3 flex min-h-0 flex-col">
                   <div className="mb-2 flex items-center justify-between">
                     <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-teal-100">{'\u6267\u884c\u5217\u8868'}</h4>
                     <span className="text-[10px] font-semibold text-teal-200">{executableTasks.length}</span>
@@ -2172,8 +2225,8 @@ export default function App() {
                   {executableTasks.length === 0 ? (
                     <p className="text-[11px] text-teal-100/70">{'\u6682\u65e0\u53ef\u6267\u884c\u4efb\u52a1\uff08\u7b49\u5f85\u524d\u7f6e\u4efb\u52a1\u5b8c\u6210\uff09\u3002'}</p>
                   ) : (
-                    <div className="space-y-2">
-                      {executableTasks.slice(0, 5).map((task) => (
+                    <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto pr-1 max-h-[22rem]">
+                      {executableTasks.map((task) => (
                         <div key={`ready-top-${task.id}`} className="rounded-xl border border-teal-300/20 bg-slate-900/50 px-3 py-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <button
@@ -2850,7 +2903,7 @@ export default function App() {
                         <div key={dimension} className="flex items-center justify-between rounded-lg border border-violet-300/20 bg-slate-950/60 px-2 py-1.5">
                           <div>
                             <p className="text-xs font-semibold text-violet-100">{dimension}</p>
-                            <p className="text-[10px] text-violet-100/70">当前能力值 {abilityScores[dimension] || 0}</p>
+                            <p className="text-[10px] text-violet-100/70">当前能力值 {formatMetricValue(liveAbilityScores[dimension] || 0)}</p>
                           </div>
                           <button
                             onClick={() => removeAbilityDimension(dimension)}

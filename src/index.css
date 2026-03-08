@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Bree+Serif&family=Fira+Code:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600;700&family=Nunito:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 :root {
@@ -107,6 +107,55 @@
   --task-point-meta: rgba(101, 112, 132, 0.92);
 }
 
+[data-theme="stardew"] {
+  --font-ui: "Nunito", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-display: "Bree Serif", "IBM Plex Mono", serif;
+  --font-mono: "IBM Plex Mono", "Fira Code", "SFMono-Regular", Consolas, monospace;
+  --bg-0: #16324f;
+  --bg-1: #255978;
+  --bg-2: #345145;
+  --panel-bg: rgba(31, 49, 72, 0.82);
+  --panel-bg-elevated: rgba(39, 59, 84, 0.92);
+  --panel-border: rgba(238, 205, 122, 0.28);
+  --text-primary: #f7efd6;
+  --text-secondary: #ddd2b7;
+  --text-strong: #fff9e8;
+  --text-muted: #c8bb99;
+  --accent: #e9c46a;
+  --accent-strong: #dba94a;
+  --accent-warm: #f08a4b;
+  --shell-bg:
+    radial-gradient(980px 540px at 50% -8%, rgba(250, 218, 122, 0.2), transparent 46%),
+    radial-gradient(720px 420px at 10% 14%, rgba(110, 169, 218, 0.22), transparent 58%),
+    radial-gradient(880px 560px at 90% 8%, rgba(255, 168, 106, 0.16), transparent 58%),
+    linear-gradient(180deg, #1f4167 0%, #245b76 44%, #335748 76%, #263b31 100%);
+  --surface-soft: rgba(67, 49, 35, 0.42);
+  --surface-muted: rgba(77, 58, 40, 0.56);
+  --surface-raised: rgba(88, 64, 40, 0.7);
+  --surface-border: rgba(244, 217, 142, 0.18);
+  --brand-bg: linear-gradient(180deg, rgba(117, 76, 42, 0.96), rgba(73, 48, 29, 0.96));
+  --brand-border: rgba(244, 217, 142, 0.34);
+  --theme-chip-bg: rgba(89, 62, 39, 0.84);
+  --theme-chip-border: rgba(244, 217, 142, 0.2);
+  --theme-chip-text: #fff3cf;
+  --grid-bg: rgba(29, 45, 66, 0.88);
+  --grid-line: rgba(245, 224, 169, 0.14);
+  --axis-line: rgba(255, 223, 135, 0.28);
+  --axis-label-bg: rgba(77, 56, 38, 0.86);
+  --axis-label-border: rgba(244, 217, 142, 0.26);
+  --axis-label-text: #fff3cf;
+  --quad-nw: radial-gradient(circle at 26% 26%, rgba(255, 226, 144, 0.22), transparent 74%);
+  --quad-ne: radial-gradient(circle at 74% 24%, rgba(142, 205, 255, 0.18), transparent 72%);
+  --quad-sw: radial-gradient(circle at 28% 76%, rgba(124, 197, 139, 0.18), transparent 74%);
+  --quad-se: radial-gradient(circle at 74% 76%, rgba(255, 166, 122, 0.16), transparent 72%);
+  --task-point-shell-bg: rgba(187, 78, 57, 0.94);
+  --task-point-shell-border: rgba(255, 229, 180, 0.42);
+  --task-point-label-bg: rgba(77, 56, 38, 0.92);
+  --task-point-label-border: rgba(244, 217, 142, 0.3);
+  --task-point-title: #fff3d1;
+  --task-point-meta: rgba(250, 236, 204, 0.82);
+}
+
 html {
   font-size: 16px;
 }
@@ -177,6 +226,44 @@ body {
 }
 
 .theme-toggle:hover {
+  background: color-mix(in srgb, var(--theme-chip-bg) 86%, white 14%);
+}
+
+.theme-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.28rem;
+  border: 1px solid var(--theme-chip-border);
+  border-radius: 999px;
+  background: var(--theme-chip-bg);
+  box-shadow: 0 10px 24px rgba(2, 14, 20, 0.18);
+  backdrop-filter: blur(12px);
+}
+
+.theme-switcher-compact {
+  gap: 0.18rem;
+  padding: 0.2rem;
+}
+
+.theme-segment {
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--theme-chip-text);
+  cursor: pointer;
+}
+
+.theme-segment[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--theme-chip-bg));
+  color: var(--text-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 8px 16px rgba(2, 14, 20, 0.16);
+}
+
+.theme-segment[data-active="false"]:hover {
   background: color-mix(in srgb, var(--theme-chip-bg) 86%, white 14%);
 }
 
@@ -736,6 +823,10 @@ select {
   box-shadow: 0 10px 24px rgba(111, 126, 151, 0.08);
 }
 
+[data-theme="day"] .theme-switcher {
+  box-shadow: 0 10px 24px rgba(111, 126, 151, 0.08);
+}
+
 [data-theme="day"] .rounded-2xl,
 [data-theme="day"] .rounded-xl,
 [data-theme="day"] .rounded-lg {
@@ -745,6 +836,17 @@ select {
 [data-theme="day"] .text-white,
 [data-theme="day"] .text-slate-100,
 [data-theme="day"] .text-slate-200 {
+  color: var(--text-strong) !important;
+}
+
+[data-theme="day"] [class*="text-white"],
+[data-theme="day"] [class*="text-violet-50"],
+[data-theme="day"] [class*="text-violet-100"],
+[data-theme="day"] [class*="text-emerald-100"],
+[data-theme="day"] [class*="text-cyan-100"],
+[data-theme="day"] [class*="text-teal-100"],
+[data-theme="day"] [class*="text-amber-100"],
+[data-theme="day"] [class*="text-rose-100"] {
   color: var(--text-strong) !important;
 }
 
@@ -1007,6 +1109,59 @@ select {
   background:
     radial-gradient(circle at 50% 24%, rgba(255, 255, 255, 0.82), transparent 38%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(245, 248, 247, 0.9));
+}
+
+[data-theme="stardew"] .glass-panel {
+  background: linear-gradient(180deg, rgba(34, 54, 78, 0.86) 0%, rgba(64, 46, 30, 0.76) 100%);
+  border-color: rgba(241, 208, 125, 0.26);
+  box-shadow:
+    0 18px 36px rgba(22, 29, 41, 0.34),
+    inset 0 1px 0 rgba(255, 242, 204, 0.1);
+}
+
+[data-theme="stardew"] .glass-modal {
+  background: linear-gradient(180deg, rgba(39, 59, 84, 0.96) 0%, rgba(78, 55, 36, 0.92) 100%);
+  border-color: rgba(241, 208, 125, 0.28);
+  box-shadow:
+    0 26px 54px rgba(18, 24, 35, 0.44),
+    inset 0 1px 0 rgba(255, 242, 204, 0.12);
+}
+
+[data-theme="stardew"] .brand-shell {
+  background: linear-gradient(180deg, rgba(126, 82, 44, 0.98), rgba(81, 52, 30, 0.98));
+  border-color: rgba(244, 217, 142, 0.34);
+  box-shadow:
+    0 18px 30px rgba(29, 21, 15, 0.28),
+    inset 0 1px 0 rgba(255, 240, 198, 0.18) !important;
+}
+
+[data-theme="stardew"] .brand-shell h1 {
+  font-family: var(--font-display);
+  color: #fff0be !important;
+}
+
+[data-theme="stardew"] .brand-shell p {
+  font-family: var(--font-display);
+  letter-spacing: 0.16em !important;
+  color: #ffd47b !important;
+}
+
+[data-theme="stardew"] .motivation-stage {
+  background:
+    radial-gradient(circle at 50% 24%, rgba(255, 244, 212, 0.16), transparent 40%),
+    linear-gradient(180deg, rgba(22, 38, 56, 0.68), rgba(82, 56, 36, 0.84));
+}
+
+[data-theme="stardew"] .task-point-shell {
+  box-shadow:
+    0 0 0 6px rgba(255, 188, 120, 0.08),
+    0 12px 24px rgba(33, 23, 18, 0.24);
+}
+
+[data-theme="stardew"] .task-point-label {
+  box-shadow:
+    0 18px 30px rgba(18, 24, 35, 0.22),
+    inset 0 1px 0 rgba(255, 238, 196, 0.12);
 }
 
 ::-webkit-scrollbar {
