@@ -252,6 +252,34 @@ function getUserTasksFile(username) {
   return path.join(dataDir, 'users', safeUser, 'tasks.json');
 }
 
+function normalizeAbilityModule(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return {
+      active_module_id: 'special:mokugyo',
+      special_totals: {},
+      tracked_ms_baseline: 0,
+      updated_at: Date.now(),
+    };
+  }
+
+  return {
+    active_module_id: typeof payload.active_module_id === 'string' && payload.active_module_id.trim()
+      ? payload.active_module_id.trim()
+      : 'special:mokugyo',
+    special_totals: payload.special_totals && typeof payload.special_totals === 'object'
+      ? Object.fromEntries(
+          Object.entries(payload.special_totals)
+            .filter(([key, value]) => typeof key === 'string' && Number.isFinite(Number(value)))
+            .map(([key, value]) => [key, Math.max(0, Number(value))])
+        )
+      : {},
+    tracked_ms_baseline: Number.isFinite(Number(payload.tracked_ms_baseline))
+      ? Math.max(0, Number(payload.tracked_ms_baseline))
+      : 0,
+    updated_at: Number.isFinite(Number(payload.updated_at)) ? Number(payload.updated_at) : Date.now(),
+  };
+}
+
 function normalizeTaskPayload(payload) {
   if (Array.isArray(payload)) {
     return {
@@ -261,6 +289,7 @@ function normalizeTaskPayload(payload) {
         daily_checkins: {},
         daily_rest_sessions: {},
       },
+      ability_module: normalizeAbilityModule(null),
     };
   }
   if (payload && typeof payload === 'object') {
@@ -316,6 +345,7 @@ function normalizeTaskPayload(payload) {
             daily_checkins: {},
             daily_rest_sessions: {},
           },
+      ability_module: normalizeAbilityModule(payload.ability_module),
     };
   }
   return {
@@ -325,6 +355,7 @@ function normalizeTaskPayload(payload) {
       daily_checkins: {},
       daily_rest_sessions: {},
     },
+    ability_module: normalizeAbilityModule(null),
   };
 }
 

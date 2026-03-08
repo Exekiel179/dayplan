@@ -3,8 +3,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus,
   X,
+  Brain,
   CheckCircle2,
   Circle,
+  CircleDollarSign,
+  Coins,
   GripVertical,
   Sparkles,
   ChevronRight,
@@ -32,6 +35,7 @@ import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import {
+  AbilityModuleSettings,
   DailyEnergyCheckin,
   DailyRestSession,
   LongTermCadence,
@@ -68,6 +72,43 @@ const COLLABORATION_LEVEL_OPTIONS: { value: TaskCollaborationLevel; label: strin
   { value: 'high', label: '协作程度高' },
 ];
 type AppTheme = 'night' | 'day';
+type AbilityModuleOption = {
+  id: string;
+  label: string;
+  description: string;
+  unit: string;
+  kind: 'ability' | 'special';
+  gainPerHour?: number;
+};
+
+const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
+  {
+    id: 'special:mokugyo',
+    label: '木鱼',
+    description: '任务计时中自动敲木鱼，持续累计功德点。',
+    unit: '功德点',
+    kind: 'special',
+    gainPerHour: 108,
+  },
+  {
+    id: 'special:caishen',
+    label: '财神爷',
+    description: '任务计时中自动积累财富值，把专注时间转成可见收益。',
+    unit: '财富',
+    kind: 'special',
+    gainPerHour: 188,
+  },
+];
+const DEFAULT_ABILITY_GAIN_PER_HOUR = 36;
+
+function createDefaultAbilityModuleSettings(): AbilityModuleSettings {
+  return {
+    active_module_id: 'special:mokugyo',
+    special_totals: {},
+    tracked_ms_baseline: 0,
+    updated_at: Date.now(),
+  };
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -120,6 +161,68 @@ function normalizeTrackingAccumulatedMs(value: unknown) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return 0;
   return Math.round(numeric);
+}
+
+function normalizeAbilityModule(value: unknown): AbilityModuleSettings {
+  if (!value || typeof value !== 'object') return createDefaultAbilityModuleSettings();
+  const raw = value as Partial<AbilityModuleSettings>;
+  const specialTotals = raw.special_totals && typeof raw.special_totals === 'object'
+    ? Object.entries(raw.special_totals as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, amount]) => {
+        const numeric = Number(amount);
+        if (!key.trim() || !Number.isFinite(numeric) || numeric < 0) return acc;
+        acc[key] = numeric;
+        return acc;
+      }, {})
+    : {};
+
+  return {
+    active_module_id: typeof raw.active_module_id === 'string' && raw.active_module_id.trim()
+      ? raw.active_module_id.trim()
+      : 'special:mokugyo',
+    special_totals: specialTotals,
+    tracked_ms_baseline: normalizeTrackingAccumulatedMs(raw.tracked_ms_baseline),
+    updated_at: Number.isFinite(Number(raw.updated_at)) ? Number(raw.updated_at) : Date.now(),
+  };
+}
+
+function buildAbilityModuleId(dimension: string) {
+  return `ability:${dimension}`;
+}
+
+function getAbilityDimensionFromModuleId(moduleId: string) {
+  return moduleId.startsWith('ability:') ? moduleId.slice('ability:'.length) : '';
+}
+
+function getSpecialAbilityModule(moduleId: string) {
+  return SPECIAL_ABILITY_MODULES.find((module) => module.id === moduleId) || null;
+}
+
+function buildAbilityModuleOptions(abilityDimensions: string[]): AbilityModuleOption[] {
+  return [
+    ...abilityDimensions.map((dimension) => ({
+      id: buildAbilityModuleId(dimension),
+      label: dimension,
+      description: '任务计时时会持续推动这个能力维度上涨，适合把专注时间沉淀成明确成长。',
+      unit: 'OA',
+      kind: 'ability' as const,
+      gainPerHour: DEFAULT_ABILITY_GAIN_PER_HOUR,
+    })),
+    ...SPECIAL_ABILITY_MODULES,
+  ];
+}
+
+function getMotivationMode(moduleId: string) {
+  if (moduleId === 'special:caishen') return 'special:caishen';
+  if (moduleId === 'special:mokugyo') return 'special:mokugyo';
+  return 'ability';
+}
+
+function formatMetricValue(value: number) {
+  if (!Number.isFinite(value)) return '0';
+  if (Math.abs(value - Math.round(value)) < 0.01) {
+    return Math.round(value).toLocaleString('zh-CN');
+  }
+  return value.toFixed(1);
 }
 
 function normalizeRecoveredEnergy(value: unknown) {
@@ -490,6 +593,7 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
       tasks,
       ability_dimensions: collectAbilityDimensions(tasks),
       wellbeing: { daily_checkins: {}, daily_rest_sessions: {} },
+      ability_module: createDefaultAbilityModuleSettings(),
     };
   }
   if (payload && typeof payload === 'object') {
@@ -508,9 +612,15 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
       tasks,
       ability_dimensions: [...merged],
       wellbeing: normalizeWellbeing(raw.wellbeing),
+      ability_module: normalizeAbilityModule(raw.ability_module),
     };
   }
-  return { tasks: [], ability_dimensions: [], wellbeing: { daily_checkins: {}, daily_rest_sessions: {} } };
+  return {
+    tasks: [],
+    ability_dimensions: [],
+    wellbeing: { daily_checkins: {}, daily_rest_sessions: {} },
+    ability_module: createDefaultAbilityModuleSettings(),
+  };
 }
 
 function formatDateTime(ts?: number | null) {
@@ -743,6 +853,7 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [abilityDimensions, setAbilityDimensions] = useState<string[]>([]);
   const [wellbeing, setWellbeing] = useState<WellbeingSettings>({ daily_checkins: {}, daily_rest_sessions: {} });
+  const [abilityModule, setAbilityModule] = useState<AbilityModuleSettings>(createDefaultAbilityModuleSettings());
   const [newAbilityDimension, setNewAbilityDimension] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
@@ -750,6 +861,9 @@ export default function App() {
   const [isPlacementMode, setIsPlacementMode] = useState(false);
   const [isSideNavOpen, setIsSideNavOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true));
   const [isSuggestionOpen, setIsSuggestionOpen] = useState(true);
+  const [isTopBoardCollapsed, setIsTopBoardCollapsed] = useState(false);
+  const [isMotivationPanelOpen, setIsMotivationPanelOpen] = useState(false);
+  const [topTaskPanelView, setTopTaskPanelView] = useState<'execution' | 'directory'>('execution');
   const [sideNavWidth, setSideNavWidth] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
@@ -761,6 +875,7 @@ export default function App() {
 
   const quadrantRef = useRef<HTMLDivElement>(null);
   const hasHydratedRef = useRef(false);
+  const topBoardDragStateRef = useRef<{ startY: number; collapsed: boolean } | null>(null);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -776,6 +891,7 @@ export default function App() {
     setTasks([]);
     setAbilityDimensions([]);
     setWellbeing({ daily_checkins: {}, daily_rest_sessions: {} });
+    setAbilityModule(createDefaultAbilityModuleSettings());
     setSelectedTask(null);
     setIsLoadingTasks(false);
     setStorageError('');
@@ -788,6 +904,7 @@ export default function App() {
   const archivedTasks = tasks.filter((task) => task.status === 'completed');
   const longTermTasks = activeTasks.filter((task) => task.timeline === 'long_term');
   const runningTasks = activeTasks.filter((task) => Boolean(task.tracking_started_at));
+  const totalTrackedMsAllTasks = tasks.reduce((sum, task) => sum + getTrackedMs(task, nowTs), 0);
   const taskById = new Map(tasks.map((task) => [task.id, task]));
 
   const isDependencySatisfied = (dependencyTask?: Task) => {
@@ -809,6 +926,7 @@ export default function App() {
     const urgB = 100 - getTaskRenderY(b, nowTs);
     return (impB * urgB) - (impA * urgA);
   });
+  const topDirectoryTasks = sortedTasks.slice(0, 6);
 
   const executableTasks = activeTasks.filter((task) => isTaskReady(task) && isLongTermDue(task, nowTs));
   const blockedTasks = activeTasks.filter((task) => !isTaskReady(task) || !isLongTermDue(task, nowTs));
@@ -882,7 +1000,7 @@ export default function App() {
     isResting: todayRestSession.is_resting,
   });
 
-  const abilityScores = abilityDimensions.reduce<Record<string, number>>((acc, dim) => {
+  const baseAbilityScores = abilityDimensions.reduce<Record<string, number>>((acc, dim) => {
     acc[dim] = 0;
     return acc;
   }, {});
@@ -890,22 +1008,87 @@ export default function App() {
     const gains = task.ability_gains || {};
     const completionTimes = Math.max(0, task.completion_count || 0);
     Object.entries(gains).forEach(([dim, gain]) => {
-      if (!(dim in abilityScores)) {
-        abilityScores[dim] = 0;
+      if (!(dim in baseAbilityScores)) {
+        baseAbilityScores[dim] = 0;
       }
-      abilityScores[dim] += completionTimes * Math.max(0, Math.floor(gain));
+      baseAbilityScores[dim] += completionTimes * Math.max(0, Math.floor(gain));
     });
   });
+  const abilityScores = Object.fromEntries(
+    Object.entries(baseAbilityScores).map(([dim, value]) => [
+      dim,
+      value + (abilityModule.special_totals[buildAbilityModuleId(dim)] || 0),
+    ])
+  );
   const abilityTotalScore = Object.values(abilityScores).reduce((sum, value) => sum + value, 0);
   const abilityHighlights = Object.entries(abilityScores)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4);
+  const abilityModuleOptions = buildAbilityModuleOptions(abilityDimensions);
+  const abilityDimensionModules = abilityModuleOptions.filter((module) => module.kind === 'ability');
+  const activeAbilityModule = abilityModuleOptions.find((module) => module.id === abilityModule.active_module_id) || abilityModuleOptions[0] || SPECIAL_ABILITY_MODULES[0];
+  const activeAbilityDimension = getAbilityDimensionFromModuleId(activeAbilityModule?.id || '');
+  const activeMotivationMode = getMotivationMode(activeAbilityModule?.id || '');
+  const activeSpecialAbilityModule = getSpecialAbilityModule(activeAbilityModule?.id || '');
+  const activeModuleGainPerHour = activeAbilityModule?.gainPerHour || 0;
+  const activeModuleStoredScore = abilityModule.special_totals[activeAbilityModule?.id || ''] || 0;
+  const activeModuleLiveGain = Math.max(0, totalTrackedMsAllTasks - abilityModule.tracked_ms_baseline) / 3600000 * activeModuleGainPerHour;
+  const activeAbilityModuleScore = activeSpecialAbilityModule
+    ? activeModuleStoredScore + activeModuleLiveGain
+    : (abilityScores[activeAbilityDimension] || 0) + activeModuleLiveGain;
+  const statusSummary = pressureScore >= 70
+    ? (energyScore >= 60 ? '高压高能，适合短冲刺推进' : '高压低能，优先降载和缓冲')
+    : (energyScore >= 60 ? '状态良好，可以先吃掉高价值任务' : '低压低能，适合整理和恢复');
+  const getAbilityModuleDisplayValue = (moduleId: string) => {
+    const module = abilityModuleOptions.find((item) => item.id === moduleId);
+    const baseValue = abilityModule.special_totals[moduleId] || 0;
+    const liveGain = moduleId === activeAbilityModule?.id
+      ? Math.max(0, totalTrackedMsAllTasks - abilityModule.tracked_ms_baseline) / 3600000 * (module?.gainPerHour || 0)
+      : 0;
+    const specialModule = getSpecialAbilityModule(moduleId);
+    if (specialModule) {
+      return baseValue + liveGain;
+    }
+    return (abilityScores[getAbilityDimensionFromModuleId(moduleId)] || 0) + liveGain;
+  };
+  const motivationModeOptions = [
+    { id: 'ability', label: '能力成长', disabled: abilityDimensionModules.length === 0 },
+    { id: 'special:mokugyo', label: '木鱼激励', disabled: false },
+    { id: 'special:caishen', label: '财神激励', disabled: false },
+  ] as const;
+  const isExecutionSparse = runningTasks.length === 0 && executableTasks.length === 0;
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNowTs(Date.now());
     }, 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      const dragState = topBoardDragStateRef.current;
+      if (!dragState) return;
+      const deltaY = event.clientY - dragState.startY;
+      if (dragState.collapsed && deltaY > 34) {
+        setIsTopBoardCollapsed(false);
+        topBoardDragStateRef.current = null;
+      } else if (!dragState.collapsed && deltaY < -34) {
+        setIsTopBoardCollapsed(true);
+        topBoardDragStateRef.current = null;
+      }
+    };
+
+    const handleMouseUp = () => {
+      topBoardDragStateRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
   }, []);
 
   // Track mouse for placement mode
@@ -999,6 +1182,7 @@ export default function App() {
         setTasks(loadedData.tasks);
         setAbilityDimensions(loadedData.ability_dimensions);
         setWellbeing(loadedData.wellbeing);
+        setAbilityModule(loadedData.ability_module);
         setStorageError('');
       })
       .catch((e) => {
@@ -1035,6 +1219,7 @@ export default function App() {
         tasks,
         ability_dimensions: abilityDimensions,
         wellbeing,
+        ability_module: abilityModule,
       }, authToken)
         .then(() => setStorageError(''))
         .catch((e) => {
@@ -1049,7 +1234,27 @@ export default function App() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [tasks, abilityDimensions, wellbeing, isLoadingTasks, authToken]);
+  }, [tasks, abilityDimensions, wellbeing, abilityModule, isLoadingTasks, authToken]);
+
+  useEffect(() => {
+    if (abilityModule.tracked_ms_baseline <= totalTrackedMsAllTasks) return;
+    setAbilityModule((prev) => ({
+      ...prev,
+      tracked_ms_baseline: totalTrackedMsAllTasks,
+      updated_at: Date.now(),
+    }));
+  }, [abilityModule.tracked_ms_baseline, totalTrackedMsAllTasks]);
+
+  useEffect(() => {
+    const fallbackModuleId = abilityModuleOptions[0]?.id || 'special:mokugyo';
+    if (abilityModuleOptions.some((module) => module.id === abilityModule.active_module_id)) return;
+    setAbilityModule((prev) => ({
+      ...prev,
+      active_module_id: fallbackModuleId,
+      tracked_ms_baseline: totalTrackedMsAllTasks,
+      updated_at: Date.now(),
+    }));
+  }, [abilityModule.active_module_id, abilityModuleOptions, totalTrackedMsAllTasks]);
 
   const handleAddTask = () => {
     setIsPlacementMode(true);
@@ -1121,6 +1326,42 @@ export default function App() {
     });
   };
 
+  const settleAbilityModuleProgress = (nextModuleId?: string, settledAt = Date.now()) => {
+    const trackedMsAtMoment = tasks.reduce((sum, task) => sum + getTrackedMs(task, settledAt), 0);
+    setAbilityModule((prev) => {
+      const nextTotals = { ...(prev.special_totals || {}) };
+      const activeModuleOption = buildAbilityModuleOptions(abilityDimensions).find((module) => module.id === prev.active_module_id);
+      const delta = Math.max(0, trackedMsAtMoment - prev.tracked_ms_baseline) / 3600000 * (activeModuleOption?.gainPerHour || 0);
+      if (delta > 0 && activeModuleOption) {
+        nextTotals[activeModuleOption.id] = Number(((nextTotals[activeModuleOption.id] || 0) + delta).toFixed(2));
+      }
+
+      return {
+        active_module_id: nextModuleId ?? prev.active_module_id,
+        special_totals: nextTotals,
+        tracked_ms_baseline: trackedMsAtMoment,
+        updated_at: settledAt,
+      };
+    });
+  };
+
+  const switchAbilityModule = (moduleId: string) => {
+    if (moduleId === abilityModule.active_module_id) return;
+    settleAbilityModuleProgress(moduleId);
+  };
+
+  const switchMotivationMode = (modeId: 'ability' | 'special:mokugyo' | 'special:caishen') => {
+    if (modeId === 'ability') {
+      if (abilityDimensionModules.length === 0) return;
+      const nextAbilityModuleId = activeMotivationMode === 'ability'
+        ? activeAbilityModule.id
+        : abilityDimensionModules[0].id;
+      switchAbilityModule(nextAbilityModuleId);
+      return;
+    }
+    switchAbilityModule(modeId);
+  };
+
   const toggleTaskTracking = (task: Task) => {
     const now = Date.now();
     const nextTask = task.tracking_started_at
@@ -1137,6 +1378,7 @@ export default function App() {
 
   const toggleRestMode = () => {
     const now = Date.now();
+    settleAbilityModuleProgress(undefined, now);
     setTasks((prev) => prev.map((task) => stopTrackingTaskState(task, now)));
     setSelectedTask((prev) => (prev ? stopTrackingTaskState(prev, now) : prev));
     setWellbeing((prev) => {
@@ -1157,7 +1399,7 @@ export default function App() {
         : {
             is_resting: true,
             started_at: now,
-            recovered_energy,
+            recovered_energy: recoveredEnergy,
             updated_at: now,
           };
 
@@ -1384,6 +1626,70 @@ export default function App() {
   const selectedTaskReady = selectedTask ? isTaskReady(selectedTask) : false;
   const selectedTaskIsPersisted = selectedTask ? tasks.some((task) => task.id === selectedTask.id) : false;
 
+  const renderMotivationScene = () => {
+    if (activeMotivationMode === 'special:mokugyo') {
+      return (
+        <div className="motivation-stage motivation-stage-mokugyo">
+          <div className="motivation-glow motivation-glow-mokugyo" />
+          <div className="mokugyo-scene">
+            <div className="mokugyo-aura" />
+            <div className="mokugyo-shell">
+              <div className="mokugyo-shell-core" />
+            </div>
+            <div className="mokugyo-base" />
+            <div className="mokugyo-mallet">
+              <div className="mokugyo-mallet-stick" />
+              <div className="mokugyo-mallet-head" />
+            </div>
+            <span className="mokugyo-pulse mokugyo-pulse-1" />
+            <span className="mokugyo-pulse mokugyo-pulse-2" />
+            <span className="mokugyo-pulse mokugyo-pulse-3" />
+          </div>
+        </div>
+      );
+    }
+
+    if (activeMotivationMode === 'special:caishen') {
+      return (
+        <div className="motivation-stage motivation-stage-caishen">
+          <div className="motivation-glow motivation-glow-caishen" />
+          <div className="caishen-scene">
+            <div className="caishen-avatar">
+              <div className="caishen-halo" />
+              <div className="caishen-head">
+                <CircleDollarSign className="h-8 w-8" />
+              </div>
+              <div className="caishen-body" />
+            </div>
+            <div className="coin-burst coin-burst-1"><Coins className="h-4 w-4" /></div>
+            <div className="coin-burst coin-burst-2"><Coins className="h-5 w-5" /></div>
+            <div className="coin-burst coin-burst-3"><Coins className="h-4 w-4" /></div>
+            <div className="coin-burst coin-burst-4"><Coins className="h-5 w-5" /></div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="motivation-stage motivation-stage-ability">
+        <div className="motivation-glow motivation-glow-ability" />
+        <div className="brain-scene">
+          <div className="brain-core">
+            <Brain className="h-10 w-10" />
+          </div>
+          <span className="brain-up brain-up-1" />
+          <span className="brain-up brain-up-2" />
+          <span className="brain-up brain-up-3" />
+          <span className="brain-up brain-up-4" />
+        </div>
+        <div className="mt-3 text-center">
+          <div className="text-sm font-semibold text-violet-50">{activeAbilityDimension || '能力成长'}</div>
+          <div className="text-[11px] text-violet-100/75">大脑持续抬升，能力值稳步累积</div>
+        </div>
+      </div>
+    );
+  };
+
   if (isAuthChecking) {
     return (
       <div className="app-shell min-h-screen text-slate-100 flex items-center justify-center">
@@ -1558,21 +1864,72 @@ export default function App() {
         </div>
       </div>
 
-      <section
-        className={cn(
-          "z-10 grid gap-3 border-b border-white/[0.08] bg-slate-950/70 px-4 py-3 sm:px-6",
-          isSuggestionOpen
-            ? "xl:grid-cols-[minmax(0,1.75fr)_minmax(340px,0.95fr)]"
-            : "xl:grid-cols-[minmax(0,1fr)_84px]"
-        )}
-      >
+      <div className="z-10 border-b border-white/[0.08] bg-slate-950/70">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setIsTopBoardCollapsed((prev) => !prev)}
+          onMouseDown={(event) => {
+            topBoardDragStateRef.current = {
+              startY: event.clientY,
+              collapsed: isTopBoardCollapsed,
+            };
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              setIsTopBoardCollapsed((prev) => !prev);
+            }
+          }}
+          className="mx-4 mt-3 flex cursor-row-resize items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-[11px] font-semibold text-slate-300 transition-colors hover:bg-white/[0.05] sm:mx-6"
+        >
+          <span className="h-1.5 w-14 rounded-full bg-white/15" />
+          <span>{isTopBoardCollapsed ? '向下拉出状态板' : '向上折叠状态板'}</span>
+          <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isTopBoardCollapsed ? "rotate-90" : "-rotate-90")} />
+        </div>
+
+        <AnimatePresence initial={false} mode="wait">
+          {isTopBoardCollapsed ? (
+            <motion.div
+              key="top-board-collapsed"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="px-4 pb-3 pt-2 sm:px-6"
+            >
+              <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3">
+                <span className="rounded-xl border border-white/10 bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-slate-300">{todayKey}</span>
+                <span className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-100">起始精力 {todayInitialEnergy}</span>
+                <span className={cn("rounded-xl border px-2.5 py-1 text-[11px] font-semibold", pressureTone.card)}>{pressureTone.label} {pressureScore}</span>
+                <span className={cn("rounded-xl border px-2.5 py-1 text-[11px] font-semibold", energyTone.card)}>{energyTone.label} {energyScore}</span>
+                <span className="rounded-xl border border-violet-300/25 bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-100">
+                  {activeAbilityModule?.label || '木鱼'} {formatMetricValue(activeAbilityModuleScore)} {activeAbilityModule?.unit || 'OA'}
+                </span>
+                <span className="rounded-xl border border-cyan-300/25 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-100">
+                  {todayRestSession.is_resting ? '休息模式中' : `${runningTasks.length} 个任务计时中`}
+                </span>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.section
+              key="top-board-expanded"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className={cn(
+                "grid gap-2.5 overflow-hidden px-4 py-3 xl:items-stretch sm:px-6",
+                isSuggestionOpen
+                  ? "xl:grid-cols-[minmax(0,1.74fr)_minmax(300px,0.9fr)]"
+                  : "xl:grid-cols-[minmax(0,1fr)_84px]"
+              )}
+            >
         <div className="grid gap-3 content-start">
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">今夜状态总览</p>
-                <h3 className="mt-1 text-lg font-bold text-white">精力、压力与能力 OA</h3>
-                <p className="mt-1 text-[11px] text-slate-400">把关键状态集中看，减少视线跳转。</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{'\u4eca\u591c\u72b6\u6001\u603b\u89c8'}</p>
+                <h3 className="mt-1 text-lg font-bold text-white">{'\u7cbe\u529b\u3001\u538b\u529b\u4e0e\u6fc0\u52b1\u6a21\u5757'}</h3>
+                <p className="mt-1 text-[11px] text-slate-400">{'\u4fdd\u6301\u53d1\u5e03\u7248\u7684\u9605\u8bfb\u987a\u5e8f\uff0c\u53ea\u628a\u6fc0\u52b1\u673a\u5236\u548c\u771f\u5b9e\u7d2f\u8ba1\u63a5\u8fdb\u6765\u3002'}</p>
               </div>
               <span className="rounded-xl border border-white/10 bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
                 {todayKey}
@@ -1583,10 +1940,10 @@ export default function App() {
               <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">起始精力与能力 OA</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{'\u8d77\u59cb\u7cbe\u529b\u4e0e\u6fc0\u52b1\u6a21\u5757'}</p>
                     <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
                       <BatteryMedium className="h-4 w-4 text-emerald-300" />
-                      先校准状态，再看能力积累
+                      {'\u5148\u6821\u51c6\u72b6\u6001\uff0c\u518d\u770b\u5f53\u524d\u6fc0\u52b1\u79ef\u7d2f'}
                     </h4>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1594,7 +1951,7 @@ export default function App() {
                       {todayInitialEnergy}
                     </span>
                     <span className="rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1 text-lg font-bold text-violet-100">
-                      OA {abilityTotalScore}
+                      {formatMetricValue(activeAbilityModuleScore)} {activeAbilityModule?.unit || 'OA'}
                     </span>
                   </div>
                 </div>
@@ -1607,32 +1964,57 @@ export default function App() {
                   className="mt-4 w-full accent-emerald-400"
                 />
                 <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-                  <span>低电量</span>
+                  <span>{'\u4f4e\u7535\u91cf'}</span>
                   <span>{todayKey}</span>
-                  <span>高状态</span>
+                  <span>{'\u9ad8\u72b6\u6001'}</span>
                 </div>
                 <div className="mt-4 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">能力 OA</p>
-                      <h5 className="mt-1 text-sm font-semibold text-white">当前累计能力</h5>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{'\u6fc0\u52b1\u6a21\u5757'}</p>
+                      <h5 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                        <Sparkles className="h-4 w-4 text-violet-200" />
+                        {activeAbilityModule?.label || '\u6728\u9c7c'}
+                      </h5>
                     </div>
-                    <span className="rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1 text-base font-bold text-violet-100">
-                      {abilityTotalScore}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsMotivationPanelOpen(true)}
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-violet-300/30 bg-violet-500/15 px-2.5 py-1.5 text-[10px] font-bold text-violet-100 transition-colors hover:bg-violet-500/25"
+                    >
+                      <ChevronRight className="h-3 w-3" />
+                      {'\u8bbe\u7f6e'}
+                    </button>
                   </div>
-                  {abilityHighlights.length === 0 ? (
-                    <p className="mt-3 text-[11px] text-violet-100/75">还没有能力维度，去任务清单里加一个后这里会自动汇总。</p>
-                  ) : (
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                      {abilityHighlights.map(([name, value]) => (
-                        <div key={`ability-top-${name}`} className="rounded-xl border border-violet-300/25 bg-slate-950/60 px-3 py-2">
-                          <div className="text-[11px] font-semibold text-violet-50">{name}</div>
-                          <div className="mt-1 text-lg font-bold text-white">{value}</div>
-                        </div>
-                      ))}
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[170px_minmax(0,1fr)] lg:items-center">
+                    <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/35">
+                      {renderMotivationScene()}
                     </div>
-                  )}
+                    <div className="grid gap-2">
+                      <p className="text-[11px] leading-5 text-violet-100/80">
+                        {activeAbilityModule?.description || '\u4efb\u52a1\u8ba1\u65f6\u65f6\u4f1a\u628a\u4e13\u6ce8\u65f6\u95f4\u8f6c\u6210\u5f53\u524d\u6fc0\u52b1\u6a21\u5757\u7684\u5b9e\u9645\u589e\u957f\u3002'}
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="rounded-xl border border-violet-300/20 bg-slate-950/60 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100/70">{'\u5f53\u524d\u6a21\u5757'}</div>
+                          <div className="mt-1 text-sm font-bold text-white">{activeAbilityModule?.label || '\u6728\u9c7c'}</div>
+                        </div>
+                        <div className="rounded-xl border border-violet-300/20 bg-slate-950/60 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100/70">{'\u5b9e\u65f6\u589e\u957f'}</div>
+                          <div className="mt-1 text-sm font-bold text-white">+{formatMetricValue(activeModuleLiveGain)}</div>
+                        </div>
+                        <div className="rounded-xl border border-violet-300/20 bg-slate-950/60 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100/70">{'\u7d2f\u8ba1\u503c'}</div>
+                          <div className="mt-1 text-sm font-bold text-white">{formatMetricValue(activeAbilityModuleScore)}</div>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-[11px] leading-5 text-violet-100/80">
+                        {activeAbilityModule?.gainPerHour || DEFAULT_ABILITY_GAIN_PER_HOUR}{'\u002f\u5c0f\u65f6\uff0c\u5f53\u524d\u6a21\u5f0f\u4e3a'}
+                        {activeMotivationMode === 'ability' ? ` ${'\u80fd\u529b\u79ef\u7d2f'} · ${activeAbilityDimension || '\u80fd\u529b'}` : ` ${activeAbilityModule?.label || '\u6728\u9c7c'}`}
+                        {'\u3002'}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1640,7 +2022,7 @@ export default function App() {
                 <div className={cn("rounded-2xl border p-4", pressureTone.card)}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">压力值</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">{'\u538b\u529b\u503c'}</p>
                       <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
                         <Gauge className="h-4 w-4" />
                         {pressureTone.label}
@@ -1655,14 +2037,14 @@ export default function App() {
                     />
                   </div>
                   <p className="mt-2 text-[11px] text-current/80">
-                    待处理 {dueTodayTasks.length} 项，预计 {dueTodayEstimatedMinutes} 分钟，已超时 {overdueTodayTasks.length} 项。
+                    {'\u5f85\u5904\u7406'} {dueTodayTasks.length} {'\u9879\uff0c\u9884\u8ba1'} {dueTodayEstimatedMinutes} {'\u5206\u949f\uff0c\u5df2\u8d85\u65f6'} {overdueTodayTasks.length} {'\u9879\u3002'}
                   </p>
                 </div>
 
                 <div className={cn("rounded-2xl border p-4", energyTone.card)}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">当前精力</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">{'\u5f53\u524d\u7cbe\u529b'}</p>
                       <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
                         <TrendingUp className="h-4 w-4" />
                         {energyTone.label}
@@ -1677,11 +2059,11 @@ export default function App() {
                     />
                   </div>
                   <p className="mt-2 text-[11px] text-current/80">
-                    已完成 {completedTodayTasks.length} 项，实时消耗 {liveEnergyBurn.toFixed(1)}，休息恢复 {totalRestRecovery.toFixed(1)}，当前速率 {liveEnergyBurnRate.toFixed(0)}/小时。
+                    {statusSummary}{'\u3002\u5df2\u5b8c\u6210'} {completedTodayTasks.length} {'\u9879\uff0c\u6062\u590d'} {totalRestRecovery.toFixed(1)} {'\uff0c\u5f53\u524d\u901f\u7387'} {liveEnergyBurnRate.toFixed(0)}{'\u002f\u5c0f\u65f6\u3002'}
                   </p>
                   <div className="mt-3 flex items-center justify-between gap-3">
                     <div className="text-[11px] text-current/80">
-                      {todayRestSession.is_resting ? '休息中，精力正在缓慢恢复。' : '需要缓冲时，可以开休息模式回一点精力。'}
+                      {todayRestSession.is_resting ? '\u4f11\u606f\u4e2d\uff0c\u7cbe\u529b\u6b63\u5728\u7f13\u6162\u6062\u590d\u3002' : '\u9700\u8981\u7f13\u51b2\u65f6\uff0c\u53ef\u4ee5\u5f00\u4f11\u606f\u6a21\u5f0f\u56de\u4e00\u70b9\u7cbe\u529b\u3002'}
                     </div>
                     <button
                       type="button"
@@ -1694,7 +2076,7 @@ export default function App() {
                       )}
                     >
                       <Coffee className="h-3.5 w-3.5" />
-                      {todayRestSession.is_resting ? '结束休息' : '开始休息'}
+                      {todayRestSession.is_resting ? '\u7ed3\u675f\u4f11\u606f' : '\u5f00\u59cb\u4f11\u606f'}
                     </button>
                   </div>
                 </div>
@@ -1703,106 +2085,190 @@ export default function App() {
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">执行中</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                  {topTaskPanelView === 'execution' ? '\u6267\u884c\u4e2d' : '\u4efb\u52a1\u76ee\u5f55'}
+                </p>
                 <h3 className="mt-1 flex items-center gap-2 text-lg font-bold text-white">
-                  <Activity className="h-4 w-4 text-cyan-300" />
-                  当前计时与执行列表
+                  {topTaskPanelView === 'execution' ? <Activity className="h-4 w-4 text-cyan-300" /> : <ListTodo className="h-4 w-4 text-cyan-300" />}
+                  {topTaskPanelView === 'execution' ? '\u5f53\u524d\u8ba1\u65f6\u4e0e\u6267\u884c\u5217\u8868' : '\u4efb\u52a1\u76ee\u5f55\u9884\u89c8'}
                 </h3>
               </div>
-              <span className="rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-sm font-bold text-cyan-100">
-                {todayRestSession.is_resting ? '休息中' : `${runningTasks.length} 正在做`}
-              </span>
+              <div className="flex items-center gap-2">
+                <div className="inline-flex rounded-xl border border-white/10 bg-slate-900/70 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setTopTaskPanelView('execution')}
+                    className={cn(
+                      "rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
+                      topTaskPanelView === 'execution' ? 'bg-cyan-500/20 text-cyan-100' : 'text-slate-300 hover:bg-white/5'
+                    )}
+                  >
+                    {'\u6267\u884c\u5217\u8868'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTopTaskPanelView('directory')}
+                    className={cn(
+                      "rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
+                      topTaskPanelView === 'directory' ? 'bg-cyan-500/20 text-cyan-100' : 'text-slate-300 hover:bg-white/5'
+                    )}
+                  >
+                    {'\u4efb\u52a1\u76ee\u5f55'}
+                  </button>
+                </div>
+                <span className="rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-sm font-bold text-cyan-100">
+                  {topTaskPanelView === 'execution' ? (todayRestSession.is_resting ? '\u4f11\u606f\u4e2d' : `${runningTasks.length} \u6b63\u5728\u505a`) : `${sortedTasks.length} \u9879\u4efb\u52a1`}
+                </span>
+              </div>
             </div>
 
-            <div className="mt-4 grid gap-3 xl:grid-cols-[0.88fr_1.12fr]">
-              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-100">当前计时</h4>
-                  <span className="text-[10px] font-semibold text-cyan-200">{runningTasks.length}</span>
+            {topTaskPanelView === 'execution' ? (
+              <div className="mt-4 grid gap-3 xl:grid-cols-[0.88fr_1.12fr]">
+                <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-100">{'\u5f53\u524d\u8ba1\u65f6'}</h4>
+                    <span className="text-[10px] font-semibold text-cyan-200">{runningTasks.length}</span>
+                  </div>
+                  {runningTasks.length === 0 ? (
+                    <p className="text-[11px] text-cyan-100/70">{'\u8fd8\u6ca1\u6709\u6807\u8bb0\u201c\u73b0\u5728\u6b63\u5728\u505a\u201d\u7684\u4efb\u52a1\u3002'}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {runningTasks.slice(0, 4).map((task) => (
+                        <div key={`running-top-${task.id}`} className="rounded-xl border border-cyan-300/20 bg-slate-900/55 px-2.5 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTask(task)}
+                              className="truncate text-left text-[11px] font-semibold text-cyan-50"
+                            >
+                              {task.title || '\u672a\u547d\u540d\u4efb\u52a1'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleTaskTracking(task)}
+                              className="rounded-lg border border-cyan-300/25 bg-cyan-500/15 p-1 text-cyan-100 transition-colors hover:bg-cyan-500/25"
+                              title={"\u6682\u505c\u8ba1\u65f6"}
+                            >
+                              <Pause className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between text-[10px] text-cyan-100/80">
+                            <span>{formatDurationFromMs(getTrackedMs(task, nowTs))}</span>
+                            <span>{'\u8017\u80fd'} {getTaskLiveEnergyBurn(task, nowTs).toFixed(1)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {runningTasks.length === 0 ? (
-                  <p className="text-[11px] text-cyan-100/70">还没有标记“现在正在做”的任务。</p>
+
+                <div className="rounded-2xl border border-teal-400/25 bg-teal-500/10 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-teal-100">{'\u6267\u884c\u5217\u8868'}</h4>
+                    <span className="text-[10px] font-semibold text-teal-200">{executableTasks.length}</span>
+                  </div>
+                  {executableTasks.length === 0 ? (
+                    <p className="text-[11px] text-teal-100/70">{'\u6682\u65e0\u53ef\u6267\u884c\u4efb\u52a1\uff08\u7b49\u5f85\u524d\u7f6e\u4efb\u52a1\u5b8c\u6210\uff09\u3002'}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {executableTasks.slice(0, 5).map((task) => (
+                        <div key={`ready-top-${task.id}`} className="rounded-xl border border-teal-300/20 bg-slate-900/50 px-3 py-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTask(task)}
+                              className="truncate text-left text-[11px] font-semibold text-teal-50"
+                            >
+                              {task.title || '\u672a\u547d\u540d\u4efb\u52a1'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleTaskTracking(task)}
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold transition-colors",
+                                task.tracking_started_at
+                                  ? 'border-cyan-300/40 bg-cyan-500/20 text-cyan-100'
+                                  : 'border-white/15 bg-white/5 text-slate-200 hover:bg-white/10'
+                              )}
+                            >
+                              {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                              {task.tracking_started_at ? '\u6682\u505c' : '\u5f00\u59cb'}
+                            </button>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-300">
+                            <span>{'\u9884\u4f30'} {task.estimated_minutes}m</span>
+                            <span>{'\u5b9e\u9645'} {getDisplayedActualMinutes(task, nowTs)}m</span>
+                            <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-3">
+                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2">
+                  <div className="text-[11px] text-slate-300">{'\u8fd9\u91cc\u5c55\u793a\u4efb\u52a1\u76ee\u5f55\u9884\u89c8\uff0c\u5b8c\u6574\u7f16\u8f91\u4ecd\u5728\u53f3\u4e0a\u89d2\u4efb\u52a1\u6e05\u5355\u91cc\u3002'}</div>
+                  <button
+                    type="button"
+                    onClick={() => setIsTaskListOpen(true)}
+                    className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-slate-200 transition-colors hover:bg-white/10"
+                  >
+                    {'\u6253\u5f00\u4efb\u52a1\u6e05\u5355'}
+                  </button>
+                </div>
+                {topDirectoryTasks.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-6 text-center text-[11px] text-slate-400">
+                    {'\u5f53\u524d\u6ca1\u6709\u4efb\u52a1\uff0c\u5148\u65b0\u5efa\u4e00\u4e2a\u4efb\u52a1\u3002'}
+                  </div>
                 ) : (
-                  <div className="space-y-2">
-                    {runningTasks.slice(0, 4).map((task) => (
-                      <div key={`running-top-${task.id}`} className="rounded-xl border border-cyan-300/20 bg-slate-900/55 px-2.5 py-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedTask(task)}
-                            className="truncate text-left text-[11px] font-semibold text-cyan-50"
-                          >
-                            {task.title || '未命名任务'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleTaskTracking(task)}
-                            className="rounded-lg border border-cyan-300/25 bg-cyan-500/15 p-1 text-cyan-100 transition-colors hover:bg-cyan-500/25"
-                            title="暂停计时"
-                          >
-                            <Pause className="h-3.5 w-3.5" />
-                          </button>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {topDirectoryTasks.map((task) => (
+                      <button
+                        key={`top-directory-${task.id}`}
+                        type="button"
+                        onClick={() => setSelectedTask(task)}
+                        className="rounded-2xl border border-white/10 bg-slate-950/55 px-3 py-3 text-left transition-colors hover:bg-slate-900"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-[11px] font-semibold text-white">{task.title || '\u672a\u547d\u540d\u4efb\u52a1'}</div>
+                            <div className="mt-1 text-[10px] text-slate-400">
+                              {'\u9884\u4f30'} {task.estimated_minutes}m / {'\u5b9e\u9645'} {getDisplayedActualMinutes(task, nowTs)}m
+                            </div>
+                          </div>
+                          <span
+                            className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
+                            style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+                          />
                         </div>
-                        <div className="mt-1 flex items-center justify-between text-[10px] text-cyan-100/80">
-                          <span>{formatDurationFromMs(getTrackedMs(task, nowTs))}</span>
-                          <span>耗能 {getTaskLiveEnergyBurn(task, nowTs).toFixed(1)}</span>
+                        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                          <span className={cn("rounded-md border px-1.5 py-0.5", getTimelineAccent(task.timeline).badge)}>
+                            {task.timeline === 'long_term' ? '\u957f\u671f' : '\u4e34\u65f6'}
+                          </span>
+                          <span className="rounded-md border border-rose-400/25 bg-rose-500/10 px-1.5 py-0.5 text-rose-100">
+                            {'\u538b\u529b'} {(task.stress_score || 3)}/5
+                          </span>
+                          {task.tracking_started_at && (
+                            <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
+                              {'\u8ba1\u65f6\u4e2d'}
+                            </span>
+                          )}
                         </div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
               </div>
-
-              <div className="rounded-2xl border border-teal-400/25 bg-teal-500/10 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-teal-100">执行列表</h4>
-                  <span className="text-[10px] font-semibold text-teal-200">{executableTasks.length}</span>
-                </div>
-                {executableTasks.length === 0 ? (
-                  <p className="text-[11px] text-teal-100/70">暂无可执行任务（等待前置任务完成）。</p>
-                ) : (
-                  <div className="space-y-2">
-                    {executableTasks.slice(0, 5).map((task) => (
-                      <div key={`ready-top-${task.id}`} className="rounded-xl border border-teal-300/20 bg-slate-900/50 px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedTask(task)}
-                            className="truncate text-left text-[11px] font-semibold text-teal-50"
-                          >
-                            {task.title || '未命名任务'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleTaskTracking(task)}
-                            className={cn(
-                              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold transition-colors",
-                              task.tracking_started_at
-                                ? "border-cyan-300/40 bg-cyan-500/20 text-cyan-100"
-                                : "border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
-                            )}
-                          >
-                            {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                            {task.tracking_started_at ? '暂停' : '开始'}
-                          </button>
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-300">
-                          <span>预估 {task.estimated_minutes}m</span>
-                          <span>实际 {getDisplayedActualMinutes(task, nowTs)}m</span>
-                          <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+            )}
           </div>
+
         </div>
 
-        <div className={cn("rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-all duration-300", !isSuggestionOpen && "suggestion-rail px-2 py-4")}>
+        <div className={cn("self-stretch rounded-2xl border border-white/10 bg-white/[0.03] p-2.5 transition-all duration-300", !isSuggestionOpen && "suggestion-rail px-2 py-4")}>
           <div className="flex items-center justify-between gap-3">
             <div className={cn(!isSuggestionOpen && "xl:hidden")}>
               <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">建议窗口</p>
@@ -1828,22 +2294,22 @@ export default function App() {
 
           {isSuggestionOpen ? (
             <>
-              <div className="mt-4 space-y-2">
+              <div className="mt-2.5 space-y-1.5">
                 {wellbeingSuggestions.map((suggestion, index) => (
                   <div
                     key={`${todayKey}-${index}`}
-                    className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm leading-6 text-slate-200"
+                    className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[11px] leading-5 text-slate-200"
                   >
                     {suggestion}
                   </div>
                 ))}
               </div>
 
-              <div className="mt-4 border-t border-white/10 pt-4">
+              <div className="mt-2.5 border-t border-white/10 pt-2.5">
                 <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">当下建议先做</p>
-                <div className="mt-3 space-y-2">
+                <div className="mt-2 space-y-1.5">
                   {recommendedNowTasks.length === 0 ? (
-                    <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-400">
+                    <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400">
                       当前没有可执行任务，先解除阻塞项或安排休息。
                     </div>
                   ) : (
@@ -1851,10 +2317,10 @@ export default function App() {
                       <button
                         key={`recommend-${task.id}`}
                         onClick={() => setSelectedTask(task)}
-                        className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-left transition-colors hover:bg-slate-900"
+                        className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-left transition-colors hover:bg-slate-900"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-semibold text-white">{index + 1}. {task.title || '未命名任务'}</span>
+                          <span className="text-[11px] font-semibold text-white">{index + 1}. {task.title || '未命名任务'}</span>
                           <span className="rounded-md border border-teal-400/25 bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold text-teal-100">
                             {(task.stress_score || 3)}/5
                           </span>
@@ -1867,7 +2333,7 @@ export default function App() {
                             {getCollaborationLevelLabel(task.collaboration_level || 'low')}
                           </span>
                         </div>
-                        <p className="mt-2 text-[11px] leading-5 text-slate-300">
+                        <p className="mt-1 text-[11px] leading-5 text-slate-300 line-clamp-2">
                           {buildRecommendationReason(task, energyScore, nowTs)}
                         </p>
                       </button>
@@ -1876,16 +2342,16 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="mt-4 border-t border-white/10 pt-4">
+              <div className="mt-2.5 border-t border-white/10 pt-2.5">
                 <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">可一起处理的任务</p>
-                <div className="mt-3 space-y-2">
+                <div className="mt-2 space-y-1.5">
                   {bundleSuggestions.map((bundle, index) => (
                     <div
                       key={`bundle-${index}`}
-                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2"
+                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5"
                     >
-                      <div className="text-sm font-semibold text-white">{bundle.title}</div>
-                      <p className="mt-1 text-[11px] leading-5 text-slate-300">{bundle.description}</p>
+                      <div className="text-[11px] font-semibold text-white">{bundle.title}</div>
+                      <p className="mt-0.5 text-[11px] leading-5 text-slate-300 line-clamp-2">{bundle.description}</p>
                     </div>
                   ))}
                 </div>
@@ -1893,7 +2359,188 @@ export default function App() {
             </>
           ) : null}
         </div>
-      </section>
+            </motion.section>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <AnimatePresence>
+        {todayRestSession.is_resting && (
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 18 }}
+            className="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded-2xl border border-emerald-400/35 bg-slate-950/92 px-4 py-3 shadow-2xl"
+          >
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-200">休息模式</div>
+              <div className="mt-1 text-sm font-semibold text-white">正在恢复精力，可随时退出</div>
+            </div>
+            <button
+              type="button"
+              onClick={toggleRestMode}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-emerald-400/40 bg-emerald-500/20 px-3 py-2 text-[11px] font-bold text-emerald-100 transition-colors hover:bg-emerald-500/30"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              退出休息
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isMotivationPanelOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMotivationPanelOpen(false)}
+              className="fixed inset-0 z-40 bg-slate-950/60"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.96 }}
+              className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,720px)] -translate-x-1/2 -translate-y-1/2 rounded-[2rem] border border-white/10 glass-modal p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">二级窗口</p>
+                  <h3 className="mt-1 text-lg font-bold text-white">激励机制设置</h3>
+                  <p className="mt-1 text-[11px] text-slate-400">主状态板已精简，详细切换和能力明细放在这里。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsMotivationPanelOpen(false)}
+                  className="rounded-xl border border-white/10 bg-white/5 p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">激励模式</p>
+                      <p className="mt-1 text-[11px] text-slate-400">只会激活一个模式。</p>
+                    </div>
+                    <span className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+                      当前 {activeMotivationMode === 'ability' ? (activeAbilityDimension || '能力成长') : (activeAbilityModule?.label || '木鱼')}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    {motivationModeOptions.map((mode) => (
+                      <button
+                        key={`mode-panel-${mode.id}`}
+                        type="button"
+                        onClick={() => switchMotivationMode(mode.id)}
+                        disabled={mode.disabled}
+                        className={cn(
+                          "rounded-2xl border px-3 py-3 text-left transition-all",
+                          mode.disabled
+                            ? "cursor-not-allowed border-white/10 bg-white/[0.02] text-slate-500"
+                            : "cursor-pointer",
+                          activeMotivationMode === mode.id
+                            ? "border-teal-400/40 bg-teal-500/12 shadow-[0_0_20px_rgba(20,184,166,0.1)]"
+                            : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
+                        )}
+                      >
+                        <div className="text-sm font-semibold text-white">{mode.label}</div>
+                        <p className="mt-2 text-[11px] leading-5 text-slate-300">
+                          {mode.id === 'ability'
+                            ? '大脑上扬动画，对应你正在关注的能力维度。'
+                            : mode.id === 'special:mokugyo'
+                              ? '敲木鱼动作会随计时持续触发。'
+                              : '财神爷会持续冒出金币。'}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {activeMotivationMode === 'ability' && (
+                    <div className="mt-4 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-100">能力维度</p>
+                          <p className="mt-1 text-[11px] text-violet-100/75">能力模式下再选择一个具体维度。</p>
+                        </div>
+                        <span className="rounded-lg border border-violet-300/30 bg-violet-500/10 px-2 py-1 text-[10px] font-bold text-violet-100">
+                          {activeAbilityDimension || '未设置'}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {abilityDimensionModules.length === 0 ? (
+                          <div className="text-[11px] text-violet-100/75">还没有能力维度，先在任务清单里新增一个。</div>
+                        ) : (
+                          abilityDimensionModules.map((module) => (
+                            <button
+                              key={`ability-dimension-${module.id}`}
+                              type="button"
+                              onClick={() => switchAbilityModule(module.id)}
+                              className={cn(
+                                "cursor-pointer rounded-xl border px-2.5 py-1.5 text-[11px] font-bold transition-colors",
+                                module.id === activeAbilityModule?.id
+                                  ? "border-violet-300/60 bg-violet-500/30 text-white"
+                                  : "border-violet-300/20 bg-slate-950/60 text-violet-100/80 hover:bg-slate-900"
+                              )}
+                            >
+                              {module.label} · {formatMetricValue(getAbilityModuleDisplayValue(module.id))} {module.unit}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid gap-3">
+                  <div className="rounded-2xl border border-violet-300/20 bg-violet-500/10 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">当前展示说明</p>
+                        <p className="mt-1 text-[11px] text-slate-400">主状态板始终只出现当前机制。</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3 text-[11px] leading-5 text-slate-300">
+                      {activeMotivationMode === 'ability'
+                        ? '当前只显示大脑上升动画。木鱼和财神爷不会同时展示。'
+                        : activeMotivationMode === 'special:mokugyo'
+                          ? '当前只显示木鱼敲击动画。能力和财神爷动画已隐藏。'
+                          : '当前只显示财神爷掉金币动画。能力和木鱼动画已隐藏。'}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-violet-300/20 bg-violet-500/10 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">能力排名</p>
+                        <h4 className="mt-1 text-sm font-semibold text-white">当前累计能力</h4>
+                      </div>
+                      <span className="rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1 text-base font-bold text-violet-100">
+                        OA {abilityTotalScore}
+                      </span>
+                    </div>
+                    {abilityHighlights.length === 0 ? (
+                      <p className="mt-3 text-[11px] text-violet-100/75">还没有能力维度，去任务清单里加一个后这里会自动汇总。</p>
+                    ) : (
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        {abilityHighlights.map(([name, value]) => (
+                          <div key={`ability-top-${name}`} className="rounded-xl border border-violet-300/25 bg-slate-950/60 px-3 py-2">
+                            <div className="text-[11px] font-semibold text-violet-50">{name}</div>
+                            <div className="mt-1 text-lg font-bold text-white">{value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       <main className="relative flex flex-1 overflow-hidden">
         {/* Left Collapsible Sidebar */}
@@ -3124,4 +3771,5 @@ function TaskPoint({
     </motion.div>
   );
 }
+
 

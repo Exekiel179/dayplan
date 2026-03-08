@@ -367,6 +367,331 @@ select {
   backdrop-filter: blur(10px);
 }
 
+.motivation-stage {
+  position: relative;
+  min-height: 5.6rem;
+  overflow: hidden;
+  border-radius: 1.15rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    radial-gradient(circle at 50% 24%, rgba(255, 255, 255, 0.1), transparent 40%),
+    linear-gradient(180deg, rgba(8, 18, 32, 0.58), rgba(8, 18, 32, 0.82));
+  isolation: isolate;
+}
+
+.motivation-stage-ability {
+  border-color: rgba(167, 139, 250, 0.32);
+}
+
+.motivation-stage-mokugyo {
+  border-color: rgba(45, 212, 191, 0.32);
+}
+
+.motivation-stage-caishen {
+  border-color: rgba(251, 191, 36, 0.34);
+}
+
+.motivation-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+.motivation-glow-ability {
+  background: radial-gradient(circle at 50% 40%, rgba(167, 139, 250, 0.3), transparent 48%);
+}
+
+.motivation-glow-mokugyo {
+  background: radial-gradient(circle at 50% 55%, rgba(45, 212, 191, 0.24), transparent 46%);
+}
+
+.motivation-glow-caishen {
+  background: radial-gradient(circle at 50% 45%, rgba(251, 191, 36, 0.28), transparent 52%);
+}
+
+.brain-scene,
+.mokugyo-scene,
+.caishen-scene {
+  position: relative;
+  height: 5.6rem;
+}
+
+.brain-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  height: 3.6rem;
+  width: 3.6rem;
+  transform: translate(-50%, -50%);
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.32), rgba(124, 58, 237, 0.4));
+  color: #f5efff;
+  box-shadow:
+    0 0 0 10px rgba(167, 139, 250, 0.08),
+    0 14px 30px rgba(76, 29, 149, 0.35);
+  animation: brain-float 2.8s ease-in-out infinite;
+}
+
+.brain-up {
+  position: absolute;
+  bottom: 0.8rem;
+  width: 0.56rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(216, 180, 254, 0.12), rgba(192, 132, 252, 0.95));
+  box-shadow: 0 0 16px rgba(192, 132, 252, 0.35);
+  animation: brain-up 2.1s ease-in infinite;
+}
+
+.brain-up::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -0.38rem;
+  height: 0.65rem;
+  width: 0.65rem;
+  transform: translateX(-50%) rotate(45deg);
+  border-top: 2px solid rgba(233, 213, 255, 0.94);
+  border-left: 2px solid rgba(233, 213, 255, 0.94);
+}
+
+.brain-up-1 {
+  left: calc(50% - 2.55rem);
+  height: 1.45rem;
+  animation-delay: 0s;
+}
+
+.brain-up-2 {
+  left: calc(50% - 0.85rem);
+  height: 2.2rem;
+  animation-delay: 0.28s;
+}
+
+.brain-up-3 {
+  left: calc(50% + 0.95rem);
+  height: 1.8rem;
+  animation-delay: 0.52s;
+}
+
+.brain-up-4 {
+  left: calc(50% + 2.65rem);
+  height: 2.45rem;
+  animation-delay: 0.76s;
+}
+
+.mokugyo-aura {
+  position: absolute;
+  left: 50%;
+  bottom: 0.75rem;
+  height: 2.8rem;
+  width: 6.5rem;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.28), transparent 68%);
+}
+
+.mokugyo-shell {
+  position: absolute;
+  left: 50%;
+  bottom: 1.15rem;
+  height: 2.9rem;
+  width: 5.3rem;
+  transform: translateX(-50%);
+  border-radius: 46% 46% 54% 54%;
+  background: linear-gradient(180deg, #7b4d2a 0%, #5b341a 58%, #3f2110 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 227, 192, 0.12),
+    0 12px 24px rgba(0, 0, 0, 0.36);
+  animation: mokugyo-bounce 1.6s ease-in-out infinite;
+}
+
+.mokugyo-shell-core {
+  position: absolute;
+  inset: 0.55rem 0.95rem 0.7rem;
+  border-radius: 50%;
+  border: 3px solid rgba(244, 196, 145, 0.3);
+}
+
+.mokugyo-base {
+  position: absolute;
+  left: 50%;
+  bottom: 0.55rem;
+  height: 0.55rem;
+  width: 4rem;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(31, 41, 55, 0.7), rgba(15, 23, 42, 0.88));
+}
+
+.mokugyo-mallet {
+  position: absolute;
+  left: calc(50% + 1.15rem);
+  bottom: 3.15rem;
+  height: 2.8rem;
+  width: 2.8rem;
+  transform-origin: 0.55rem 2.2rem;
+  animation: mokugyo-strike 1.6s cubic-bezier(0.42, 0, 0.2, 1) infinite;
+}
+
+.mokugyo-mallet-stick {
+  position: absolute;
+  left: 0.72rem;
+  top: 0.65rem;
+  height: 1.8rem;
+  width: 0.26rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f5d6a8, #a16207);
+}
+
+.mokugyo-mallet-head {
+  position: absolute;
+  left: 0.2rem;
+  top: 0.15rem;
+  height: 0.8rem;
+  width: 1.05rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fde68a, #f59e0b);
+  box-shadow: 0 0 18px rgba(245, 158, 11, 0.28);
+}
+
+.mokugyo-pulse {
+  position: absolute;
+  left: 50%;
+  bottom: 2.7rem;
+  height: 0.8rem;
+  width: 0.8rem;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  border: 2px solid rgba(45, 212, 191, 0.48);
+  animation: mokugyo-pulse 1.6s ease-out infinite;
+}
+
+.mokugyo-pulse-2 {
+  animation-delay: 0.32s;
+}
+
+.mokugyo-pulse-3 {
+  animation-delay: 0.64s;
+}
+
+.caishen-avatar {
+  position: absolute;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+}
+
+.caishen-halo {
+  position: absolute;
+  left: 50%;
+  top: -0.55rem;
+  height: 3.8rem;
+  width: 3.8rem;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(254, 240, 138, 0.35), transparent 68%);
+}
+
+.caishen-head {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  height: 3.2rem;
+  width: 3.2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #fde68a, #f59e0b);
+  color: #7c2d12;
+  box-shadow:
+    0 0 0 10px rgba(251, 191, 36, 0.08),
+    0 16px 28px rgba(146, 64, 14, 0.25);
+  animation: caishen-bob 2.4s ease-in-out infinite;
+}
+
+.caishen-body {
+  position: absolute;
+  left: 50%;
+  top: 2.15rem;
+  height: 2.2rem;
+  width: 4.7rem;
+  transform: translateX(-50%);
+  border-radius: 1.2rem 1.2rem 1.5rem 1.5rem;
+  background: linear-gradient(180deg, #ef4444, #b91c1c);
+  box-shadow: inset 0 1px 0 rgba(255, 245, 245, 0.28);
+}
+
+.coin-burst {
+  position: absolute;
+  bottom: 1.7rem;
+  color: #facc15;
+  text-shadow: 0 0 12px rgba(250, 204, 21, 0.34);
+  animation: coin-rise 2.2s ease-in infinite;
+}
+
+.coin-burst-1 {
+  left: calc(50% - 3.15rem);
+  animation-delay: 0s;
+}
+
+.coin-burst-2 {
+  left: calc(50% - 1.55rem);
+  animation-delay: 0.35s;
+}
+
+.coin-burst-3 {
+  left: calc(50% + 0.95rem);
+  animation-delay: 0.75s;
+}
+
+.coin-burst-4 {
+  left: calc(50% + 2.9rem);
+  animation-delay: 1.05s;
+}
+
+@keyframes brain-float {
+  0%, 100% { transform: translate(-50%, -50%); }
+  50% { transform: translate(-50%, calc(-50% - 0.4rem)); }
+}
+
+@keyframes brain-up {
+  0% { transform: translateY(0) scaleY(0.82); opacity: 0.22; }
+  35% { opacity: 1; }
+  100% { transform: translateY(-1rem) scaleY(1); opacity: 0.18; }
+}
+
+@keyframes mokugyo-bounce {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  32% { transform: translateX(-50%) translateY(-0.15rem); }
+  50% { transform: translateX(-50%) translateY(0.16rem); }
+}
+
+@keyframes mokugyo-strike {
+  0%, 100% { transform: rotate(-14deg); }
+  18% { transform: rotate(18deg); }
+  34% { transform: rotate(-36deg); }
+  52% { transform: rotate(-10deg); }
+}
+
+@keyframes mokugyo-pulse {
+  0% { transform: translateX(-50%) scale(0.5); opacity: 0.72; }
+  100% { transform: translateX(-50%) scale(3.1); opacity: 0; }
+}
+
+@keyframes caishen-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-0.38rem); }
+}
+
+@keyframes coin-rise {
+  0% { transform: translateY(0) scale(0.55); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateY(-4.6rem) rotate(12deg) scale(1.08); opacity: 0; }
+}
+
 [data-theme="day"] .glass-panel {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.76) 0%, rgba(250, 252, 251, 0.72) 100%);
   border-color: rgba(190, 223, 220, 0.56);
@@ -676,6 +1001,12 @@ select {
 [data-theme="day"] .group-hover\:text-teal-400:hover,
 [data-theme="day"] .hover\:text-teal-400:hover {
   color: var(--accent-strong) !important;
+}
+
+[data-theme="day"] .motivation-stage {
+  background:
+    radial-gradient(circle at 50% 24%, rgba(255, 255, 255, 0.82), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(245, 248, 247, 0.9));
 }
 
 ::-webkit-scrollbar {

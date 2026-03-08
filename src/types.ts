@@ -57,8 +57,16 @@ export interface WellbeingSettings {
   daily_rest_sessions: Record<string, DailyRestSession>;
 }
 
+export interface AbilityModuleSettings {
+  active_module_id: string;
+  special_totals: Record<string, number>;
+  tracked_ms_baseline: number;
+  updated_at: number;
+}
+
 export interface UserTaskData {
   tasks: Task[];
   ability_dimensions: string[];
   wellbeing: WellbeingSettings;
+  ability_module: AbilityModuleSettings;
 }
