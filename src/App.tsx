@@ -29,7 +29,9 @@ import {
   Pause,
   Activity,
   SunMedium,
-  MoonStar
+  MoonStar,
+  MessageSquare,
+  Send
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
@@ -38,6 +40,7 @@ import {
   AbilityModuleSettings,
   DailyEnergyCheckin,
   DailyRestSession,
+  ExternalBehaviorEvent,
   LongTermCadence,
   Task,
   TaskCollaborationLevel,
@@ -45,6 +48,7 @@ import {
   TaskStep,
   TaskTimeline,
   UserTaskData,
+  WellbeingChatMessage,
   WellbeingSettings,
 } from './types';
 
@@ -81,6 +85,16 @@ type AbilityModuleOption = {
   kind: 'ability' | 'special';
   gainPerHour?: number;
 };
+type ExternalBehaviorPreset = {
+  id: string;
+  label: string;
+  aliases: string[];
+  instantEnergy: number;
+  energyBoostPerHour: number;
+  burnRateMultiplier: number;
+  durationMinutes: number;
+  reply: string;
+};
 
 const THEME_OPTIONS: { id: AppTheme; label: string; shortLabel: string }[] = [
   { id: 'night', label: '夜间霓光', shortLabel: '夜' },
@@ -107,6 +121,70 @@ const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
   },
 ];
 const DEFAULT_ABILITY_GAIN_PER_HOUR = 36;
+const BEHAVIOR_CHAT_PLACEHOLDER = '例如：我喝茶了 / 我刚散步回来 / 我午睡了 20 分钟';
+const MAX_DAILY_CHAT_MESSAGES = 24;
+const EXTERNAL_BEHAVIOR_PRESETS: ExternalBehaviorPreset[] = [
+  {
+    id: 'tea',
+    label: '喝茶',
+    aliases: ['喝茶', '喝了茶', '奶茶', '红茶', '绿茶', '乌龙茶', '泡茶'],
+    instantEnergy: 4,
+    energyBoostPerHour: 3.2,
+    burnRateMultiplier: 0.82,
+    durationMinutes: 100,
+    reply: '已记录喝茶。接下来一段时间会缓慢回精，同时把任务耗能压低一点。',
+  },
+  {
+    id: 'coffee',
+    label: '喝咖啡',
+    aliases: ['喝咖啡', '咖啡', '美式', '拿铁', '浓缩'],
+    instantEnergy: 5,
+    energyBoostPerHour: 3.8,
+    burnRateMultiplier: 0.86,
+    durationMinutes: 90,
+    reply: '已记录咖啡补给。会先抬高一点精力，并在短时间内降低耗能斜率。',
+  },
+  {
+    id: 'water',
+    label: '补水',
+    aliases: ['喝水', '补水', '接水', '水喝够了'],
+    instantEnergy: 2,
+    energyBoostPerHour: 1.8,
+    burnRateMultiplier: 0.94,
+    durationMinutes: 45,
+    reply: '已记录补水。效果比较温和，但能帮你把状态拉稳一点。',
+  },
+  {
+    id: 'walk',
+    label: '散步',
+    aliases: ['散步', '走路', '出去走了', '出去转了', '溜达'],
+    instantEnergy: 6,
+    energyBoostPerHour: 4.2,
+    burnRateMultiplier: 0.84,
+    durationMinutes: 80,
+    reply: '已记录散步。这个恢复更明显，接下来更适合收拾一个关键任务。',
+  },
+  {
+    id: 'meal',
+    label: '吃饭',
+    aliases: ['吃饭', '刚吃完', '午饭', '晚饭', '早餐'],
+    instantEnergy: 4,
+    energyBoostPerHour: 2.5,
+    burnRateMultiplier: 0.88,
+    durationMinutes: 75,
+    reply: '已记录进食恢复。短时间内会补一点精力，也能减轻连续工作的透支感。',
+  },
+  {
+    id: 'nap',
+    label: '午睡',
+    aliases: ['午睡', '眯了一会', '睡了会', '小睡', '补觉'],
+    instantEnergy: 9,
+    energyBoostPerHour: 5.4,
+    burnRateMultiplier: 0.72,
+    durationMinutes: 150,
+    reply: '已记录午睡恢复。精力会明显回升，接下来进入高价值任务更划算。',
+  },
+];
 
 function createDefaultAbilityModuleSettings(): AbilityModuleSettings {
   return {
@@ -115,6 +193,19 @@ function createDefaultAbilityModuleSettings(): AbilityModuleSettings {
     tracked_ms_baseline: 0,
     updated_at: Date.now(),
   };
+}
+
+function createDefaultWellbeingSettings(): WellbeingSettings {
+  return {
+    daily_checkins: {},
+    daily_rest_sessions: {},
+    daily_behavior_events: {},
+    daily_chat_messages: {},
+  };
+}
+
+function createLocalId(prefix: string) {
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -245,9 +336,60 @@ function normalizeRecoveredEnergy(value: unknown) {
   return clamp(numeric, 0, 100);
 }
 
+function normalizeBehaviorDurationMinutes(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 60;
+  return clamp(Math.round(numeric), 10, 12 * 60);
+}
+
+function normalizeBurnRateMultiplier(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return clamp(Number(numeric.toFixed(2)), 0.55, 1.2);
+}
+
+function normalizeWellbeingChatMessage(value: unknown): WellbeingChatMessage | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<WellbeingChatMessage>;
+  if (raw.role !== 'user' && raw.role !== 'assistant') return null;
+  const text = typeof raw.text === 'string' ? raw.text.trim() : '';
+  if (!text) return null;
+  return {
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : createLocalId('chat'),
+    role: raw.role,
+    text,
+    created_at: Number.isFinite(Number(raw.created_at)) ? Number(raw.created_at) : Date.now(),
+    behavior_event_id: typeof raw.behavior_event_id === 'string' && raw.behavior_event_id.trim()
+      ? raw.behavior_event_id
+      : null,
+  };
+}
+
+function normalizeExternalBehaviorEvent(value: unknown): ExternalBehaviorEvent | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<ExternalBehaviorEvent>;
+  const label = typeof raw.label === 'string' ? raw.label.trim() : '';
+  const message = typeof raw.message === 'string' ? raw.message.trim() : '';
+  const type = typeof raw.type === 'string' && raw.type.trim() ? raw.type.trim() : 'custom';
+  const startedAt = Number(raw.started_at);
+  if (!label || !message || !Number.isFinite(startedAt)) return null;
+  return {
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : createLocalId('behavior'),
+    type,
+    label,
+    message,
+    instant_energy: clamp(Math.round(Number(raw.instant_energy) || 0), -10, 20),
+    energy_boost_per_hour: clamp(Number(raw.energy_boost_per_hour) || 0, -10, 12),
+    burn_rate_multiplier: normalizeBurnRateMultiplier(raw.burn_rate_multiplier),
+    duration_minutes: normalizeBehaviorDurationMinutes(raw.duration_minutes),
+    started_at: startedAt,
+    updated_at: Number.isFinite(Number(raw.updated_at)) ? Number(raw.updated_at) : startedAt,
+  };
+}
+
 function normalizeWellbeing(value: unknown): WellbeingSettings {
   if (!value || typeof value !== 'object') {
-    return { daily_checkins: {}, daily_rest_sessions: {} };
+    return createDefaultWellbeingSettings();
   }
 
   const raw = value as Partial<WellbeingSettings>;
@@ -277,10 +419,37 @@ function normalizeWellbeing(value: unknown): WellbeingSettings {
         return acc;
       }, {})
     : {};
+  const dailyBehaviorEvents = raw.daily_behavior_events && typeof raw.daily_behavior_events === 'object'
+    ? Object.entries(raw.daily_behavior_events).reduce<Record<string, ExternalBehaviorEvent[]>>((acc, [dayKey, events]) => {
+        if (!Array.isArray(events)) return acc;
+        const normalized = events
+          .map((event) => normalizeExternalBehaviorEvent(event))
+          .filter((event): event is ExternalBehaviorEvent => Boolean(event));
+        if (normalized.length > 0) {
+          acc[dayKey] = normalized;
+        }
+        return acc;
+      }, {})
+    : {};
+  const dailyChatMessages = raw.daily_chat_messages && typeof raw.daily_chat_messages === 'object'
+    ? Object.entries(raw.daily_chat_messages).reduce<Record<string, WellbeingChatMessage[]>>((acc, [dayKey, messages]) => {
+        if (!Array.isArray(messages)) return acc;
+        const normalized = messages
+          .map((message) => normalizeWellbeingChatMessage(message))
+          .filter((message): message is WellbeingChatMessage => Boolean(message))
+          .slice(-MAX_DAILY_CHAT_MESSAGES);
+        if (normalized.length > 0) {
+          acc[dayKey] = normalized;
+        }
+        return acc;
+      }, {})
+    : {};
 
   return {
     daily_checkins: dailyCheckins,
     daily_rest_sessions: dailyRestSessions,
+    daily_behavior_events: dailyBehaviorEvents,
+    daily_chat_messages: dailyChatMessages,
   };
 }
 
@@ -290,6 +459,63 @@ function getDayKey(ts: number) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function getBehaviorEventEndsAt(event: ExternalBehaviorEvent) {
+  return event.started_at + normalizeBehaviorDurationMinutes(event.duration_minutes) * 60000;
+}
+
+function isBehaviorEventActive(event: ExternalBehaviorEvent, now: number) {
+  return getBehaviorEventEndsAt(event) > now;
+}
+
+function getBehaviorElapsedHours(event: ExternalBehaviorEvent, now: number) {
+  const elapsedMs = Math.min(Math.max(0, now - event.started_at), Math.max(0, getBehaviorEventEndsAt(event) - event.started_at));
+  return elapsedMs / 3600000;
+}
+
+function getBehaviorRecoveredEnergy(event: ExternalBehaviorEvent, now: number) {
+  return clamp(
+    event.instant_energy + getBehaviorElapsedHours(event, now) * event.energy_boost_per_hour,
+    -20,
+    30
+  );
+}
+
+function getBehaviorBurnRateModifier(events: ExternalBehaviorEvent[], now: number) {
+  if (events.length === 0) return 1;
+  return clamp(
+    Number(events.reduce((product, event) => {
+      if (!isBehaviorEventActive(event, now)) return product;
+      return product * normalizeBurnRateMultiplier(event.burn_rate_multiplier);
+    }, 1).toFixed(2)),
+    0.55,
+    1.15
+  );
+}
+
+function parseBehaviorMessage(message: string) {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) return null;
+  const preset = EXTERNAL_BEHAVIOR_PRESETS.find((item) => item.aliases.some((alias) => normalized.includes(alias)));
+  if (!preset) return null;
+  return preset;
+}
+
+function extractDurationOverrideMinutes(message: string, fallback: number) {
+  const normalized = message.toLowerCase();
+  const minuteMatch = normalized.match(/(\d+)\s*分(?:钟)?/);
+  if (minuteMatch) {
+    return normalizeBehaviorDurationMinutes(Number(minuteMatch[1]));
+  }
+  const hourMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(?:小?时|h)\b/);
+  if (hourMatch) {
+    return normalizeBehaviorDurationMinutes(Number(hourMatch[1]) * 60);
+  }
+  if (normalized.includes('半小时')) {
+    return 30;
+  }
+  return fallback;
 }
 
 function getTaskProgress(task: Task) {
@@ -318,18 +544,18 @@ function formatDurationFromMs(ms: number) {
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-function getTaskEnergyBurnRate(task: Task) {
+function getTaskEnergyBurnRate(task: Task, burnRateModifier = 1) {
   let burn = 5 + (task.stress_score || 3) * 2;
   if (task.cognitive_load === 'high') burn += 6;
   if (task.collaboration_level === 'high') burn += 3;
   if (task.use_countdown_urgency && task.deadline_at) burn += 2;
-  return burn;
+  return Number((burn * burnRateModifier).toFixed(1));
 }
 
-function getTaskLiveEnergyBurn(task: Task, now: number) {
+function getTaskLiveEnergyBurn(task: Task, now: number, burnRateModifier = 1) {
   if (!task.tracking_started_at) return 0;
   const elapsedHours = Math.max(0, now - task.tracking_started_at) / 3600000;
-  return getTaskEnergyBurnRate(task) * elapsedHours;
+  return getTaskEnergyBurnRate(task, burnRateModifier) * elapsedHours;
 }
 
 function getLiveRestRecovery(session: DailyRestSession | undefined, now: number) {
@@ -606,7 +832,7 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
     return {
       tasks,
       ability_dimensions: collectAbilityDimensions(tasks),
-      wellbeing: { daily_checkins: {}, daily_rest_sessions: {} },
+      wellbeing: createDefaultWellbeingSettings(),
       ability_module: createDefaultAbilityModuleSettings(),
     };
   }
@@ -632,7 +858,7 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
   return {
     tasks: [],
     ability_dimensions: [],
-    wellbeing: { daily_checkins: {}, daily_rest_sessions: {} },
+    wellbeing: createDefaultWellbeingSettings(),
     ability_module: createDefaultAbilityModuleSettings(),
   };
 }
@@ -866,9 +1092,10 @@ export default function App() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [abilityDimensions, setAbilityDimensions] = useState<string[]>([]);
-  const [wellbeing, setWellbeing] = useState<WellbeingSettings>({ daily_checkins: {}, daily_rest_sessions: {} });
+  const [wellbeing, setWellbeing] = useState<WellbeingSettings>(createDefaultWellbeingSettings());
   const [abilityModule, setAbilityModule] = useState<AbilityModuleSettings>(createDefaultAbilityModuleSettings());
   const [newAbilityDimension, setNewAbilityDimension] = useState('');
+  const [behaviorChatInput, setBehaviorChatInput] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
@@ -904,7 +1131,7 @@ export default function App() {
     setAuthUser('');
     setTasks([]);
     setAbilityDimensions([]);
-    setWellbeing({ daily_checkins: {}, daily_rest_sessions: {} });
+    setWellbeing(createDefaultWellbeingSettings());
     setAbilityModule(createDefaultAbilityModuleSettings());
     setSelectedTask(null);
     setIsLoadingTasks(false);
@@ -948,6 +1175,9 @@ export default function App() {
   const totalEstimatedMinutes = activeTasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
   const totalActualMinutes = activeTasks.reduce((sum, task) => sum + getDisplayedActualMinutes(task, nowTs), 0);
   const todayKey = getDayKey(nowTs);
+  const todayBehaviorEvents = wellbeing.daily_behavior_events[todayKey] ?? [];
+  const todayChatMessages = wellbeing.daily_chat_messages[todayKey] ?? [];
+  const activeBehaviorEvents = todayBehaviorEvents.filter((event) => isBehaviorEventActive(event, nowTs));
   const dueTodayTasks = activeTasks.filter((task) => task.timeline === 'temporary' || isLongTermDue(task, nowTs));
   const dueTodayEstimatedMinutes = dueTodayTasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
   const overdueTodayTasks = dueTodayTasks.filter((task) => task.timeline === 'temporary' && Boolean(task.deadline_at) && (task.deadline_at || 0) <= nowTs);
@@ -982,12 +1212,14 @@ export default function App() {
   const progressBoost = dueTodayTasks.length > 0
     ? Math.round((dueTodayTasks.reduce((sum, task) => sum + getTaskProgress(task), 0) / dueTodayTasks.length) * 10)
     : 0;
-  const liveEnergyBurn = runningTasks.reduce((sum, task) => sum + getTaskLiveEnergyBurn(task, nowTs), 0);
-  const liveEnergyBurnRate = runningTasks.reduce((sum, task) => sum + getTaskEnergyBurnRate(task), 0);
+  const behaviorRecovery = activeBehaviorEvents.reduce((sum, event) => sum + getBehaviorRecoveredEnergy(event, nowTs), 0);
+  const behaviorBurnRateModifier = getBehaviorBurnRateModifier(activeBehaviorEvents, nowTs);
+  const liveEnergyBurn = runningTasks.reduce((sum, task) => sum + getTaskLiveEnergyBurn(task, nowTs, behaviorBurnRateModifier), 0);
+  const liveEnergyBurnRate = runningTasks.reduce((sum, task) => sum + getTaskEnergyBurnRate(task, behaviorBurnRateModifier), 0);
   const liveRestRecovery = getLiveRestRecovery(todayRestSession, nowTs);
   const totalRestRecovery = normalizeRecoveredEnergy(todayRestSession.recovered_energy) + liveRestRecovery;
   const energyScore = clamp(
-    Math.round(todayInitialEnergy - pressureScore * 0.45 + completionBoost + energyDeltaBoost + progressBoost - liveEnergyBurn + totalRestRecovery),
+    Math.round(todayInitialEnergy - pressureScore * 0.45 + completionBoost + energyDeltaBoost + progressBoost - liveEnergyBurn + totalRestRecovery + behaviorRecovery),
     0,
     100
   );
@@ -1013,6 +1245,10 @@ export default function App() {
     runningTasks,
     isResting: todayRestSession.is_resting,
   });
+  const latestActiveBehavior = activeBehaviorEvents[activeBehaviorEvents.length - 1];
+  const latestBehaviorMessage = latestActiveBehavior
+    ? `${latestActiveBehavior.label}生效中，当前耗能系数 ${(behaviorBurnRateModifier * 100).toFixed(0)}%。`
+    : '还没有记录外部行为，可以直接在右侧聊天里说“我喝茶了”。';
 
   const baseAbilityScores = abilityDimensions.reduce<Record<string, number>>((acc, dim) => {
     acc[dim] = 0;
@@ -1506,6 +1742,67 @@ export default function App() {
         },
       },
     }));
+  };
+
+  const submitBehaviorChat = (rawInput?: string) => {
+    const text = (rawInput ?? behaviorChatInput).trim();
+    if (!text) return;
+
+    const now = Date.now();
+    const userMessage: WellbeingChatMessage = {
+      id: createLocalId('chat'),
+      role: 'user',
+      text,
+      created_at: now,
+      behavior_event_id: null,
+    };
+    const preset = parseBehaviorMessage(text);
+    const durationMinutes = preset ? extractDurationOverrideMinutes(text, preset.durationMinutes) : 0;
+    const behaviorEvent = preset
+      ? {
+          id: createLocalId('behavior'),
+          type: preset.id,
+          label: preset.label,
+          message: text,
+          instant_energy: preset.instantEnergy,
+          energy_boost_per_hour: preset.energyBoostPerHour,
+          burn_rate_multiplier: preset.burnRateMultiplier,
+          duration_minutes: durationMinutes,
+          started_at: now,
+          updated_at: now,
+        } satisfies ExternalBehaviorEvent
+      : null;
+    const targetTask = recommendedNowTasks[0]?.title || '';
+    const assistantText = behaviorEvent
+      ? `${preset.reply} 预计持续 ${durationMinutes} 分钟，当前额外恢复约 +${behaviorEvent.instant_energy}，耗能压到 ${Math.round(behaviorEvent.burn_rate_multiplier * 100)}%。${targetTask ? ` 现在适合先推进「${targetTask}」。` : ''}`
+      : `${targetTask ? `当前更建议先做「${targetTask}」。` : '当前没有合适的任务建议。'} 你可以直接告诉我外部行为，比如“我喝茶了”“我散步了”“我午睡了 20 分钟”。`;
+    const assistantMessage: WellbeingChatMessage = {
+      id: createLocalId('chat'),
+      role: 'assistant',
+      text: assistantText,
+      created_at: now + 1,
+      behavior_event_id: behaviorEvent?.id || null,
+    };
+
+    setWellbeing((prev) => {
+      const nextChatMessages = [...(prev.daily_chat_messages[todayKey] ?? []), userMessage, assistantMessage].slice(-MAX_DAILY_CHAT_MESSAGES);
+      const nextBehaviorEvents = behaviorEvent
+        ? [...(prev.daily_behavior_events[todayKey] ?? []), behaviorEvent].slice(-18)
+        : (prev.daily_behavior_events[todayKey] ?? []);
+
+      return {
+        ...prev,
+        daily_chat_messages: {
+          ...prev.daily_chat_messages,
+          [todayKey]: nextChatMessages,
+        },
+        daily_behavior_events: {
+          ...prev.daily_behavior_events,
+          [todayKey]: nextBehaviorEvents,
+        },
+      };
+    });
+    setBehaviorChatInput('');
   };
 
   const removeAbilityDimension = (name: string) => {
@@ -2112,8 +2409,9 @@ export default function App() {
                     />
                   </div>
                   <p className="mt-2 text-[11px] text-current/80">
-                    {statusSummary}{'\u3002\u5df2\u5b8c\u6210'} {completedTodayTasks.length} {'\u9879\uff0c\u6062\u590d'} {totalRestRecovery.toFixed(1)} {'\uff0c\u5f53\u524d\u901f\u7387'} {liveEnergyBurnRate.toFixed(0)}{'\u002f\u5c0f\u65f6\u3002'}
+                    {statusSummary}{'\u3002\u5df2\u5b8c\u6210'} {completedTodayTasks.length} {'\u9879\uff0c\u6062\u590d'} {(totalRestRecovery + behaviorRecovery).toFixed(1)} {'\uff0c\u5f53\u524d\u901f\u7387'} {liveEnergyBurnRate.toFixed(0)}{'\u002f\u5c0f\u65f6\u3002'}
                   </p>
+                  <p className="mt-1 text-[11px] text-current/75">{latestBehaviorMessage}</p>
                   <div className="mt-3 flex items-center justify-between gap-3">
                     <div className="text-[11px] text-current/80">
                       {todayRestSession.is_resting ? '\u4f11\u606f\u4e2d\uff0c\u7cbe\u529b\u6b63\u5728\u7f13\u6162\u6062\u590d\u3002' : '\u9700\u8981\u7f13\u51b2\u65f6\uff0c\u53ef\u4ee5\u5f00\u4f11\u606f\u6a21\u5f0f\u56de\u4e00\u70b9\u7cbe\u529b\u3002'}
@@ -2209,7 +2507,7 @@ export default function App() {
                           </div>
                           <div className="mt-1 flex items-center justify-between text-[10px] text-cyan-100/80">
                             <span>{formatDurationFromMs(getTrackedMs(task, nowTs))}</span>
-                            <span>{'\u8017\u80fd'} {getTaskLiveEnergyBurn(task, nowTs).toFixed(1)}</span>
+                            <span>{'\u8017\u80fd'} {getTaskLiveEnergyBurn(task, nowTs, behaviorBurnRateModifier).toFixed(1)}</span>
                           </div>
                         </div>
                       ))}
@@ -2321,7 +2619,7 @@ export default function App() {
 
         </div>
 
-        <div className={cn("self-stretch rounded-2xl border border-white/10 bg-white/[0.03] p-2.5 transition-all duration-300", !isSuggestionOpen && "suggestion-rail px-2 py-4")}>
+        <div className={cn("self-stretch rounded-2xl border border-white/10 bg-white/[0.03] p-2.5 transition-all duration-300 flex min-h-0 flex-col", !isSuggestionOpen && "suggestion-rail px-2 py-4")}>
           <div className="flex items-center justify-between gap-3">
             <div className={cn(!isSuggestionOpen && "xl:hidden")}>
               <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">建议窗口</p>
@@ -2347,66 +2645,192 @@ export default function App() {
 
           {isSuggestionOpen ? (
             <>
-              <div className="mt-2.5 space-y-1.5">
-                {wellbeingSuggestions.map((suggestion, index) => (
-                  <div
-                    key={`${todayKey}-${index}`}
-                    className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[11px] leading-5 text-slate-200"
-                  >
-                    {suggestion}
+              <div className="mt-2.5 grid min-h-0 gap-2.5 xl:flex-1 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
+                <div className="space-y-2.5">
+                  <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-100/70">外部行为状态</p>
+                        <p className="mt-1 text-[11px] leading-5 text-amber-50/85">{latestBehaviorMessage}</p>
+                      </div>
+                      <span className="rounded-lg border border-amber-300/25 bg-slate-950/50 px-2 py-1 text-[10px] font-bold text-amber-100">
+                        +{behaviorRecovery.toFixed(1)}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {activeBehaviorEvents.length === 0 ? (
+                        <span className="rounded-full border border-white/10 bg-slate-950/55 px-2 py-1 text-[10px] text-slate-300">
+                          暂无生效中的行为
+                        </span>
+                      ) : (
+                        activeBehaviorEvents.map((event) => (
+                          <span
+                            key={event.id}
+                            className="rounded-full border border-amber-300/25 bg-slate-950/55 px-2 py-1 text-[10px] font-semibold text-amber-50"
+                          >
+                            {event.label} · 还剩 {Math.max(1, Math.ceil((getBehaviorEventEndsAt(event) - nowTs) / 60000))} 分钟
+                          </span>
+                        ))
+                      )}
+                    </div>
                   </div>
-                ))}
-              </div>
 
-              <div className="mt-2.5 border-t border-white/10 pt-2.5">
-                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">当下建议先做</p>
-                <div className="mt-2 space-y-1.5">
-                  {recommendedNowTasks.length === 0 ? (
-                    <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400">
-                      当前没有可执行任务，先解除阻塞项或安排休息。
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">节奏提醒</p>
+                    <div className="mt-2 space-y-1.5">
+                      {wellbeingSuggestions.map((suggestion, index) => (
+                        <div
+                          key={`${todayKey}-${index}`}
+                          className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[11px] leading-5 text-slate-200"
+                        >
+                          {suggestion}
+                        </div>
+                      ))}
                     </div>
-                  ) : (
-                    recommendedNowTasks.map((task, index) => (
-                      <button
-                        key={`recommend-${task.id}`}
-                        onClick={() => setSelectedTask(task)}
-                        className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-left transition-colors hover:bg-slate-900"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-semibold text-white">{index + 1}. {task.title || '未命名任务'}</span>
-                          <span className="rounded-md border border-teal-400/25 bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold text-teal-100">
-                            {(task.stress_score || 3)}/5
-                          </span>
+                  </div>
+
+                  <div className="border-t border-white/10 pt-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">当下建议先做</p>
+                    <div className="mt-2 space-y-1.5">
+                      {recommendedNowTasks.length === 0 ? (
+                        <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400">
+                          当前没有可执行任务，先解除阻塞项或安排休息。
                         </div>
-                        <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-semibold">
-                          <span className="rounded-md border border-sky-400/25 bg-sky-500/10 px-1.5 py-0.5 text-sky-100">
-                            {getCognitiveLoadLabel(task.cognitive_load || 'low')}
-                          </span>
-                          <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-1.5 py-0.5 text-violet-100">
-                            {getCollaborationLevelLabel(task.collaboration_level || 'low')}
-                          </span>
+                      ) : (
+                        recommendedNowTasks.map((task, index) => (
+                          <button
+                            key={`recommend-${task.id}`}
+                            onClick={() => setSelectedTask(task)}
+                            className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-left transition-colors hover:bg-slate-900"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-semibold text-white">{index + 1}. {task.title || '未命名任务'}</span>
+                              <span className="rounded-md border border-teal-400/25 bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold text-teal-100">
+                                {(task.stress_score || 3)}/5
+                              </span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                              <span className="rounded-md border border-sky-400/25 bg-sky-500/10 px-1.5 py-0.5 text-sky-100">
+                                {getCognitiveLoadLabel(task.cognitive_load || 'low')}
+                              </span>
+                              <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-1.5 py-0.5 text-violet-100">
+                                {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-[11px] leading-5 text-slate-300 line-clamp-2">
+                              {buildRecommendationReason(task, energyScore, nowTs)}
+                            </p>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/10 pt-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">可一起处理的任务</p>
+                    <div className="mt-2 space-y-1.5">
+                      {bundleSuggestions.length === 0 ? (
+                        <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400">
+                          当前没有明显适合打包处理的任务，先完成一个主任务更稳。
                         </div>
-                        <p className="mt-1 text-[11px] leading-5 text-slate-300 line-clamp-2">
-                          {buildRecommendationReason(task, energyScore, nowTs)}
-                        </p>
-                      </button>
-                    ))
-                  )}
+                      ) : (
+                        bundleSuggestions.map((bundle, index) => (
+                          <div
+                            key={`bundle-${index}`}
+                            className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5"
+                          >
+                            <div className="text-[11px] font-semibold text-white">{bundle.title}</div>
+                            <p className="mt-0.5 text-[11px] leading-5 text-slate-300 line-clamp-2">{bundle.description}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              <div className="mt-2.5 border-t border-white/10 pt-2.5">
-                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">可一起处理的任务</p>
-                <div className="mt-2 space-y-1.5">
-                  {bundleSuggestions.map((bundle, index) => (
-                    <div
-                      key={`bundle-${index}`}
-                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5"
-                    >
-                      <div className="text-[11px] font-semibold text-white">{bundle.title}</div>
-                      <p className="mt-0.5 text-[11px] leading-5 text-slate-300 line-clamp-2">{bundle.description}</p>
+                <div className="flex min-h-[22rem] min-w-0 flex-col rounded-[1.4rem] border border-cyan-300/18 bg-[linear-gradient(180deg,rgba(10,16,28,0.96),rgba(6,12,22,0.88))] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.25)] xl:min-h-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-cyan-100/65">行为聊天窗口</p>
+                      <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                        <MessageSquare className="h-4 w-4 text-cyan-300" />
+                        外部行为管理
+                      </h4>
+                      <p className="mt-1 text-[11px] leading-5 text-slate-400">
+                        直接说你刚做了什么，我会把它换算成实时精力恢复和耗能修正。
+                      </p>
                     </div>
-                  ))}
+                    <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1 text-right">
+                      <div className="text-[10px] font-bold text-cyan-100">{activeBehaviorEvents.length} 个效果</div>
+                      <div className="mt-0.5 text-[10px] text-cyan-100/70">耗能 {Math.round(behaviorBurnRateModifier * 100)}%</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {EXTERNAL_BEHAVIOR_PRESETS.slice(0, 4).map((preset) => (
+                      <button
+                        key={`quick-behavior-${preset.id}`}
+                        type="button"
+                        onClick={() => submitBehaviorChat(`我${preset.label}了`)}
+                        className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.09]"
+                      >
+                        我{preset.label}了
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950/55">
+                    <div className="border-b border-white/8 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      今日对话
+                    </div>
+                    <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto px-3 py-3">
+                      {todayChatMessages.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[11px] leading-5 text-slate-400">
+                          还没有记录。试试发送“我喝茶了”，系统会立刻把它转成精力恢复和耗能折扣。
+                        </div>
+                      ) : (
+                        todayChatMessages.map((message) => (
+                          <div
+                            key={message.id}
+                            className={cn(
+                              "max-w-[92%] rounded-2xl px-3 py-2 text-[11px] leading-5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]",
+                              message.role === 'user'
+                                ? 'ml-auto border border-cyan-300/20 bg-cyan-500/16 text-cyan-50'
+                                : 'border border-white/10 bg-white/[0.04] text-slate-200'
+                            )}
+                          >
+                            <div className="whitespace-pre-wrap break-words">{message.text}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="border-t border-white/8 px-3 py-3">
+                      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                        <input
+                          type="text"
+                          value={behaviorChatInput}
+                          onChange={(e) => setBehaviorChatInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              submitBehaviorChat();
+                            }
+                          }}
+                          placeholder={BEHAVIOR_CHAT_PLACEHOLDER}
+                          className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => submitBehaviorChat()}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-500/16 text-cyan-100 transition-colors hover:bg-cyan-500/24"
+                          aria-label="发送行为记录"
+                        >
+                          <Send className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </>
@@ -3229,7 +3653,7 @@ export default function App() {
                           已累计 {formatDurationFromMs(getTrackedMs(selectedTask, nowTs))}，折算实际用时 {getDisplayedActualMinutes(selectedTask, nowTs)} 分钟。
                         </p>
                         <p className="mt-1 text-[11px] leading-5 text-cyan-100/80">
-                          当前实时精力消耗速率 {getTaskEnergyBurnRate(selectedTask)}/小时。
+                          当前实时精力消耗速率 {getTaskEnergyBurnRate(selectedTask, behaviorBurnRateModifier)}/小时。
                         </p>
                       </div>
                       <button

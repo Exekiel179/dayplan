@@ -52,9 +52,32 @@ export interface DailyRestSession {
   updated_at: number;
 }
 
+export interface ExternalBehaviorEvent {
+  id: string;
+  type: string;
+  label: string;
+  message: string;
+  instant_energy: number;
+  energy_boost_per_hour: number;
+  burn_rate_multiplier: number;
+  duration_minutes: number;
+  started_at: number;
+  updated_at: number;
+}
+
+export interface WellbeingChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  created_at: number;
+  behavior_event_id?: string | null;
+}
+
 export interface WellbeingSettings {
   daily_checkins: Record<string, DailyEnergyCheckin>;
   daily_rest_sessions: Record<string, DailyRestSession>;
+  daily_behavior_events: Record<string, ExternalBehaviorEvent[]>;
+  daily_chat_messages: Record<string, WellbeingChatMessage[]>;
 }
 
 export interface AbilityModuleSettings {
