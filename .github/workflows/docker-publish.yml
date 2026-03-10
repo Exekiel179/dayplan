@@ -201,7 +201,9 @@ jobs:
         run: |
           set -euo pipefail
           if docker buildx imagetools inspect "${IMAGE}:latest" >/dev/null 2>&1; then
-            docker buildx imagetools create --tag "${IMAGE}:bak" "${IMAGE}:latest"
+            docker pull "${IMAGE}:latest"
+            docker tag "${IMAGE}:latest" "${IMAGE}:bak"
+            docker push "${IMAGE}:bak"
           else
             echo "No existing ${IMAGE}:latest found before publish; skipping pre-publish backup."
           fi
@@ -252,7 +254,9 @@ jobs:
 
           if ! has_remote_ref "${IMAGE}:bak"; then
             echo "Seeding ${IMAGE}:bak from ${IMAGE}:latest"
-            docker buildx imagetools create --tag "${IMAGE}:bak" "${IMAGE}:latest"
+            docker pull "${IMAGE}:latest"
+            docker tag "${IMAGE}:latest" "${IMAGE}:bak"
+            docker push "${IMAGE}:bak"
           fi
 
           require_remote_ref "${IMAGE}:bak"
