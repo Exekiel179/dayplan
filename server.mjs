@@ -12,6 +12,7 @@ const port = Number(process.env.PORT || 3000);
 
 const dataDir = path.resolve(__dirname, '.data');
 const legacyTasksFile = path.join(dataDir, 'tasks.json');
+const legacyTasksBackupFile = path.join(dataDir, 'tasks.legacy.backup.json');
 const authUsersFile = path.join(dataDir, 'auth-users.json');
 const distDir = path.resolve(__dirname, 'dist');
 
@@ -252,6 +253,15 @@ function getUserTasksFile(username) {
   return path.join(dataDir, 'users', safeUser, 'tasks.json');
 }
 
+function hasRecordEntries(value) {
+  return Boolean(value && typeof value === 'object' && Object.keys(value).length > 0);
+}
+
+function isSeedUsername(username) {
+  const normalized = normalizeUsername(username);
+  return SEED_USERS.some((user) => normalizeUsername(user.username) === normalized);
+}
+
 function normalizeAbilityModule(payload) {
   if (!payload || typeof payload !== 'object') {
     return {
@@ -359,27 +369,100 @@ function normalizeTaskPayload(payload) {
   };
 }
 
-async function readTasks(username) {
-  const userTasksFile = getUserTasksFile(username);
+async function readLegacyTaskPayload() {
   try {
-    const text = await fs.promises.readFile(userTasksFile, 'utf-8');
-    const parsed = JSON.parse(text);
-    return normalizeTaskPayload(parsed);
+    const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
+    return normalizeTaskPayload(JSON.parse(text));
   } catch (error) {
     if (error && error.code === 'ENOENT') {
-      try {
-        const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
-        const parsed = JSON.parse(text);
-        return normalizeTaskPayload(parsed);
-      } catch (legacyError) {
-        if (legacyError && legacyError.code === 'ENOENT') {
-          return normalizeTaskPayload([]);
-        }
-        throw legacyError;
-      }
+      return null;
     }
     throw error;
   }
+}
+
+function mergeLegacyTaskPayload(currentPayload, legacyPayload) {
+  return {
+    tasks: legacyPayload.tasks,
+    ability_dimensions: [...new Set([
+      ...legacyPayload.ability_dimensions,
+      ...currentPayload.ability_dimensions,
+    ])],
+    wellbeing: {
+      daily_checkins: {
+        ...legacyPayload.wellbeing.daily_checkins,
+        ...currentPayload.wellbeing.daily_checkins,
+      },
+      daily_rest_sessions: {
+        ...legacyPayload.wellbeing.daily_rest_sessions,
+        ...currentPayload.wellbeing.daily_rest_sessions,
+      },
+    },
+    ability_module: hasRecordEntries(currentPayload.ability_module.special_totals)
+      || currentPayload.ability_module.tracked_ms_baseline > 0
+      || currentPayload.ability_module.active_module_id !== 'special:mokugyo'
+      ? currentPayload.ability_module
+      : legacyPayload.ability_module,
+  };
+}
+
+async function archiveLegacyTasksFile() {
+  try {
+    await fs.promises.access(legacyTasksFile);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  try {
+    await fs.promises.access(legacyTasksBackupFile);
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') {
+      throw error;
+    }
+    await fs.promises.copyFile(legacyTasksFile, legacyTasksBackupFile);
+  }
+
+  await fs.promises.unlink(legacyTasksFile).catch((error) => {
+    if (!error || error.code !== 'ENOENT') {
+      throw error;
+    }
+  });
+}
+
+async function maybeAdoptLegacyTasks(username, currentPayload) {
+  if (!isSeedUsername(username) || currentPayload.tasks.length > 0) {
+    return currentPayload;
+  }
+
+  const legacyPayload = await readLegacyTaskPayload();
+  if (!legacyPayload || legacyPayload.tasks.length === 0) {
+    return currentPayload;
+  }
+
+  const migratedPayload = mergeLegacyTaskPayload(currentPayload, legacyPayload);
+  await writeTasks(username, migratedPayload);
+  await archiveLegacyTasksFile();
+  console.log(`Migrated legacy single-user tasks into ${normalizeUsername(username)}`);
+  return migratedPayload;
+}
+
+async function readTasks(username) {
+  const userTasksFile = getUserTasksFile(username);
+  let currentPayload = normalizeTaskPayload([]);
+
+  try {
+    const text = await fs.promises.readFile(userTasksFile, 'utf-8');
+    currentPayload = normalizeTaskPayload(JSON.parse(text));
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  return maybeAdoptLegacyTasks(username, currentPayload);
 }
 
 async function writeTasks(username, payload) {

@@ -7,6 +7,7 @@ import { defineConfig, loadEnv } from 'vite';
 
 const dataDir = path.resolve(__dirname, '.data');
 const legacyTasksFile = path.join(dataDir, 'tasks.json');
+const legacyTasksBackupFile = path.join(dataDir, 'tasks.legacy.backup.json');
 const authUsersFile = path.join(dataDir, 'auth-users.json');
 
 type Req = {
@@ -85,31 +86,231 @@ function getUserTasksFile(username: string) {
   return path.join(dataDir, 'users', safeUser, 'tasks.json');
 }
 
-async function readTasks(username: string) {
-  const tasksFile = getUserTasksFile(username);
+function hasRecordEntries(value: unknown) {
+  return Boolean(value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0);
+}
+
+function normalizeAbilityModule(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return {
+      active_module_id: 'special:mokugyo',
+      special_totals: {},
+      tracked_ms_baseline: 0,
+      updated_at: Date.now(),
+    };
+  }
+
+  const source = payload as Record<string, unknown>;
+  return {
+    active_module_id: typeof source.active_module_id === 'string' && source.active_module_id.trim()
+      ? source.active_module_id.trim()
+      : 'special:mokugyo',
+    special_totals: source.special_totals && typeof source.special_totals === 'object'
+      ? Object.fromEntries(
+          Object.entries(source.special_totals)
+            .filter(([key, value]) => typeof key === 'string' && Number.isFinite(Number(value)))
+            .map(([key, value]) => [key, Math.max(0, Number(value))])
+        )
+      : {},
+    tracked_ms_baseline: Number.isFinite(Number(source.tracked_ms_baseline))
+      ? Math.max(0, Number(source.tracked_ms_baseline))
+      : 0,
+    updated_at: Number.isFinite(Number(source.updated_at)) ? Number(source.updated_at) : Date.now(),
+  };
+}
+
+function normalizeTaskPayload(payload: unknown) {
+  if (Array.isArray(payload)) {
+    return {
+      tasks: payload,
+      ability_dimensions: [],
+      wellbeing: {
+        daily_checkins: {},
+        daily_rest_sessions: {},
+      },
+      ability_module: normalizeAbilityModule(null),
+    };
+  }
+
+  if (payload && typeof payload === 'object') {
+    const source = payload as Record<string, any>;
+    return {
+      tasks: Array.isArray(source.tasks) ? source.tasks : [],
+      ability_dimensions: Array.isArray(source.ability_dimensions)
+        ? source.ability_dimensions
+          .filter((item: unknown): item is string => typeof item === 'string')
+          .map((item: string) => item.trim())
+          .filter(Boolean)
+        : [],
+      wellbeing: source.wellbeing && typeof source.wellbeing === 'object' && source.wellbeing.daily_checkins && typeof source.wellbeing.daily_checkins === 'object'
+        ? {
+            daily_checkins: Object.fromEntries(
+              Object.entries(source.wellbeing.daily_checkins)
+                .filter(([key, value]) =>
+                  typeof key === 'string'
+                  && value
+                  && typeof value === 'object'
+                  && Number.isFinite(Number((value as Record<string, unknown>).initial_energy))
+                )
+                .map(([key, value]) => [
+                  key,
+                  {
+                    initial_energy: Math.max(0, Math.min(100, Math.round(Number((value as Record<string, unknown>).initial_energy)))),
+                    updated_at: Number.isFinite(Number((value as Record<string, unknown>).updated_at))
+                      ? Number((value as Record<string, unknown>).updated_at)
+                      : Date.now(),
+                  },
+                ])
+            ),
+            daily_rest_sessions: source.wellbeing.daily_rest_sessions && typeof source.wellbeing.daily_rest_sessions === 'object'
+              ? Object.fromEntries(
+                  Object.entries(source.wellbeing.daily_rest_sessions)
+                    .filter(([key, value]) => typeof key === 'string' && value && typeof value === 'object')
+                    .map(([key, value]) => [
+                      key,
+                      {
+                        is_resting: Boolean((value as Record<string, unknown>).is_resting),
+                        started_at: Number.isFinite(Number((value as Record<string, unknown>).started_at))
+                          ? Number((value as Record<string, unknown>).started_at)
+                          : null,
+                        recovered_energy: Number.isFinite(Number((value as Record<string, unknown>).recovered_energy))
+                          ? Math.max(0, Math.min(100, Number((value as Record<string, unknown>).recovered_energy)))
+                          : 0,
+                        updated_at: Number.isFinite(Number((value as Record<string, unknown>).updated_at))
+                          ? Number((value as Record<string, unknown>).updated_at)
+                          : Date.now(),
+                      },
+                    ])
+                )
+              : {},
+          }
+        : {
+            daily_checkins: {},
+            daily_rest_sessions: {},
+          },
+      ability_module: normalizeAbilityModule(source.ability_module),
+    };
+  }
+
+  return {
+    tasks: [],
+    ability_dimensions: [],
+    wellbeing: {
+      daily_checkins: {},
+      daily_rest_sessions: {},
+    },
+    ability_module: normalizeAbilityModule(null),
+  };
+}
+
+function isSeedUsername(username: string, authConfig: AuthConfig) {
+  const normalized = normalizeUsername(username);
+  return authConfig.seedUsers.some((user) => normalizeUsername(user.username) === normalized);
+}
+
+async function readLegacyTaskPayload() {
   try {
-    const text = await fs.promises.readFile(tasksFile, 'utf-8');
-    const parsed = JSON.parse(text);
-    return Array.isArray(parsed) ? parsed : [];
+    const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
+    return normalizeTaskPayload(JSON.parse(text));
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      try {
-        const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
-        const parsed = JSON.parse(text);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch (legacyError: unknown) {
-        if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') return [];
-        throw legacyError;
-      }
+      return null;
     }
     throw error;
   }
 }
 
-async function writeTasks(username: string, tasks: unknown[]) {
+function mergeLegacyTaskPayload(currentPayload: ReturnType<typeof normalizeTaskPayload>, legacyPayload: ReturnType<typeof normalizeTaskPayload>) {
+  return {
+    tasks: legacyPayload.tasks,
+    ability_dimensions: [...new Set([
+      ...legacyPayload.ability_dimensions,
+      ...currentPayload.ability_dimensions,
+    ])],
+    wellbeing: {
+      daily_checkins: {
+        ...legacyPayload.wellbeing.daily_checkins,
+        ...currentPayload.wellbeing.daily_checkins,
+      },
+      daily_rest_sessions: {
+        ...legacyPayload.wellbeing.daily_rest_sessions,
+        ...currentPayload.wellbeing.daily_rest_sessions,
+      },
+    },
+    ability_module: hasRecordEntries(currentPayload.ability_module.special_totals)
+      || currentPayload.ability_module.tracked_ms_baseline > 0
+      || currentPayload.ability_module.active_module_id !== 'special:mokugyo'
+      ? currentPayload.ability_module
+      : legacyPayload.ability_module,
+  };
+}
+
+async function archiveLegacyTasksFile() {
+  try {
+    await fs.promises.access(legacyTasksFile);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  try {
+    await fs.promises.access(legacyTasksBackupFile);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+    await fs.promises.copyFile(legacyTasksFile, legacyTasksBackupFile);
+  }
+
+  await fs.promises.unlink(legacyTasksFile).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  });
+}
+
+async function writeTasks(username: string, payload: unknown) {
   const tasksFile = getUserTasksFile(username);
   await fs.promises.mkdir(path.dirname(tasksFile), { recursive: true });
-  await fs.promises.writeFile(tasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
+  await fs.promises.writeFile(tasksFile, JSON.stringify(normalizeTaskPayload(payload), null, 2), 'utf-8');
+}
+
+async function maybeAdoptLegacyTasks(
+  username: string,
+  currentPayload: ReturnType<typeof normalizeTaskPayload>,
+  authConfig: AuthConfig
+) {
+  if (!isSeedUsername(username, authConfig) || currentPayload.tasks.length > 0) {
+    return currentPayload;
+  }
+
+  const legacyPayload = await readLegacyTaskPayload();
+  if (!legacyPayload || legacyPayload.tasks.length === 0) {
+    return currentPayload;
+  }
+
+  const migratedPayload = mergeLegacyTaskPayload(currentPayload, legacyPayload);
+  await writeTasks(username, migratedPayload);
+  await archiveLegacyTasksFile();
+  return migratedPayload;
+}
+
+async function readTasks(username: string, authConfig: AuthConfig) {
+  const tasksFile = getUserTasksFile(username);
+  let currentPayload = normalizeTaskPayload([]);
+
+  try {
+    const text = await fs.promises.readFile(tasksFile, 'utf-8');
+    currentPayload = normalizeTaskPayload(JSON.parse(text));
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  return maybeAdoptLegacyTasks(username, currentPayload, authConfig);
 }
 
 async function readRegisteredUsers() {
@@ -418,7 +619,7 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
       if (!session) return;
 
       if (req.method === 'GET') {
-        readTasks(session.username)
+        readTasks(session.username, authConfig)
           .then((tasks) => sendJson(res, 200, tasks))
           .catch((error) => sendJson(res, 500, { error: `read failed: ${(error as Error).message}` }));
         return;
@@ -427,8 +628,8 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
       if (req.method === 'PUT') {
         readJsonBody(req)
           .then(async (payload) => {
-            if (!Array.isArray(payload)) {
-              sendJson(res, 400, { error: 'payload must be an array' });
+            if (!Array.isArray(payload) && !(payload && typeof payload === 'object')) {
+              sendJson(res, 400, { error: 'payload must be an array or object' });
               return;
             }
             await writeTasks(session.username, payload);
