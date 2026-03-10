@@ -7,7 +7,6 @@ import { defineConfig, loadEnv } from 'vite';
 
 const dataDir = path.resolve(__dirname, '.data');
 const legacyTasksFile = path.join(dataDir, 'tasks.json');
-const legacyTasksBackupFile = path.join(dataDir, 'tasks.legacy.backup.json');
 const authUsersFile = path.join(dataDir, 'auth-users.json');
 
 type Req = {
@@ -86,342 +85,31 @@ function getUserTasksFile(username: string) {
   return path.join(dataDir, 'users', safeUser, 'tasks.json');
 }
 
-function hasRecordEntries(value: unknown) {
-  return Boolean(value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0);
-}
-
-function createDefaultWellbeing() {
-  return {
-    daily_checkins: {},
-    daily_rest_sessions: {},
-    daily_behavior_events: {},
-    daily_chat_messages: {},
-  };
-}
-
-function normalizeAbilityModule(payload: unknown) {
-  if (!payload || typeof payload !== 'object') {
-    return {
-      active_module_id: 'special:mokugyo',
-      special_totals: {},
-      tracked_ms_baseline: 0,
-      updated_at: Date.now(),
-    };
-  }
-
-  const source = payload as Record<string, unknown>;
-  return {
-    active_module_id: typeof source.active_module_id === 'string' && source.active_module_id.trim()
-      ? source.active_module_id.trim()
-      : 'special:mokugyo',
-    special_totals: source.special_totals && typeof source.special_totals === 'object'
-      ? Object.fromEntries(
-          Object.entries(source.special_totals)
-            .filter(([key, value]) => typeof key === 'string' && Number.isFinite(Number(value)))
-            .map(([key, value]) => [key, Math.max(0, Number(value))])
-        )
-      : {},
-    tracked_ms_baseline: Number.isFinite(Number(source.tracked_ms_baseline))
-      ? Math.max(0, Number(source.tracked_ms_baseline))
-      : 0,
-    updated_at: Number.isFinite(Number(source.updated_at)) ? Number(source.updated_at) : Date.now(),
-  };
-}
-
-function normalizeRecoveredEnergy(value: unknown) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric < 0) return 0;
-  return Math.max(0, Math.min(100, numeric));
-}
-
-function normalizeBehaviorDurationMinutes(value: unknown) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 60;
-  return Math.max(10, Math.min(12 * 60, Math.round(numeric)));
-}
-
-function normalizeBurnRateMultiplier(value: unknown) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 1;
-  return Math.max(0.55, Math.min(1.2, Number(numeric.toFixed(2))));
-}
-
-function normalizeWellbeingChatMessage(value: unknown) {
-  if (!value || typeof value !== 'object') return null;
-
-  const raw = value as Record<string, unknown>;
-  if (raw.role !== 'user' && raw.role !== 'assistant') {
-    return null;
-  }
-
-  const text = typeof raw.text === 'string' ? raw.text.trim() : '';
-  if (!text) return null;
-
-  return {
-    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : crypto.randomUUID(),
-    role: raw.role,
-    text,
-    created_at: Number.isFinite(Number(raw.created_at)) ? Number(raw.created_at) : Date.now(),
-    behavior_event_id: typeof raw.behavior_event_id === 'string' && raw.behavior_event_id.trim()
-      ? raw.behavior_event_id
-      : null,
-  };
-}
-
-function normalizeExternalBehaviorEvent(value: unknown) {
-  if (!value || typeof value !== 'object') return null;
-
-  const raw = value as Record<string, unknown>;
-  const label = typeof raw.label === 'string' ? raw.label.trim() : '';
-  const message = typeof raw.message === 'string' ? raw.message.trim() : '';
-  const type = typeof raw.type === 'string' && raw.type.trim() ? raw.type.trim() : 'custom';
-  const startedAt = Number(raw.started_at);
-
-  if (!label || !message || !Number.isFinite(startedAt)) {
-    return null;
-  }
-
-  return {
-    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : crypto.randomUUID(),
-    type,
-    label,
-    message,
-    instant_energy: Math.max(-10, Math.min(20, Math.round(Number(raw.instant_energy) || 0))),
-    energy_boost_per_hour: Math.max(-10, Math.min(12, Number(raw.energy_boost_per_hour) || 0)),
-    burn_rate_multiplier: normalizeBurnRateMultiplier(raw.burn_rate_multiplier),
-    duration_minutes: normalizeBehaviorDurationMinutes(raw.duration_minutes),
-    started_at: startedAt,
-    updated_at: Number.isFinite(Number(raw.updated_at)) ? Number(raw.updated_at) : startedAt,
-  };
-}
-
-function normalizeWellbeing(payload: unknown) {
-  if (!payload || typeof payload !== 'object') {
-    return createDefaultWellbeing();
-  }
-
-  const raw = payload as Record<string, any>;
-  const dailyCheckins = raw.daily_checkins && typeof raw.daily_checkins === 'object'
-    ? Object.fromEntries(
-        Object.entries(raw.daily_checkins)
-          .filter(([key, value]) =>
-            typeof key === 'string'
-            && value
-            && typeof value === 'object'
-            && Number.isFinite(Number((value as Record<string, unknown>).initial_energy))
-          )
-          .map(([key, value]) => [
-            key,
-            {
-              initial_energy: Math.max(0, Math.min(100, Math.round(Number((value as Record<string, unknown>).initial_energy)))),
-              updated_at: Number.isFinite(Number((value as Record<string, unknown>).updated_at))
-                ? Number((value as Record<string, unknown>).updated_at)
-                : Date.now(),
-            },
-          ])
-      )
-    : {};
-
-  const dailyRestSessions = raw.daily_rest_sessions && typeof raw.daily_rest_sessions === 'object'
-    ? Object.fromEntries(
-        Object.entries(raw.daily_rest_sessions)
-          .filter(([key, value]) => typeof key === 'string' && value && typeof value === 'object')
-          .map(([key, value]) => [
-            key,
-            {
-              is_resting: Boolean((value as Record<string, unknown>).is_resting),
-              started_at: Number.isFinite(Number((value as Record<string, unknown>).started_at))
-                ? Number((value as Record<string, unknown>).started_at)
-                : null,
-              recovered_energy: normalizeRecoveredEnergy((value as Record<string, unknown>).recovered_energy),
-              updated_at: Number.isFinite(Number((value as Record<string, unknown>).updated_at))
-                ? Number((value as Record<string, unknown>).updated_at)
-                : Date.now(),
-            },
-          ])
-      )
-    : {};
-
-  const dailyBehaviorEvents = raw.daily_behavior_events && typeof raw.daily_behavior_events === 'object'
-    ? Object.entries(raw.daily_behavior_events).reduce<Record<string, ReturnType<typeof normalizeExternalBehaviorEvent>[]>>((acc, [dayKey, events]) => {
-        if (!Array.isArray(events)) return acc;
-        const normalized = events
-          .map((event) => normalizeExternalBehaviorEvent(event))
-          .filter((event): event is NonNullable<ReturnType<typeof normalizeExternalBehaviorEvent>> => Boolean(event));
-
-        if (normalized.length > 0) {
-          acc[dayKey] = normalized;
-        }
-
-        return acc;
-      }, {})
-    : {};
-
-  const dailyChatMessages = raw.daily_chat_messages && typeof raw.daily_chat_messages === 'object'
-    ? Object.entries(raw.daily_chat_messages).reduce<Record<string, ReturnType<typeof normalizeWellbeingChatMessage>[]>>((acc, [dayKey, messages]) => {
-        if (!Array.isArray(messages)) return acc;
-        const normalized = messages
-          .map((message) => normalizeWellbeingChatMessage(message))
-          .filter((message): message is NonNullable<ReturnType<typeof normalizeWellbeingChatMessage>> => Boolean(message))
-          .slice(-24);
-
-        if (normalized.length > 0) {
-          acc[dayKey] = normalized;
-        }
-
-        return acc;
-      }, {})
-    : {};
-
-  return {
-    daily_checkins: dailyCheckins,
-    daily_rest_sessions: dailyRestSessions,
-    daily_behavior_events: dailyBehaviorEvents,
-    daily_chat_messages: dailyChatMessages,
-  };
-}
-
-function normalizeTaskPayload(payload: unknown) {
-  if (Array.isArray(payload)) {
-    return {
-      tasks: payload,
-      ability_dimensions: [],
-      wellbeing: createDefaultWellbeing(),
-      ability_module: normalizeAbilityModule(null),
-    };
-  }
-
-  if (payload && typeof payload === 'object') {
-    const source = payload as Record<string, any>;
-    return {
-      tasks: Array.isArray(source.tasks) ? source.tasks : [],
-      ability_dimensions: Array.isArray(source.ability_dimensions)
-        ? source.ability_dimensions
-          .filter((item: unknown): item is string => typeof item === 'string')
-          .map((item: string) => item.trim())
-          .filter(Boolean)
-        : [],
-      wellbeing: normalizeWellbeing(source.wellbeing),
-      ability_module: normalizeAbilityModule(source.ability_module),
-    };
-  }
-
-  return {
-    tasks: [],
-    ability_dimensions: [],
-    wellbeing: createDefaultWellbeing(),
-    ability_module: normalizeAbilityModule(null),
-  };
-}
-
-function isSeedUsername(username: string, authConfig: AuthConfig) {
-  const normalized = normalizeUsername(username);
-  return authConfig.seedUsers.some((user) => normalizeUsername(user.username) === normalized);
-}
-
-async function readLegacyTaskPayload() {
-  try {
-    const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
-    return normalizeTaskPayload(JSON.parse(text));
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-}
-
-function mergeLegacyTaskPayload(currentPayload: ReturnType<typeof normalizeTaskPayload>, legacyPayload: ReturnType<typeof normalizeTaskPayload>) {
-  return {
-    tasks: legacyPayload.tasks,
-    ability_dimensions: [...new Set([
-      ...legacyPayload.ability_dimensions,
-      ...currentPayload.ability_dimensions,
-    ])],
-    wellbeing: {
-      daily_checkins: {
-        ...legacyPayload.wellbeing.daily_checkins,
-        ...currentPayload.wellbeing.daily_checkins,
-      },
-      daily_rest_sessions: {
-        ...legacyPayload.wellbeing.daily_rest_sessions,
-        ...currentPayload.wellbeing.daily_rest_sessions,
-      },
-    },
-    ability_module: hasRecordEntries(currentPayload.ability_module.special_totals)
-      || currentPayload.ability_module.tracked_ms_baseline > 0
-      || currentPayload.ability_module.active_module_id !== 'special:mokugyo'
-      ? currentPayload.ability_module
-      : legacyPayload.ability_module,
-  };
-}
-
-async function archiveLegacyTasksFile() {
-  try {
-    await fs.promises.access(legacyTasksFile);
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return;
-    }
-    throw error;
-  }
-
-  try {
-    await fs.promises.access(legacyTasksBackupFile);
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
-    }
-    await fs.promises.copyFile(legacyTasksFile, legacyTasksBackupFile);
-  }
-
-  await fs.promises.unlink(legacyTasksFile).catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
-    }
-  });
-}
-
-async function writeTasks(username: string, payload: unknown) {
+async function readTasks(username: string) {
   const tasksFile = getUserTasksFile(username);
-  await fs.promises.mkdir(path.dirname(tasksFile), { recursive: true });
-  await fs.promises.writeFile(tasksFile, JSON.stringify(normalizeTaskPayload(payload), null, 2), 'utf-8');
-}
-
-async function maybeAdoptLegacyTasks(
-  username: string,
-  currentPayload: ReturnType<typeof normalizeTaskPayload>,
-  authConfig: AuthConfig
-) {
-  if (!isSeedUsername(username, authConfig) || currentPayload.tasks.length > 0) {
-    return currentPayload;
-  }
-
-  const legacyPayload = await readLegacyTaskPayload();
-  if (!legacyPayload || legacyPayload.tasks.length === 0) {
-    return currentPayload;
-  }
-
-  const migratedPayload = mergeLegacyTaskPayload(currentPayload, legacyPayload);
-  await writeTasks(username, migratedPayload);
-  await archiveLegacyTasksFile();
-  return migratedPayload;
-}
-
-async function readTasks(username: string, authConfig: AuthConfig) {
-  const tasksFile = getUserTasksFile(username);
-  let currentPayload = normalizeTaskPayload([]);
-
   try {
     const text = await fs.promises.readFile(tasksFile, 'utf-8');
-    currentPayload = normalizeTaskPayload(JSON.parse(text));
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      try {
+        const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
+        const parsed = JSON.parse(text);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (legacyError: unknown) {
+        if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw legacyError;
+      }
     }
+    throw error;
   }
+}
 
-  return maybeAdoptLegacyTasks(username, currentPayload, authConfig);
+async function writeTasks(username: string, tasks: unknown[]) {
+  const tasksFile = getUserTasksFile(username);
+  await fs.promises.mkdir(path.dirname(tasksFile), { recursive: true });
+  await fs.promises.writeFile(tasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
 }
 
 async function readRegisteredUsers() {
@@ -730,7 +418,7 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
       if (!session) return;
 
       if (req.method === 'GET') {
-        readTasks(session.username, authConfig)
+        readTasks(session.username)
           .then((tasks) => sendJson(res, 200, tasks))
           .catch((error) => sendJson(res, 500, { error: `read failed: ${(error as Error).message}` }));
         return;
@@ -739,8 +427,8 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
       if (req.method === 'PUT') {
         readJsonBody(req)
           .then(async (payload) => {
-            if (!Array.isArray(payload) && !(payload && typeof payload === 'object')) {
-              sendJson(res, 400, { error: 'payload must be an array or object' });
+            if (!Array.isArray(payload)) {
+              sendJson(res, 400, { error: 'payload must be an array' });
               return;
             }
             await writeTasks(session.username, payload);
