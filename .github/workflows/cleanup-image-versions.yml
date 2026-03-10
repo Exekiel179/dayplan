@@ -1,0 +1,167 @@
+name: Cleanup Image Versions
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cleanup-image-versions
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      REPOSITORY_OWNER: ${{ github.repository_owner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image names
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner_lower=$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "ghcr_image=ghcr.io/${owner_lower}/dayplan" >> "$GITHUB_OUTPUT"
+          echo "ghcr_package_owner=${REPOSITORY_OWNER}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve Docker Hub credentials
+        id: dockerhub_vars
+        env:
+          PRIMARY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          PRIMARY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          FALLBACK_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          FALLBACK_TOKEN: ${{ secrets.DOCKER_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          username="${PRIMARY_USERNAME:-}"
+          token="${PRIMARY_TOKEN:-}"
+
+          if [[ -z "${username}" || -z "${token}" ]]; then
+            username="${FALLBACK_USERNAME:-}"
+            token="${FALLBACK_TOKEN:-}"
+          fi
+
+          if [[ -z "${username}" || -z "${token}" ]]; then
+            echo "::error::Docker Hub credentials are not configured."
+            exit 1
+          fi
+
+          echo "username=${username}" >> "$GITHUB_OUTPUT"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+          echo "image=$(echo "${username}" | tr '[:upper:]' '[:lower:]')/dayplan" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ steps.dockerhub_vars.outputs.username }}
+          password: ${{ steps.dockerhub_vars.outputs.token }}
+
+      - name: Repoint bak to latest on both registries
+        env:
+          GHCR_IMAGE: ${{ steps.vars.outputs.ghcr_image }}
+          DOCKERHUB_IMAGE: ${{ steps.dockerhub_vars.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "${GHCR_IMAGE}:bak" "${GHCR_IMAGE}:latest"
+          docker buildx imagetools create --tag "${DOCKERHUB_IMAGE}:bak" "${DOCKERHUB_IMAGE}:latest"
+
+      - name: Delete extra GHCR package versions
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = process.env.REPOSITORY_OWNER;
+            const packageName = 'dayplan';
+            const keepTags = new Set(['latest', 'bak']);
+
+            const versions = await github.paginate(
+              github.rest.packages.getAllPackageVersionsForPackageOwnedByUser,
+              {
+                package_type: 'container',
+                package_name: packageName,
+                username: owner,
+                per_page: 100,
+              }
+            );
+
+            for (const version of versions) {
+              const tags = version.metadata?.container?.tags ?? [];
+              const shouldKeep = tags.some((tag) => keepTags.has(tag));
+              core.info(`GHCR version ${version.id}: ${tags.join(', ') || '(untagged)'} => ${shouldKeep ? 'keep' : 'delete'}`);
+              if (!shouldKeep) {
+                await github.rest.packages.deletePackageVersionForUser({
+                  package_type: 'container',
+                  package_name: packageName,
+                  username: owner,
+                  package_version_id: version.id,
+                });
+              }
+            }
+
+      - name: Delete extra Docker Hub tags
+        env:
+          DOCKERHUB_USERNAME: ${{ steps.dockerhub_vars.outputs.username }}
+          DOCKERHUB_TOKEN: ${{ steps.dockerhub_vars.outputs.token }}
+          DOCKERHUB_IMAGE: ${{ steps.dockerhub_vars.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          namespace="${DOCKERHUB_IMAGE%%/*}"
+          repository="${DOCKERHUB_IMAGE##*/}"
+
+          jwt=$(curl -fsSL -X POST https://hub.docker.com/v2/users/login/ \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"${DOCKERHUB_USERNAME}\",\"password\":\"${DOCKERHUB_TOKEN}\"}" | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+          mapfile -t tags < <(curl -fsSL "https://hub.docker.com/v2/repositories/${namespace}/${repository}/tags?page_size=100" | python -c "import sys,json; data=json.load(sys.stdin); [print(item['name']) for item in data.get('results', [])]")
+
+          for tag in "${tags[@]}"; do
+            case "$tag" in
+              latest|bak)
+                echo "Keeping Docker Hub tag: $tag"
+                ;;
+              *)
+                echo "Deleting Docker Hub tag: $tag"
+                curl -fsSL -X DELETE "https://hub.docker.com/v2/repositories/${namespace}/${repository}/tags/${tag}/" \
+                  -H "Authorization: JWT ${jwt}"
+                ;;
+            esac
+          done
+
+      - name: Delete Git tag v0.1.0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/v0.1.0" || true
+
+      - name: Verify kept tags
+        env:
+          GHCR_IMAGE: ${{ steps.vars.outputs.ghcr_image }}
+          DOCKERHUB_IMAGE: ${{ steps.dockerhub_vars.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${GHCR_IMAGE}:latest" >/dev/null
+          docker buildx imagetools inspect "${GHCR_IMAGE}:bak" >/dev/null
+          docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:latest" >/dev/null
+          docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:bak" >/dev/null
