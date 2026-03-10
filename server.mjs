@@ -262,6 +262,15 @@ function isSeedUsername(username) {
   return SEED_USERS.some((user) => normalizeUsername(user.username) === normalized);
 }
 
+function createDefaultWellbeing() {
+  return {
+    daily_checkins: {},
+    daily_rest_sessions: {},
+    daily_behavior_events: {},
+    daily_chat_messages: {},
+  };
+}
+
 function normalizeAbilityModule(payload) {
   if (!payload || typeof payload !== 'object') {
     return {
@@ -290,15 +299,158 @@ function normalizeAbilityModule(payload) {
   };
 }
 
+function normalizeRecoveredEnergy(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
+  return Math.max(0, Math.min(100, numeric));
+}
+
+function normalizeBehaviorDurationMinutes(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 60;
+  return Math.max(10, Math.min(12 * 60, Math.round(numeric)));
+}
+
+function normalizeBurnRateMultiplier(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.max(0.55, Math.min(1.2, Number(numeric.toFixed(2))));
+}
+
+function normalizeWellbeingChatMessage(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  if (payload.role !== 'user' && payload.role !== 'assistant') {
+    return null;
+  }
+
+  const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+  if (!text) return null;
+
+  return {
+    id: typeof payload.id === 'string' && payload.id.trim() ? payload.id : crypto.randomUUID(),
+    role: payload.role,
+    text,
+    created_at: Number.isFinite(Number(payload.created_at)) ? Number(payload.created_at) : Date.now(),
+    behavior_event_id: typeof payload.behavior_event_id === 'string' && payload.behavior_event_id.trim()
+      ? payload.behavior_event_id
+      : null,
+  };
+}
+
+function normalizeExternalBehaviorEvent(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const label = typeof payload.label === 'string' ? payload.label.trim() : '';
+  const message = typeof payload.message === 'string' ? payload.message.trim() : '';
+  const type = typeof payload.type === 'string' && payload.type.trim() ? payload.type.trim() : 'custom';
+  const startedAt = Number(payload.started_at);
+
+  if (!label || !message || !Number.isFinite(startedAt)) {
+    return null;
+  }
+
+  return {
+    id: typeof payload.id === 'string' && payload.id.trim() ? payload.id : crypto.randomUUID(),
+    type,
+    label,
+    message,
+    instant_energy: Math.max(-10, Math.min(20, Math.round(Number(payload.instant_energy) || 0))),
+    energy_boost_per_hour: Math.max(-10, Math.min(12, Number(payload.energy_boost_per_hour) || 0)),
+    burn_rate_multiplier: normalizeBurnRateMultiplier(payload.burn_rate_multiplier),
+    duration_minutes: normalizeBehaviorDurationMinutes(payload.duration_minutes),
+    started_at: startedAt,
+    updated_at: Number.isFinite(Number(payload.updated_at)) ? Number(payload.updated_at) : startedAt,
+  };
+}
+
+function normalizeWellbeing(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return createDefaultWellbeing();
+  }
+
+  const dailyCheckins = payload.daily_checkins && typeof payload.daily_checkins === 'object'
+    ? Object.fromEntries(
+        Object.entries(payload.daily_checkins)
+          .filter(([key, value]) =>
+            typeof key === 'string'
+            && value
+            && typeof value === 'object'
+            && Number.isFinite(Number(value.initial_energy))
+          )
+          .map(([key, value]) => [
+            key,
+            {
+              initial_energy: Math.max(0, Math.min(100, Math.round(Number(value.initial_energy)))),
+              updated_at: Number.isFinite(Number(value.updated_at)) ? Number(value.updated_at) : Date.now(),
+            },
+          ])
+      )
+    : {};
+
+  const dailyRestSessions = payload.daily_rest_sessions && typeof payload.daily_rest_sessions === 'object'
+    ? Object.fromEntries(
+        Object.entries(payload.daily_rest_sessions)
+          .filter(([key, value]) => typeof key === 'string' && value && typeof value === 'object')
+          .map(([key, value]) => [
+            key,
+            {
+              is_resting: Boolean(value.is_resting),
+              started_at: Number.isFinite(Number(value.started_at)) ? Number(value.started_at) : null,
+              recovered_energy: normalizeRecoveredEnergy(value.recovered_energy),
+              updated_at: Number.isFinite(Number(value.updated_at)) ? Number(value.updated_at) : Date.now(),
+            },
+          ])
+      )
+    : {};
+
+  const dailyBehaviorEvents = payload.daily_behavior_events && typeof payload.daily_behavior_events === 'object'
+    ? Object.entries(payload.daily_behavior_events).reduce((acc, [dayKey, events]) => {
+        if (!Array.isArray(events)) return acc;
+
+        const normalized = events
+          .map((event) => normalizeExternalBehaviorEvent(event))
+          .filter(Boolean);
+
+        if (normalized.length > 0) {
+          acc[dayKey] = normalized;
+        }
+
+        return acc;
+      }, {})
+    : {};
+
+  const dailyChatMessages = payload.daily_chat_messages && typeof payload.daily_chat_messages === 'object'
+    ? Object.entries(payload.daily_chat_messages).reduce((acc, [dayKey, messages]) => {
+        if (!Array.isArray(messages)) return acc;
+
+        const normalized = messages
+          .map((message) => normalizeWellbeingChatMessage(message))
+          .filter(Boolean)
+          .slice(-24);
+
+        if (normalized.length > 0) {
+          acc[dayKey] = normalized;
+        }
+
+        return acc;
+      }, {})
+    : {};
+
+  return {
+    daily_checkins: dailyCheckins,
+    daily_rest_sessions: dailyRestSessions,
+    daily_behavior_events: dailyBehaviorEvents,
+    daily_chat_messages: dailyChatMessages,
+  };
+}
+
 function normalizeTaskPayload(payload) {
   if (Array.isArray(payload)) {
     return {
       tasks: payload,
       ability_dimensions: [],
-      wellbeing: {
-        daily_checkins: {},
-        daily_rest_sessions: {},
-      },
+      wellbeing: createDefaultWellbeing(),
       ability_module: normalizeAbilityModule(null),
     };
   }
@@ -311,60 +463,14 @@ function normalizeTaskPayload(payload) {
           .map((item) => item.trim())
           .filter(Boolean)
         : [],
-      wellbeing: payload.wellbeing && typeof payload.wellbeing === 'object' && payload.wellbeing.daily_checkins && typeof payload.wellbeing.daily_checkins === 'object'
-        ? {
-            daily_checkins: Object.fromEntries(
-              Object.entries(payload.wellbeing.daily_checkins)
-                .filter(([key, value]) =>
-                  typeof key === 'string'
-                  && value
-                  && typeof value === 'object'
-                  && Number.isFinite(Number(value.initial_energy))
-                )
-                .map(([key, value]) => [
-                  key,
-                  {
-                    initial_energy: Math.max(0, Math.min(100, Math.round(Number(value.initial_energy)))),
-                    updated_at: Number.isFinite(Number(value.updated_at)) ? Number(value.updated_at) : Date.now(),
-                  },
-                ])
-            ),
-            daily_rest_sessions: payload.wellbeing.daily_rest_sessions && typeof payload.wellbeing.daily_rest_sessions === 'object'
-              ? Object.fromEntries(
-                  Object.entries(payload.wellbeing.daily_rest_sessions)
-                    .filter(([key, value]) =>
-                      typeof key === 'string'
-                      && value
-                      && typeof value === 'object'
-                    )
-                    .map(([key, value]) => [
-                      key,
-                      {
-                        is_resting: Boolean(value.is_resting),
-                        started_at: Number.isFinite(Number(value.started_at)) ? Number(value.started_at) : null,
-                        recovered_energy: Number.isFinite(Number(value.recovered_energy))
-                          ? Math.max(0, Math.min(100, Number(value.recovered_energy)))
-                          : 0,
-                        updated_at: Number.isFinite(Number(value.updated_at)) ? Number(value.updated_at) : Date.now(),
-                      },
-                    ])
-                )
-              : {},
-          }
-        : {
-            daily_checkins: {},
-            daily_rest_sessions: {},
-          },
+      wellbeing: normalizeWellbeing(payload.wellbeing),
       ability_module: normalizeAbilityModule(payload.ability_module),
     };
   }
   return {
     tasks: [],
     ability_dimensions: [],
-    wellbeing: {
-      daily_checkins: {},
-      daily_rest_sessions: {},
-    },
+    wellbeing: createDefaultWellbeing(),
     ability_module: normalizeAbilityModule(null),
   };
 }

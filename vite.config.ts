@@ -90,6 +90,15 @@ function hasRecordEntries(value: unknown) {
   return Boolean(value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0);
 }
 
+function createDefaultWellbeing() {
+  return {
+    daily_checkins: {},
+    daily_rest_sessions: {},
+    daily_behavior_events: {},
+    daily_chat_messages: {},
+  };
+}
+
 function normalizeAbilityModule(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     return {
@@ -119,15 +128,165 @@ function normalizeAbilityModule(payload: unknown) {
   };
 }
 
+function normalizeRecoveredEnergy(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
+  return Math.max(0, Math.min(100, numeric));
+}
+
+function normalizeBehaviorDurationMinutes(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 60;
+  return Math.max(10, Math.min(12 * 60, Math.round(numeric)));
+}
+
+function normalizeBurnRateMultiplier(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.max(0.55, Math.min(1.2, Number(numeric.toFixed(2))));
+}
+
+function normalizeWellbeingChatMessage(value: unknown) {
+  if (!value || typeof value !== 'object') return null;
+
+  const raw = value as Record<string, unknown>;
+  if (raw.role !== 'user' && raw.role !== 'assistant') {
+    return null;
+  }
+
+  const text = typeof raw.text === 'string' ? raw.text.trim() : '';
+  if (!text) return null;
+
+  return {
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : crypto.randomUUID(),
+    role: raw.role,
+    text,
+    created_at: Number.isFinite(Number(raw.created_at)) ? Number(raw.created_at) : Date.now(),
+    behavior_event_id: typeof raw.behavior_event_id === 'string' && raw.behavior_event_id.trim()
+      ? raw.behavior_event_id
+      : null,
+  };
+}
+
+function normalizeExternalBehaviorEvent(value: unknown) {
+  if (!value || typeof value !== 'object') return null;
+
+  const raw = value as Record<string, unknown>;
+  const label = typeof raw.label === 'string' ? raw.label.trim() : '';
+  const message = typeof raw.message === 'string' ? raw.message.trim() : '';
+  const type = typeof raw.type === 'string' && raw.type.trim() ? raw.type.trim() : 'custom';
+  const startedAt = Number(raw.started_at);
+
+  if (!label || !message || !Number.isFinite(startedAt)) {
+    return null;
+  }
+
+  return {
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : crypto.randomUUID(),
+    type,
+    label,
+    message,
+    instant_energy: Math.max(-10, Math.min(20, Math.round(Number(raw.instant_energy) || 0))),
+    energy_boost_per_hour: Math.max(-10, Math.min(12, Number(raw.energy_boost_per_hour) || 0)),
+    burn_rate_multiplier: normalizeBurnRateMultiplier(raw.burn_rate_multiplier),
+    duration_minutes: normalizeBehaviorDurationMinutes(raw.duration_minutes),
+    started_at: startedAt,
+    updated_at: Number.isFinite(Number(raw.updated_at)) ? Number(raw.updated_at) : startedAt,
+  };
+}
+
+function normalizeWellbeing(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return createDefaultWellbeing();
+  }
+
+  const raw = payload as Record<string, any>;
+  const dailyCheckins = raw.daily_checkins && typeof raw.daily_checkins === 'object'
+    ? Object.fromEntries(
+        Object.entries(raw.daily_checkins)
+          .filter(([key, value]) =>
+            typeof key === 'string'
+            && value
+            && typeof value === 'object'
+            && Number.isFinite(Number((value as Record<string, unknown>).initial_energy))
+          )
+          .map(([key, value]) => [
+            key,
+            {
+              initial_energy: Math.max(0, Math.min(100, Math.round(Number((value as Record<string, unknown>).initial_energy)))),
+              updated_at: Number.isFinite(Number((value as Record<string, unknown>).updated_at))
+                ? Number((value as Record<string, unknown>).updated_at)
+                : Date.now(),
+            },
+          ])
+      )
+    : {};
+
+  const dailyRestSessions = raw.daily_rest_sessions && typeof raw.daily_rest_sessions === 'object'
+    ? Object.fromEntries(
+        Object.entries(raw.daily_rest_sessions)
+          .filter(([key, value]) => typeof key === 'string' && value && typeof value === 'object')
+          .map(([key, value]) => [
+            key,
+            {
+              is_resting: Boolean((value as Record<string, unknown>).is_resting),
+              started_at: Number.isFinite(Number((value as Record<string, unknown>).started_at))
+                ? Number((value as Record<string, unknown>).started_at)
+                : null,
+              recovered_energy: normalizeRecoveredEnergy((value as Record<string, unknown>).recovered_energy),
+              updated_at: Number.isFinite(Number((value as Record<string, unknown>).updated_at))
+                ? Number((value as Record<string, unknown>).updated_at)
+                : Date.now(),
+            },
+          ])
+      )
+    : {};
+
+  const dailyBehaviorEvents = raw.daily_behavior_events && typeof raw.daily_behavior_events === 'object'
+    ? Object.entries(raw.daily_behavior_events).reduce<Record<string, ReturnType<typeof normalizeExternalBehaviorEvent>[]>>((acc, [dayKey, events]) => {
+        if (!Array.isArray(events)) return acc;
+        const normalized = events
+          .map((event) => normalizeExternalBehaviorEvent(event))
+          .filter((event): event is NonNullable<ReturnType<typeof normalizeExternalBehaviorEvent>> => Boolean(event));
+
+        if (normalized.length > 0) {
+          acc[dayKey] = normalized;
+        }
+
+        return acc;
+      }, {})
+    : {};
+
+  const dailyChatMessages = raw.daily_chat_messages && typeof raw.daily_chat_messages === 'object'
+    ? Object.entries(raw.daily_chat_messages).reduce<Record<string, ReturnType<typeof normalizeWellbeingChatMessage>[]>>((acc, [dayKey, messages]) => {
+        if (!Array.isArray(messages)) return acc;
+        const normalized = messages
+          .map((message) => normalizeWellbeingChatMessage(message))
+          .filter((message): message is NonNullable<ReturnType<typeof normalizeWellbeingChatMessage>> => Boolean(message))
+          .slice(-24);
+
+        if (normalized.length > 0) {
+          acc[dayKey] = normalized;
+        }
+
+        return acc;
+      }, {})
+    : {};
+
+  return {
+    daily_checkins: dailyCheckins,
+    daily_rest_sessions: dailyRestSessions,
+    daily_behavior_events: dailyBehaviorEvents,
+    daily_chat_messages: dailyChatMessages,
+  };
+}
+
 function normalizeTaskPayload(payload: unknown) {
   if (Array.isArray(payload)) {
     return {
       tasks: payload,
       ability_dimensions: [],
-      wellbeing: {
-        daily_checkins: {},
-        daily_rest_sessions: {},
-      },
+      wellbeing: createDefaultWellbeing(),
       ability_module: normalizeAbilityModule(null),
     };
   }
@@ -142,52 +301,7 @@ function normalizeTaskPayload(payload: unknown) {
           .map((item: string) => item.trim())
           .filter(Boolean)
         : [],
-      wellbeing: source.wellbeing && typeof source.wellbeing === 'object' && source.wellbeing.daily_checkins && typeof source.wellbeing.daily_checkins === 'object'
-        ? {
-            daily_checkins: Object.fromEntries(
-              Object.entries(source.wellbeing.daily_checkins)
-                .filter(([key, value]) =>
-                  typeof key === 'string'
-                  && value
-                  && typeof value === 'object'
-                  && Number.isFinite(Number((value as Record<string, unknown>).initial_energy))
-                )
-                .map(([key, value]) => [
-                  key,
-                  {
-                    initial_energy: Math.max(0, Math.min(100, Math.round(Number((value as Record<string, unknown>).initial_energy)))),
-                    updated_at: Number.isFinite(Number((value as Record<string, unknown>).updated_at))
-                      ? Number((value as Record<string, unknown>).updated_at)
-                      : Date.now(),
-                  },
-                ])
-            ),
-            daily_rest_sessions: source.wellbeing.daily_rest_sessions && typeof source.wellbeing.daily_rest_sessions === 'object'
-              ? Object.fromEntries(
-                  Object.entries(source.wellbeing.daily_rest_sessions)
-                    .filter(([key, value]) => typeof key === 'string' && value && typeof value === 'object')
-                    .map(([key, value]) => [
-                      key,
-                      {
-                        is_resting: Boolean((value as Record<string, unknown>).is_resting),
-                        started_at: Number.isFinite(Number((value as Record<string, unknown>).started_at))
-                          ? Number((value as Record<string, unknown>).started_at)
-                          : null,
-                        recovered_energy: Number.isFinite(Number((value as Record<string, unknown>).recovered_energy))
-                          ? Math.max(0, Math.min(100, Number((value as Record<string, unknown>).recovered_energy)))
-                          : 0,
-                        updated_at: Number.isFinite(Number((value as Record<string, unknown>).updated_at))
-                          ? Number((value as Record<string, unknown>).updated_at)
-                          : Date.now(),
-                      },
-                    ])
-                )
-              : {},
-          }
-        : {
-            daily_checkins: {},
-            daily_rest_sessions: {},
-          },
+      wellbeing: normalizeWellbeing(source.wellbeing),
       ability_module: normalizeAbilityModule(source.ability_module),
     };
   }
@@ -195,10 +309,7 @@ function normalizeTaskPayload(payload: unknown) {
   return {
     tasks: [],
     ability_dimensions: [],
-    wellbeing: {
-      daily_checkins: {},
-      daily_rest_sessions: {},
-    },
+    wellbeing: createDefaultWellbeing(),
     ability_module: normalizeAbilityModule(null),
   };
 }
