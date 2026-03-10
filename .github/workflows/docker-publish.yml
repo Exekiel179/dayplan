@@ -8,6 +8,10 @@ on:
       - "v*"
   workflow_dispatch:
 
+concurrency:
+  group: publish-docker-image
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write
@@ -15,9 +19,21 @@ permissions:
 jobs:
   publish-ghcr:
     runs-on: ubuntu-latest
+    env:
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+      REPOSITORY_OWNER: ${{ github.repository_owner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Derive GHCR image name
+        id: ghcr_vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner_lower=$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${owner_lower}/dayplan" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -36,7 +52,7 @@ jobs:
         id: meta_ghcr
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/dayplan
+          images: ${{ steps.ghcr_vars.outputs.image }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -44,11 +60,16 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Backup current latest to bak (GHCR)
+        env:
+          IMAGE: ${{ steps.ghcr_vars.outputs.image }}
+        shell: bash
         run: |
-          IMAGE="ghcr.io/${{ github.repository_owner }}/dayplan"
-          docker pull "${IMAGE}:latest" || exit 0
-          docker tag "${IMAGE}:latest" "${IMAGE}:bak"
-          docker push "${IMAGE}:bak"
+          set -euo pipefail
+          if docker buildx imagetools inspect "${IMAGE}:latest" >/dev/null 2>&1; then
+            docker buildx imagetools create --tag "${IMAGE}:bak" "${IMAGE}:latest"
+          else
+            echo "No existing ${IMAGE}:latest found before publish; skipping pre-publish backup."
+          fi
 
       - name: Build and push (GHCR)
         uses: docker/build-push-action@v6
@@ -59,47 +80,117 @@ jobs:
           tags: ${{ steps.meta_ghcr.outputs.tags }}
           labels: ${{ steps.meta_ghcr.outputs.labels }}
 
+      - name: Ensure bak and verify remote tags (GHCR)
+        env:
+          IMAGE: ${{ steps.ghcr_vars.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          has_remote_ref() {
+            local ref="$1"
+            docker buildx imagetools inspect "$ref" >/dev/null 2>&1
+          }
+
+          require_remote_ref() {
+            local ref="$1"
+            local attempts="${2:-15}"
+            local delay_seconds="${3:-4}"
+
+            for ((attempt=1; attempt<=attempts; attempt++)); do
+              if has_remote_ref "$ref"; then
+                echo "Verified remote image: $ref"
+                return 0
+              fi
+
+              if ((attempt < attempts)); then
+                echo "Waiting for remote image $ref ($attempt/$attempts)..."
+                sleep "$delay_seconds"
+              fi
+            done
+
+            echo "::error::Remote image not found after retry window: $ref"
+            return 1
+          }
+
+          require_remote_ref "${IMAGE}:latest"
+
+          if ! has_remote_ref "${IMAGE}:bak"; then
+            echo "Seeding ${IMAGE}:bak from ${IMAGE}:latest"
+            docker buildx imagetools create --tag "${IMAGE}:bak" "${IMAGE}:latest"
+          fi
+
+          require_remote_ref "${IMAGE}:bak"
+
+          if [[ "${REF_TYPE}" == "tag" ]]; then
+            require_remote_ref "${IMAGE}:${REF_NAME}"
+          fi
+
+      - name: Logout from GHCR
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io || true
+
   publish-dockerhub:
     runs-on: ubuntu-latest
+    env:
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check DockerHub credentials
-        id: dockerhub_check
-        shell: bash
+      - name: Resolve Docker Hub credentials
+        id: dockerhub_vars
         env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          PRIMARY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          PRIMARY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          FALLBACK_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          FALLBACK_TOKEN: ${{ secrets.DOCKER_PASSWORD }}
+        shell: bash
         run: |
-          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "DockerHub credentials not configured; skipping DockerHub publish steps."
+          set -euo pipefail
+
+          username="${PRIMARY_USERNAME:-}"
+          token="${PRIMARY_TOKEN:-}"
+          source_label="DOCKERHUB_*"
+
+          if [[ -z "${username}" || -z "${token}" ]]; then
+            username="${FALLBACK_USERNAME:-}"
+            token="${FALLBACK_TOKEN:-}"
+            source_label="DOCKER_*"
           fi
 
+          if [[ -z "${username}" || -z "${token}" ]]; then
+            echo "::error::Docker Hub credentials are not configured. Expected DOCKERHUB_USERNAME/DOCKERHUB_TOKEN or DOCKER_USERNAME/DOCKER_PASSWORD."
+            exit 1
+          fi
+
+          image_namespace=$(echo "${username}" | tr '[:upper:]' '[:lower:]')
+          echo "::add-mask::${token}"
+          echo "DOCKERHUB_LOGIN_USERNAME=${username}" >> "$GITHUB_ENV"
+          echo "DOCKERHUB_LOGIN_TOKEN=${token}" >> "$GITHUB_ENV"
+          echo "image=${image_namespace}/dayplan" >> "$GITHUB_OUTPUT"
+          echo "source_label=${source_label}" >> "$GITHUB_OUTPUT"
+          echo "Using ${source_label} Docker Hub credentials for ${username}"
+
       - name: Set up QEMU
-        if: steps.dockerhub_check.outputs.enabled == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        if: steps.dockerhub_check.outputs.enabled == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to DockerHub
-        if: steps.dockerhub_check.outputs.enabled == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${DOCKERHUB_LOGIN_TOKEN}" | docker login --username "${DOCKERHUB_LOGIN_USERNAME}" --password-stdin
 
       - name: Docker metadata (DockerHub)
-        if: steps.dockerhub_check.outputs.enabled == 'true'
         id: meta_dockerhub
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/dayplan
+          images: ${{ steps.dockerhub_vars.outputs.image }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -107,15 +198,18 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Backup current latest to bak (DockerHub)
-        if: steps.dockerhub_check.outputs.enabled == 'true'
+        env:
+          IMAGE: ${{ steps.dockerhub_vars.outputs.image }}
+        shell: bash
         run: |
-          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/dayplan"
-          docker pull "${IMAGE}:latest" || exit 0
-          docker tag "${IMAGE}:latest" "${IMAGE}:bak"
-          docker push "${IMAGE}:bak"
+          set -euo pipefail
+          if docker buildx imagetools inspect "${IMAGE}:latest" >/dev/null 2>&1; then
+            docker buildx imagetools create --tag "${IMAGE}:bak" "${IMAGE}:latest"
+          else
+            echo "No existing ${IMAGE}:latest found before publish; skipping pre-publish backup."
+          fi
 
       - name: Build and push (DockerHub)
-        if: steps.dockerhub_check.outputs.enabled == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -123,3 +217,54 @@ jobs:
           push: true
           tags: ${{ steps.meta_dockerhub.outputs.tags }}
           labels: ${{ steps.meta_dockerhub.outputs.labels }}
+
+      - name: Ensure bak and verify remote tags (DockerHub)
+        env:
+          IMAGE: ${{ steps.dockerhub_vars.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          has_remote_ref() {
+            local ref="$1"
+            docker buildx imagetools inspect "$ref" >/dev/null 2>&1
+          }
+
+          require_remote_ref() {
+            local ref="$1"
+            local attempts="${2:-15}"
+            local delay_seconds="${3:-4}"
+
+            for ((attempt=1; attempt<=attempts; attempt++)); do
+              if has_remote_ref "$ref"; then
+                echo "Verified remote image: $ref"
+                return 0
+              fi
+
+              if ((attempt < attempts)); then
+                echo "Waiting for remote image $ref ($attempt/$attempts)..."
+                sleep "$delay_seconds"
+              fi
+            done
+
+            echo "::error::Remote image not found after retry window: $ref"
+            return 1
+          }
+
+          require_remote_ref "${IMAGE}:latest"
+
+          if ! has_remote_ref "${IMAGE}:bak"; then
+            echo "Seeding ${IMAGE}:bak from ${IMAGE}:latest"
+            docker buildx imagetools create --tag "${IMAGE}:bak" "${IMAGE}:latest"
+          fi
+
+          require_remote_ref "${IMAGE}:bak"
+
+          if [[ "${REF_TYPE}" == "tag" ]]; then
+            require_remote_ref "${IMAGE}:${REF_NAME}"
+          fi
+
+      - name: Logout from DockerHub
+        if: always()
+        shell: bash
+        run: docker logout || true
