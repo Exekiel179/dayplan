@@ -131,7 +131,8 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"username\":\"${DOCKERHUB_USERNAME}\",\"password\":\"${DOCKERHUB_TOKEN}\"}" | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
-          mapfile -t tags < <(curl -fsSL "https://hub.docker.com/v2/repositories/${namespace}/${repository}/tags?page_size=100" | python -c "import sys,json; data=json.load(sys.stdin); [print(item['name']) for item in data.get('results', [])]")
+          mapfile -t tags < <(curl -fsSL "https://hub.docker.com/v2/namespaces/${namespace}/repositories/${repository}/tags?page_size=100" \
+            -H "Authorization: Bearer ${jwt}" | python -c "import sys,json; data=json.load(sys.stdin); [print(item['name']) for item in data.get('results', [])]")
 
           for tag in "${tags[@]}"; do
             case "$tag" in
@@ -140,8 +141,8 @@ jobs:
                 ;;
               *)
                 echo "Deleting Docker Hub tag: $tag"
-                curl -fsSL -X DELETE "https://hub.docker.com/v2/repositories/${namespace}/${repository}/tags/${tag}/" \
-                  -H "Authorization: JWT ${jwt}"
+                curl -fsSL -X DELETE "https://hub.docker.com/v2/namespaces/${namespace}/repositories/${repository}/tags/${tag}" \
+                  -H "Authorization: Bearer ${jwt}"
                 ;;
             esac
           done
