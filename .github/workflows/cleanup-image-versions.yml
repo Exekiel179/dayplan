@@ -79,7 +79,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker buildx imagetools create --tag "${GHCR_IMAGE}:bak" "${GHCR_IMAGE}:latest"
+          docker buildx imagetools create --tag "${GHCR_IMAGE}:bak" "${GHCR_IMAGE}:latest" \
+            || echo "::warning::Skipping GHCR bak refresh before cleanup; existing bak will be kept."
           docker buildx imagetools create --tag "${DOCKERHUB_IMAGE}:bak" "${DOCKERHUB_IMAGE}:latest"
 
       - name: Delete extra GHCR package versions
