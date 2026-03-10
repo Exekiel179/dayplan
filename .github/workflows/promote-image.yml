@@ -87,7 +87,8 @@ jobs:
           set -euo pipefail
 
           if docker buildx imagetools inspect "${GHCR_IMAGE}:latest" >/dev/null 2>&1; then
-            docker buildx imagetools create --tag "${GHCR_IMAGE}:bak" "${GHCR_IMAGE}:latest"
+            docker buildx imagetools create --tag "${GHCR_IMAGE}:bak" "${GHCR_IMAGE}:latest" \
+              || echo "::warning::Skipping GHCR bak refresh before promote; existing bak will be kept."
           fi
 
           if docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:latest" >/dev/null 2>&1; then
