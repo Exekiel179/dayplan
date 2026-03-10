@@ -1,0 +1,150 @@
+name: Promote Existing Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_digest:
+        description: "Source Docker Hub manifest digest (sha256:...)"
+        required: true
+        type: string
+
+concurrency:
+  group: promote-existing-image
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    env:
+      REPOSITORY_OWNER: ${{ github.repository_owner }}
+      SOURCE_DIGEST: ${{ inputs.source_digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image names
+        id: image_vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner_lower=$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "ghcr_image=ghcr.io/${owner_lower}/dayplan" >> "$GITHUB_OUTPUT"
+          echo "source_image=docker.io/exekiel179/dayplan@${SOURCE_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve Docker Hub credentials
+        id: dockerhub_vars
+        env:
+          PRIMARY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          PRIMARY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          FALLBACK_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          FALLBACK_TOKEN: ${{ secrets.DOCKER_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          username="${PRIMARY_USERNAME:-}"
+          token="${PRIMARY_TOKEN:-}"
+
+          if [[ -z "${username}" || -z "${token}" ]]; then
+            username="${FALLBACK_USERNAME:-}"
+            token="${FALLBACK_TOKEN:-}"
+          fi
+
+          if [[ -z "${username}" || -z "${token}" ]]; then
+            echo "::error::Docker Hub credentials are not configured."
+            exit 1
+          fi
+
+          image_namespace=$(echo "${username}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${image_namespace}/dayplan" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKER_PASSWORD }}
+
+      - name: Backup current latest to bak
+        env:
+          GHCR_IMAGE: ${{ steps.image_vars.outputs.ghcr_image }}
+          DOCKERHUB_IMAGE: ${{ steps.dockerhub_vars.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if docker buildx imagetools inspect "${GHCR_IMAGE}:latest" >/dev/null 2>&1; then
+            docker buildx imagetools create --tag "${GHCR_IMAGE}:bak" "${GHCR_IMAGE}:latest"
+          fi
+
+          if docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:latest" >/dev/null 2>&1; then
+            docker buildx imagetools create --tag "${DOCKERHUB_IMAGE}:bak" "${DOCKERHUB_IMAGE}:latest"
+          fi
+
+      - name: Promote source digest to latest
+        env:
+          GHCR_IMAGE: ${{ steps.image_vars.outputs.ghcr_image }}
+          DOCKERHUB_IMAGE: ${{ steps.dockerhub_vars.outputs.image }}
+          SOURCE_IMAGE: ${{ steps.image_vars.outputs.source_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "${GHCR_IMAGE}:latest" "${SOURCE_IMAGE}"
+          docker buildx imagetools create --tag "${DOCKERHUB_IMAGE}:latest" "${SOURCE_IMAGE}"
+
+      - name: Verify latest and bak
+        env:
+          GHCR_IMAGE: ${{ steps.image_vars.outputs.ghcr_image }}
+          DOCKERHUB_IMAGE: ${{ steps.dockerhub_vars.outputs.image }}
+          SOURCE_DIGEST: ${{ inputs.source_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          require_ref() {
+            local ref="$1"
+            local attempts="${2:-15}"
+            local delay_seconds="${3:-4}"
+
+            for ((attempt=1; attempt<=attempts; attempt++)); do
+              if docker buildx imagetools inspect "$ref" >/tmp/inspect.txt 2>/dev/null; then
+                cat /tmp/inspect.txt
+                return 0
+              fi
+
+              if ((attempt < attempts)); then
+                sleep "$delay_seconds"
+              fi
+            done
+
+            echo "::error::Remote image not found: $ref"
+            return 1
+          }
+
+          require_ref "${GHCR_IMAGE}:latest" | tee /tmp/ghcr-latest.txt
+          require_ref "${GHCR_IMAGE}:bak" >/dev/null
+          require_ref "${DOCKERHUB_IMAGE}:latest" | tee /tmp/dockerhub-latest.txt
+          require_ref "${DOCKERHUB_IMAGE}:bak" >/dev/null
+
+          grep -q "${SOURCE_DIGEST}" /tmp/ghcr-latest.txt
+          grep -q "${SOURCE_DIGEST}" /tmp/dockerhub-latest.txt
+
+      - name: Logout
+        if: always()
+        shell: bash
+        run: |
+          docker logout ghcr.io || true
+          docker logout || true
