@@ -464,6 +464,29 @@ select {
   backdrop-filter: blur(10px);
 }
 
+.dimension-empty-shell {
+  width: 100%;
+}
+
+.dimension-empty-sidebar {
+  max-width: 100%;
+}
+
+.dimension-empty-stage {
+  position: relative;
+  overflow: hidden;
+  max-width: min(72rem, 100%);
+  border-radius: 2rem;
+  border: 1px solid color-mix(in srgb, var(--surface-border) 80%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 92%, transparent), color-mix(in srgb, var(--surface-raised) 88%, transparent));
+  padding: clamp(1rem, 2.2vw, 1.5rem);
+  box-shadow:
+    0 24px 48px rgba(2, 14, 20, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+}
+
 .dimension-empty-hero {
   display: grid;
   width: 100%;
@@ -472,6 +495,11 @@ select {
   align-items: start;
   justify-items: center;
   text-align: center;
+}
+
+.dimension-empty-hero-stage {
+  max-width: 42rem;
+  gap: 0.8rem;
 }
 
 .dimension-empty-icon-wrap {
@@ -495,6 +523,7 @@ select {
 
 .dimension-empty-kicker {
   margin: 0;
+  font-family: var(--font-ui);
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.18em;
@@ -524,6 +553,10 @@ select {
   gap: 0.9rem;
 }
 
+.dimension-empty-grid-stage {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .dimension-empty-card {
   display: grid;
   gap: 0.8rem;
@@ -547,6 +580,7 @@ select {
 
 .dimension-empty-card-title {
   margin: 0;
+  font-family: var(--font-display);
   color: var(--text-strong);
   font-size: 0.95rem;
   font-weight: 700;
@@ -572,6 +606,12 @@ select {
   color: var(--text-secondary);
   font-size: 0.86rem;
   line-height: 1.62;
+}
+
+@media (max-width: 900px) {
+  .dimension-empty-grid-stage {
+    grid-template-columns: 1fr;
+  }
 }
 
 .motivation-stage {
@@ -1243,7 +1283,17 @@ select {
 }
 
 [data-theme="day"] .dimension-empty-kicker {
+  font-family: var(--font-ui);
   color: #0f9186;
+  letter-spacing: 0.14em;
+}
+
+[data-theme="day"] .dimension-empty-stage {
+  border-color: rgba(198, 210, 223, 0.68);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 250, 248, 0.9));
+  box-shadow:
+    0 22px 42px rgba(110, 125, 148, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96);
 }
 
 [data-theme="day"] .dimension-empty-description,
@@ -1252,7 +1302,9 @@ select {
 }
 
 [data-theme="day"] .dimension-empty-card-title {
+  font-family: var(--font-display);
   color: #21314c;
+  letter-spacing: 0.01em;
 }
 
 [data-theme="stardew"] .glass-panel {
@@ -1366,7 +1418,28 @@ select {
 }
 
 [data-theme="stardew"] .dimension-empty-kicker {
+  font-family: var(--font-display);
   color: #ffd47b;
+  letter-spacing: 0.1em;
+}
+
+[data-theme="stardew"] .dimension-empty-stage {
+  border-color: rgba(244, 217, 142, 0.24);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 229, 162, 0.14), transparent 34%),
+    linear-gradient(180deg, rgba(35, 56, 80, 0.92), rgba(72, 50, 32, 0.84));
+  box-shadow:
+    0 24px 46px rgba(26, 18, 13, 0.24),
+    inset 0 1px 0 rgba(255, 240, 198, 0.1);
+}
+
+[data-theme="stardew"] .dimension-empty-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0.55rem;
+  border: 1px solid rgba(255, 232, 176, 0.14);
+  border-radius: 1.45rem;
+  pointer-events: none;
 }
 
 [data-theme="stardew"] .dimension-empty-card-badge {

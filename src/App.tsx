@@ -98,6 +98,59 @@ const EMPTY_DIMENSION_GUIDE = [
     description: '高协作任务会被系统集中进沟通窗口，减少来回切换和消息打断。',
   },
 ] as const;
+
+function DimensionEmptyState({
+  mode,
+  onCreateTask,
+}: {
+  mode: 'sidebar' | 'stage';
+  onCreateTask: () => void;
+}) {
+  const isStage = mode === 'stage';
+
+  return (
+    <div className={cn("dimension-empty-shell", isStage ? "dimension-empty-stage" : "dimension-empty-sidebar")}>
+      <div className={cn("dimension-empty-hero", isStage && "dimension-empty-hero-stage")}>
+        <div className="dimension-empty-icon-wrap">
+          <ListTodo className="h-8 w-8 opacity-70" />
+        </div>
+        <div className="dimension-empty-copy">
+          <p className="dimension-empty-kicker">任务维度已就绪</p>
+          <p className="dimension-empty-title">现在还没有任务，但四维建模应该完整露出来。</p>
+          <p className="dimension-empty-description">
+            先看清系统会怎样理解一个任务，再去落第一个点。新任务默认会带上下面四个维度，你只需要按实际感受微调。
+          </p>
+        </div>
+      </div>
+
+      <div className={cn("dimension-empty-grid mt-6 w-full", isStage && "dimension-empty-grid-stage")}>
+        {EMPTY_DIMENSION_GUIDE.map((item) => (
+          <div key={item.title} className="dimension-empty-card">
+            <div className="dimension-empty-card-top">
+              <p className="dimension-empty-card-title">{item.title}</p>
+              <span className="dimension-empty-card-badge">{item.value}</span>
+            </div>
+            <p className="dimension-empty-card-body">{item.description}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-3 pointer-events-auto">
+        <button
+          type="button"
+          onClick={onCreateTask}
+          className="rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
+        >
+          新建第一个任务
+        </button>
+        <p className="text-[11px] text-slate-400">
+          点击后回到坐标区落点，再打开详情细调这四个维度。
+        </p>
+      </div>
+    </div>
+  );
+}
+
 type AppTheme = 'night' | 'day' | 'stardew';
 type AbilityModuleOption = {
   id: string;
@@ -3305,6 +3358,12 @@ export default function App() {
                 onMove={updateTaskPosition}
               />
             ))}
+
+            {activeTasks.length === 0 && archivedTasks.length === 0 && !isPlacementMode && (
+              <div className="pointer-events-none absolute inset-0 z-[4] flex items-center justify-center p-5 sm:p-8">
+                <DimensionEmptyState mode="stage" onCreateTask={handleAddTask} />
+              </div>
+            )}
           </div>
         </div>
       </main>
@@ -3385,47 +3444,14 @@ export default function App() {
                 </div>
 
                 {activeTasks.length === 0 && archivedTasks.length === 0 ? (
-                  <div className="flex h-full flex-col items-center justify-center text-slate-300">
-                    <div className="dimension-empty-hero">
-                      <div className="dimension-empty-icon-wrap">
-                        <ListTodo className="h-8 w-8 opacity-70" />
-                      </div>
-                      <div className="dimension-empty-copy">
-                        <p className="dimension-empty-kicker">任务维度已就绪</p>
-                        <p className="dimension-empty-title">现在还没有任务，但四维建模应该完整露出来。</p>
-                        <p className="dimension-empty-description">
-                          先看清系统会怎样理解一个任务，再去落第一个点。新任务默认会带上下面四个维度，你只需要按实际感受微调。
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="dimension-empty-grid mt-6 w-full max-w-3xl">
-                      {EMPTY_DIMENSION_GUIDE.map((item) => (
-                        <div key={item.title} className="dimension-empty-card">
-                          <div className="dimension-empty-card-top">
-                            <p className="dimension-empty-card-title">{item.title}</p>
-                            <span className="dimension-empty-card-badge">{item.value}</span>
-                          </div>
-                          <p className="dimension-empty-card-body">{item.description}</p>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsTaskListOpen(false);
-                          handleAddTask();
-                        }}
-                        className="rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
-                      >
-                        新建第一个任务
-                      </button>
-                      <p className="text-[11px] text-slate-400">
-                        点击后回到坐标区落点，再打开详情细调这四个维度。
-                      </p>
-                    </div>
+                  <div className="flex h-full items-center justify-center text-slate-300">
+                    <DimensionEmptyState
+                      mode="sidebar"
+                      onCreateTask={() => {
+                        setIsTaskListOpen(false);
+                        handleAddTask();
+                      }}
+                    />
                   </div>
                 ) : (
                   <>
