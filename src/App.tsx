@@ -11,6 +11,8 @@ import {
   GripVertical,
   Sparkles,
   ChevronRight,
+  SunMedium,
+  MoonStar,
   ListTodo,
   LayoutGrid,
   Trash2,
@@ -28,8 +30,6 @@ import {
   Play,
   Pause,
   Activity,
-  SunMedium,
-  MoonStar,
   MessageSquare,
   Send
 } from 'lucide-react';
@@ -51,6 +51,14 @@ import {
   WellbeingChatMessage,
   WellbeingSettings,
 } from './types';
+
+type AppTheme = 'night' | 'day' | 'stardew';
+
+const THEME_OPTIONS: { id: AppTheme; label: string; shortLabel: string }[] = [
+  { id: 'night', label: '夜间霓光', shortLabel: '夜' },
+  { id: 'day', label: '白昼莫兰迪', shortLabel: '昼' },
+  { id: 'stardew', label: '星露谷', shortLabel: '谷' },
+];
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -99,59 +107,6 @@ const EMPTY_DIMENSION_GUIDE = [
   },
 ] as const;
 
-function DimensionEmptyState({
-  mode,
-  onCreateTask,
-}: {
-  mode: 'sidebar' | 'stage';
-  onCreateTask: () => void;
-}) {
-  const isStage = mode === 'stage';
-
-  return (
-    <div className={cn("dimension-empty-shell", isStage ? "dimension-empty-stage" : "dimension-empty-sidebar")}>
-      <div className={cn("dimension-empty-hero", isStage && "dimension-empty-hero-stage")}>
-        <div className="dimension-empty-icon-wrap">
-          <ListTodo className="h-8 w-8 opacity-70" />
-        </div>
-        <div className="dimension-empty-copy">
-          <p className="dimension-empty-kicker">任务维度已就绪</p>
-          <p className="dimension-empty-title">现在还没有任务，但四维建模应该完整露出来。</p>
-          <p className="dimension-empty-description">
-            先看清系统会怎样理解一个任务，再去落第一个点。新任务默认会带上下面四个维度，你只需要按实际感受微调。
-          </p>
-        </div>
-      </div>
-
-      <div className={cn("dimension-empty-grid mt-6 w-full", isStage && "dimension-empty-grid-stage")}>
-        {EMPTY_DIMENSION_GUIDE.map((item) => (
-          <div key={item.title} className="dimension-empty-card">
-            <div className="dimension-empty-card-top">
-              <p className="dimension-empty-card-title">{item.title}</p>
-              <span className="dimension-empty-card-badge">{item.value}</span>
-            </div>
-            <p className="dimension-empty-card-body">{item.description}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-3 pointer-events-auto">
-        <button
-          type="button"
-          onClick={onCreateTask}
-          className="rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
-        >
-          新建第一个任务
-        </button>
-        <p className="text-[11px] text-slate-400">
-          点击后回到坐标区落点，再打开详情细调这四个维度。
-        </p>
-      </div>
-    </div>
-  );
-}
-
-type AppTheme = 'night' | 'day' | 'stardew';
 type AbilityModuleOption = {
   id: string;
   label: string;
@@ -170,12 +125,6 @@ type ExternalBehaviorPreset = {
   durationMinutes: number;
   reply: string;
 };
-
-const THEME_OPTIONS: { id: AppTheme; label: string; shortLabel: string }[] = [
-  { id: 'night', label: '夜间霓光', shortLabel: '夜' },
-  { id: 'day', label: '白昼莫兰迪', shortLabel: '昼' },
-  { id: 'stardew', label: '星露谷', shortLabel: '谷' },
-];
 
 const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
   {
@@ -341,11 +290,11 @@ function normalizeAbilityModule(value: unknown): AbilityModuleSettings {
   const raw = value as Partial<AbilityModuleSettings>;
   const specialTotals = raw.special_totals && typeof raw.special_totals === 'object'
     ? Object.entries(raw.special_totals as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, amount]) => {
-        const numeric = Number(amount);
-        if (!key.trim() || !Number.isFinite(numeric) || numeric < 0) return acc;
-        acc[key] = numeric;
-        return acc;
-      }, {})
+      const numeric = Number(amount);
+      if (!key.trim() || !Number.isFinite(numeric) || numeric < 0) return acc;
+      acc[key] = numeric;
+      return acc;
+    }, {})
     : {};
 
   return {
@@ -470,54 +419,54 @@ function normalizeWellbeing(value: unknown): WellbeingSettings {
   const raw = value as Partial<WellbeingSettings>;
   const dailyCheckins = raw.daily_checkins && typeof raw.daily_checkins === 'object'
     ? Object.entries(raw.daily_checkins).reduce<Record<string, DailyEnergyCheckin>>((acc, [dayKey, checkin]) => {
-        if (!checkin || typeof checkin !== 'object') return acc;
-        const partial = checkin as Partial<DailyEnergyCheckin>;
-        const initialEnergy = Number(partial.initial_energy);
-        if (!Number.isFinite(initialEnergy)) return acc;
-        acc[dayKey] = {
-          initial_energy: clamp(Math.round(initialEnergy), 0, 100),
-          updated_at: Number.isFinite(Number(partial.updated_at)) ? Number(partial.updated_at) : Date.now(),
-        };
-        return acc;
-      }, {})
+      if (!checkin || typeof checkin !== 'object') return acc;
+      const partial = checkin as Partial<DailyEnergyCheckin>;
+      const initialEnergy = Number(partial.initial_energy);
+      if (!Number.isFinite(initialEnergy)) return acc;
+      acc[dayKey] = {
+        initial_energy: clamp(Math.round(initialEnergy), 0, 100),
+        updated_at: Number.isFinite(Number(partial.updated_at)) ? Number(partial.updated_at) : Date.now(),
+      };
+      return acc;
+    }, {})
     : {};
   const dailyRestSessions = raw.daily_rest_sessions && typeof raw.daily_rest_sessions === 'object'
     ? Object.entries(raw.daily_rest_sessions).reduce<Record<string, DailyRestSession>>((acc, [dayKey, session]) => {
-        if (!session || typeof session !== 'object') return acc;
-        const partial = session as Partial<DailyRestSession>;
-        acc[dayKey] = {
-          is_resting: Boolean(partial.is_resting),
-          started_at: Number.isFinite(Number(partial.started_at)) ? Number(partial.started_at) : null,
-          recovered_energy: normalizeRecoveredEnergy(partial.recovered_energy),
-          updated_at: Number.isFinite(Number(partial.updated_at)) ? Number(partial.updated_at) : Date.now(),
-        };
-        return acc;
-      }, {})
+      if (!session || typeof session !== 'object') return acc;
+      const partial = session as Partial<DailyRestSession>;
+      acc[dayKey] = {
+        is_resting: Boolean(partial.is_resting),
+        started_at: Number.isFinite(Number(partial.started_at)) ? Number(partial.started_at) : null,
+        recovered_energy: normalizeRecoveredEnergy(partial.recovered_energy),
+        updated_at: Number.isFinite(Number(partial.updated_at)) ? Number(partial.updated_at) : Date.now(),
+      };
+      return acc;
+    }, {})
     : {};
   const dailyBehaviorEvents = raw.daily_behavior_events && typeof raw.daily_behavior_events === 'object'
     ? Object.entries(raw.daily_behavior_events).reduce<Record<string, ExternalBehaviorEvent[]>>((acc, [dayKey, events]) => {
-        if (!Array.isArray(events)) return acc;
-        const normalized = events
-          .map((event) => normalizeExternalBehaviorEvent(event))
-          .filter((event): event is ExternalBehaviorEvent => Boolean(event));
-        if (normalized.length > 0) {
-          acc[dayKey] = normalized;
-        }
-        return acc;
-      }, {})
+      if (!Array.isArray(events)) return acc;
+      const normalized = events
+        .map((event) => normalizeExternalBehaviorEvent(event))
+        .filter((event): event is ExternalBehaviorEvent => Boolean(event));
+      if (normalized.length > 0) {
+        acc[dayKey] = normalized;
+      }
+      return acc;
+    }, {})
     : {};
   const dailyChatMessages = raw.daily_chat_messages && typeof raw.daily_chat_messages === 'object'
     ? Object.entries(raw.daily_chat_messages).reduce<Record<string, WellbeingChatMessage[]>>((acc, [dayKey, messages]) => {
-        if (!Array.isArray(messages)) return acc;
-        const normalized = messages
-          .map((message) => normalizeWellbeingChatMessage(message))
-          .filter((message): message is WellbeingChatMessage => Boolean(message))
-          .slice(-MAX_DAILY_CHAT_MESSAGES);
-        if (normalized.length > 0) {
-          acc[dayKey] = normalized;
-        }
-        return acc;
-      }, {})
+      if (!Array.isArray(messages)) return acc;
+      const normalized = messages
+        .map((message) => normalizeWellbeingChatMessage(message))
+        .filter((message): message is WellbeingChatMessage => Boolean(message))
+        .slice(-MAX_DAILY_CHAT_MESSAGES);
+      if (normalized.length > 0) {
+        acc[dayKey] = normalized;
+      }
+      return acc;
+    }, {})
     : {};
 
   return {
@@ -619,18 +568,22 @@ function formatDurationFromMs(ms: number) {
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-function getTaskEnergyBurnRate(task: Task, burnRateModifier = 1) {
+function getTaskEnergyBurnRate(task: Task, burnRateModifier = 1, concurrentTasksCount = 1) {
   let burn = 5 + (task.stress_score || 3) * 2;
   if (task.cognitive_load === 'high') burn += 6;
   if (task.collaboration_level === 'high') burn += 3;
   if (task.use_countdown_urgency && task.deadline_at) burn += 2;
-  return Number((burn * burnRateModifier).toFixed(1));
+
+  // Non-linear penalty for multitasking
+  const multitaskingPenalty = 1 + Math.max(0, concurrentTasksCount - 1) * 0.8;
+
+  return Number((burn * burnRateModifier * multitaskingPenalty).toFixed(1));
 }
 
-function getTaskLiveEnergyBurn(task: Task, now: number, burnRateModifier = 1) {
+function getTaskLiveEnergyBurn(task: Task, now: number, burnRateModifier = 1, concurrentTasksCount = 1) {
   if (!task.tracking_started_at) return 0;
   const elapsedHours = Math.max(0, now - task.tracking_started_at) / 3600000;
-  return getTaskEnergyBurnRate(task, burnRateModifier) * elapsedHours;
+  return getTaskEnergyBurnRate(task, burnRateModifier, concurrentTasksCount) * elapsedHours;
 }
 
 function getLiveRestRecovery(session: DailyRestSession | undefined, now: number) {
@@ -639,12 +592,15 @@ function getLiveRestRecovery(session: DailyRestSession | undefined, now: number)
   return elapsedHours * REST_RECOVERY_PER_HOUR;
 }
 
-function stopTrackingTaskState(task: Task, now: number): Task {
+function stopTrackingTaskState(task: Task, now: number, liveBurnDeduction: number): Task {
   if (!task.tracking_started_at) return task;
   return {
     ...task,
     tracking_accumulated_ms: getTrackedMs(task, now),
     tracking_started_at: null,
+    // Deduct the energy that was burned during this specific session permanently. 
+    // Since energy_delta is added to the score, we subtract the burn.
+    energy_delta: (task.energy_delta || 0) - liveBurnDeduction,
   };
 }
 
@@ -844,13 +800,13 @@ function normalizeTask(rawTask: Task): Task {
   const actualMinutes = Number(partial.actual_minutes ?? 0);
   const stepList = Array.isArray(partial.steps)
     ? partial.steps.map((step, idx) => {
-        const rawStep = step as Partial<TaskStep>;
-        return {
-          id: typeof rawStep?.id === 'string' && rawStep.id.trim() ? rawStep.id : `step-${idx}-${Math.random().toString(36).slice(2, 7)}`,
-          text: typeof rawStep?.text === 'string' ? rawStep.text : '',
-          completed: Boolean(rawStep?.completed),
-        };
-      })
+      const rawStep = step as Partial<TaskStep>;
+      return {
+        id: typeof rawStep?.id === 'string' && rawStep.id.trim() ? rawStep.id : `step-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+        text: typeof rawStep?.text === 'string' ? rawStep.text : '',
+        completed: Boolean(rawStep?.completed),
+      };
+    })
     : [];
   const status = partial.status === 'completed' ? 'completed' : 'pending';
   const completionCountRaw = Number(partial.completion_count ?? (status === 'completed' ? 1 : 0));
@@ -1005,13 +961,13 @@ function isLongTermDue(task: Task, now: number) {
 function getTimelineAccent(timeline: TaskTimeline) {
   return timeline === 'long_term'
     ? {
-        badge: 'text-teal-200 bg-teal-500/20 border-teal-400/40',
-        ring: 'border-teal-300/60',
-      }
+      badge: 'text-teal-200 bg-teal-500/20 border-teal-400/40',
+      ring: 'border-teal-300/60',
+    }
     : {
-        badge: 'text-amber-200 bg-amber-500/20 border-amber-400/40',
-        ring: 'border-amber-300/60',
-      };
+      badge: 'text-amber-200 bg-amber-500/20 border-amber-400/40',
+      ring: 'border-amber-300/60',
+    };
 }
 
 function getDimensionColor(task: Task) {
@@ -1150,11 +1106,6 @@ async function validateSession(token: string) {
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<AppTheme>(() => {
-    if (typeof window === 'undefined') return 'night';
-    const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    return stored === 'day' || stored === 'stardew' ? stored : 'night';
-  });
   const [authToken, setAuthToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) || '' : ''));
   const [authUser, setAuthUser] = useState('');
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -1163,7 +1114,9 @@ export default function App() {
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginError, setLoginError] = useState('');
+  const [isBehaviorChatOpen, setIsBehaviorChatOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [theme, setTheme] = useState(() => (typeof window !== 'undefined' ? (localStorage.getItem(THEME_STORAGE_KEY) || 'night') : 'night'));
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [abilityDimensions, setAbilityDimensions] = useState<string[]>([]);
@@ -1289,8 +1242,8 @@ export default function App() {
     : 0;
   const behaviorRecovery = activeBehaviorEvents.reduce((sum, event) => sum + getBehaviorRecoveredEnergy(event, nowTs), 0);
   const behaviorBurnRateModifier = getBehaviorBurnRateModifier(activeBehaviorEvents, nowTs);
-  const liveEnergyBurn = runningTasks.reduce((sum, task) => sum + getTaskLiveEnergyBurn(task, nowTs, behaviorBurnRateModifier), 0);
-  const liveEnergyBurnRate = runningTasks.reduce((sum, task) => sum + getTaskEnergyBurnRate(task, behaviorBurnRateModifier), 0);
+  const liveEnergyBurn = runningTasks.reduce((sum, task) => sum + getTaskLiveEnergyBurn(task, nowTs, behaviorBurnRateModifier, runningTasks.length), 0);
+  const liveEnergyBurnRate = runningTasks.reduce((sum, task) => sum + getTaskEnergyBurnRate(task, behaviorBurnRateModifier, runningTasks.length), 0);
   const liveRestRecovery = getLiveRestRecovery(todayRestSession, nowTs);
   const totalRestRecovery = normalizeRecoveredEnergy(todayRestSession.recovered_energy) + liveRestRecovery;
   const energyScore = clamp(
@@ -1717,23 +1670,61 @@ export default function App() {
   const toggleTaskTracking = (task: Task) => {
     const now = Date.now();
     settleAbilityModuleProgress(undefined, now);
-    const nextTask = task.tracking_started_at
-      ? stopTrackingTaskState(task, now)
-      : {
-          ...task,
-          tracking_started_at: now,
-          tracking_accumulated_ms: normalizeTrackingAccumulatedMs(task.tracking_accumulated_ms),
-        };
 
-    setTasks((prev) => prev.map((item) => (item.id === task.id ? nextTask : item)));
-    setSelectedTask((prev) => (prev?.id === task.id ? nextTask : prev));
+    setTasks((prev) => {
+      const runningCount = prev.filter(t => t.tracking_started_at).length;
+      const nextTasks = prev.map((t) => {
+        if (t.id !== task.id) return t;
+        if (t.tracking_started_at) {
+          // Task was running, so calculate its final burn for this session and permanently deduct.
+          const currentBurnRateModifier = getBehaviorBurnRateModifier(
+            wellbeing.daily_behavior_events[getDayKey(now)] || [],
+            now
+          );
+          const liveBurnSession = getTaskLiveEnergyBurn(t, now, currentBurnRateModifier, runningCount);
+          return stopTrackingTaskState(t, now, liveBurnSession);
+        }
+        return {
+          ...t,
+          tracking_started_at: now,
+          tracking_accumulated_ms: normalizeTrackingAccumulatedMs(t.tracking_accumulated_ms),
+        };
+      });
+      setSelectedTask((prevSelected) => (prevSelected?.id === task.id
+        ? nextTasks.find(t => t.id === task.id) || prevSelected
+        : prevSelected));
+      return nextTasks;
+    });
   };
 
   const toggleRestMode = () => {
     const now = Date.now();
     settleAbilityModuleProgress(undefined, now);
-    setTasks((prev) => prev.map((task) => stopTrackingTaskState(task, now)));
-    setSelectedTask((prev) => (prev ? stopTrackingTaskState(prev, now) : prev));
+
+    setTasks((prev) => {
+      const runningCount = prev.filter(t => t.tracking_started_at).length;
+      return prev.map((t) => {
+        if (!t.tracking_started_at) return t;
+        const currentBurnRateModifier = getBehaviorBurnRateModifier(
+          wellbeing.daily_behavior_events[getDayKey(now)] || [],
+          now
+        );
+        const liveBurnSession = getTaskLiveEnergyBurn(t, now, currentBurnRateModifier, runningCount);
+        return stopTrackingTaskState(t, now, liveBurnSession);
+      });
+    });
+
+    setSelectedTask((prevSelected) => {
+      if (!prevSelected || !prevSelected.tracking_started_at) return prevSelected;
+      const currentBurnRateModifier = getBehaviorBurnRateModifier(
+        wellbeing.daily_behavior_events[getDayKey(now)] || [],
+        now
+      );
+      // Estimate 1 for running count if we are just mutating the selected state blindly,
+      // or just assume 0 deduction since the master setTasks will update it properly anyway 
+      // if it's the same reference. Let's just deduct 0 to satisfy the type.
+      return stopTrackingTaskState(prevSelected, now, 0);
+    });
     setWellbeing((prev) => {
       const currentSession = prev.daily_rest_sessions[todayKey];
       const liveRecovery = getLiveRestRecovery(currentSession, now);
@@ -1744,17 +1735,17 @@ export default function App() {
       );
       const nextSession: DailyRestSession = currentSession?.is_resting
         ? {
-            is_resting: false,
-            started_at: null,
-            recovered_energy: recoveredEnergy,
-            updated_at: now,
-          }
+          is_resting: false,
+          started_at: null,
+          recovered_energy: recoveredEnergy,
+          updated_at: now,
+        }
         : {
-            is_resting: true,
-            started_at: now,
-            recovered_energy: recoveredEnergy,
-            updated_at: now,
-          };
+          is_resting: true,
+          started_at: now,
+          recovered_energy: recoveredEnergy,
+          updated_at: now,
+        };
 
       return {
         ...prev,
@@ -1835,17 +1826,17 @@ export default function App() {
     const durationMinutes = preset ? extractDurationOverrideMinutes(text, preset.durationMinutes) : 0;
     const behaviorEvent = preset
       ? {
-          id: createLocalId('behavior'),
-          type: preset.id,
-          label: preset.label,
-          message: text,
-          instant_energy: preset.instantEnergy,
-          energy_boost_per_hour: preset.energyBoostPerHour,
-          burn_rate_multiplier: preset.burnRateMultiplier,
-          duration_minutes: durationMinutes,
-          started_at: now,
-          updated_at: now,
-        } satisfies ExternalBehaviorEvent
+        id: createLocalId('behavior'),
+        type: preset.id,
+        label: preset.label,
+        message: text,
+        instant_energy: preset.instantEnergy,
+        energy_boost_per_hour: preset.energyBoostPerHour,
+        burn_rate_multiplier: preset.burnRateMultiplier,
+        duration_minutes: durationMinutes,
+        started_at: now,
+        updated_at: now,
+      } satisfies ExternalBehaviorEvent
       : null;
     const targetTask = recommendedNowTasks[0]?.title || '';
     const assistantText = behaviorEvent
@@ -1922,30 +1913,47 @@ export default function App() {
 
   const completeTask = (task: Task) => {
     const now = Date.now();
-    setTasks((prev) => prev.map((item) => {
-      if (item.id !== task.id) return item;
-      const mergedTask = stopTrackingTaskState(normalizeTask({ ...item, ...task }), now);
+    settleAbilityModuleProgress(undefined, now);
+    setTasks((prev) => {
+      const runningCount = prev.filter(t => t.tracking_started_at).length;
+      return prev.map((t) => {
+        if (t.id !== task.id) return t;
 
-      if (mergedTask.timeline === 'long_term') {
-        const nextDueAt = now + getLongTermCycleMs(mergedTask);
+        let targetTask = t;
+        if (targetTask.tracking_started_at) {
+          const currentBurnRateModifier = getBehaviorBurnRateModifier(
+            wellbeing.daily_behavior_events[getDayKey(now)] || [],
+            now
+          );
+          const liveBurnSession = getTaskLiveEnergyBurn(targetTask, now, currentBurnRateModifier, runningCount);
+          targetTask = stopTrackingTaskState(targetTask, now, liveBurnSession);
+        }
+
+        const isLongTerm = targetTask.timeline === 'long_term';
+        const finalStatus = isLongTerm ? 'pending' : 'completed';
+        const newCompletionCount = (targetTask.completion_count || 0) + 1;
+
+        if (isLongTerm) {
+          return {
+            ...targetTask,
+            status: finalStatus,
+            archived_at: null,
+            last_completed_at: now,
+            next_due_at: now + getLongTermCycleMs(targetTask),
+            completion_count: newCompletionCount,
+            steps: targetTask.steps.map((step) => ({ ...step, completed: false })),
+          };
+        }
+
         return {
-          ...mergedTask,
-          status: 'pending',
-          archived_at: null,
-          completion_count: (mergedTask.completion_count || 0) + 1,
+          ...targetTask,
+          status: finalStatus,
+          archived_at: now,
           last_completed_at: now,
-          next_due_at: nextDueAt,
-          steps: mergedTask.steps.map((step) => ({ ...step, completed: false })),
+          completion_count: newCompletionCount,
         };
-      }
-      return {
-        ...mergedTask,
-        status: 'completed',
-        archived_at: now,
-        last_completed_at: now,
-        completion_count: Math.max(1, (mergedTask.completion_count || 0) + 1),
-      };
-    }));
+      });
+    });
     setSelectedTask(null);
   };
 
@@ -2205,7 +2213,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell relative isolate min-h-screen flex flex-col overflow-hidden text-slate-100 font-sans selection:bg-teal-500/30">
+    <div className="app-shell relative isolate min-h-screen w-screen flex flex-col text-slate-100 font-sans selection:bg-teal-500/30">
 
       {/* Header */}
       <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/[0.08] glass-panel px-4 sm:px-6">
@@ -2348,569 +2356,483 @@ export default function App() {
                   : "xl:grid-cols-[minmax(0,1fr)_84px]"
               )}
             >
-        <div className="grid gap-3 content-start">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{'\u4eca\u591c\u72b6\u6001\u603b\u89c8'}</p>
-                <h3 className="mt-1 text-lg font-bold text-white">{'\u7cbe\u529b\u3001\u538b\u529b\u4e0e\u6fc0\u52b1\u6a21\u5757'}</h3>
-                <p className="mt-1 text-[11px] text-slate-400">{'\u4fdd\u6301\u53d1\u5e03\u7248\u7684\u9605\u8bfb\u987a\u5e8f\uff0c\u53ea\u628a\u6fc0\u52b1\u673a\u5236\u548c\u771f\u5b9e\u7d2f\u8ba1\u63a5\u8fdb\u6765\u3002'}</p>
-              </div>
-              <span className="rounded-xl border border-white/10 bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
-                {todayKey}
-              </span>
-            </div>
-
-            <div className="mt-4 grid gap-3 lg:grid-cols-[1.18fr_0.92fr]">
-              <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{'\u8d77\u59cb\u7cbe\u529b\u4e0e\u6fc0\u52b1\u6a21\u5757'}</p>
-                    <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
-                      <BatteryMedium className="h-4 w-4 text-emerald-300" />
-                      {'\u5148\u6821\u51c6\u72b6\u6001\uff0c\u518d\u770b\u5f53\u524d\u6fc0\u52b1\u79ef\u7d2f'}
-                    </h4>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-lg font-bold text-emerald-100">
-                      {todayInitialEnergy}
-                    </span>
-                    <span className="rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1 text-lg font-bold text-violet-100">
-                      {formatMetricValue(activeAbilityModuleScore)} {activeAbilityModule?.unit || 'OA'}
+              <div className="grid gap-3 content-start">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{'\u4eca\u591c\u72b6\u6001\u603b\u89c8'}</p>
+                      <h3 className="mt-1 text-lg font-bold text-white">{'\u7cbe\u529b\u3001\u538b\u529b\u4e0e\u6fc0\u52b1\u6a21\u5757'}</h3>
+                      <p className="mt-1 text-[11px] text-slate-400">{'\u4fdd\u6301\u53d1\u5e03\u7248\u7684\u9605\u8bfb\u987a\u5e8f\uff0c\u53ea\u628a\u6fc0\u52b1\u673a\u5236\u548c\u771f\u5b9e\u7d2f\u8ba1\u63a5\u8fdb\u6765\u3002'}</p>
+                    </div>
+                    <span className="rounded-xl border border-white/10 bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+                      {todayKey}
                     </span>
                   </div>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={todayInitialEnergy}
-                  onChange={(e) => updateTodayInitialEnergy(Number(e.target.value))}
-                  className="mt-4 w-full accent-emerald-400"
-                />
-                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-                  <span>{'\u4f4e\u7535\u91cf'}</span>
-                  <span>{todayKey}</span>
-                  <span>{'\u9ad8\u72b6\u6001'}</span>
-                </div>
-                <div className="mt-4 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{'\u6fc0\u52b1\u6a21\u5757'}</p>
-                      <h5 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
-                        <Sparkles className="h-4 w-4 text-violet-200" />
-                        {activeAbilityModule?.label || '\u6728\u9c7c'}
-                      </h5>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsMotivationPanelOpen(true)}
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-violet-300/30 bg-violet-500/15 px-2.5 py-1.5 text-[10px] font-bold text-violet-100 transition-colors hover:bg-violet-500/25"
-                    >
-                      <ChevronRight className="h-3 w-3" />
-                      {'\u8bbe\u7f6e'}
-                    </button>
-                  </div>
-                  <div className="mt-3 grid gap-3 lg:grid-cols-[170px_minmax(0,1fr)] lg:items-center">
-                    <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/35">
-                      {renderMotivationScene()}
-                    </div>
-                    <div className="grid gap-2">
-                      <p className="text-[11px] leading-5 text-violet-100/80">
-                        {activeAbilityModule?.description || '\u4efb\u52a1\u8ba1\u65f6\u65f6\u4f1a\u628a\u4e13\u6ce8\u65f6\u95f4\u8f6c\u6210\u5f53\u524d\u6fc0\u52b1\u6a21\u5757\u7684\u5b9e\u9645\u589e\u957f\u3002'}
-                      </p>
-                      <div className="grid gap-2 sm:grid-cols-3">
-                        <div className="rounded-xl border border-violet-300/20 bg-slate-950/60 px-3 py-2">
-                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100/70">{'\u5f53\u524d\u6a21\u5757'}</div>
-                          <div className="mt-1 text-sm font-bold text-white">{activeAbilityModule?.label || '\u6728\u9c7c'}</div>
+
+                  <div className="mt-4 grid gap-3 lg:grid-cols-[1.18fr_0.92fr]">
+                    <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{'\u8d77\u59cb\u7cbe\u529b\u4e0e\u6fc0\u52b1\u6a21\u5757'}</p>
+                          <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                            <BatteryMedium className="h-4 w-4 text-emerald-300" />
+                            {'\u5148\u6821\u51c6\u72b6\u6001\uff0c\u518d\u770b\u5f53\u524d\u6fc0\u52b1\u79ef\u7d2f'}
+                          </h4>
                         </div>
-                        <div className="rounded-xl border border-violet-300/20 bg-slate-950/60 px-3 py-2">
-                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100/70">{'\u5b9e\u65f6\u589e\u957f'}</div>
-                          <div className="mt-1 text-sm font-bold text-white">+{formatMetricValue(activeModuleLiveGain)}</div>
-                        </div>
-                        <div className="rounded-xl border border-violet-300/20 bg-slate-950/60 px-3 py-2">
-                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100/70">{'\u7d2f\u8ba1\u503c'}</div>
-                          <div className="mt-1 text-sm font-bold text-white">{formatMetricValue(activeAbilityModuleScore)}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-lg font-bold text-emerald-100">
+                            {todayInitialEnergy}
+                          </span>
+                          <span className="rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1 text-lg font-bold text-violet-100">
+                            {formatMetricValue(activeAbilityModuleScore)} {activeAbilityModule?.unit || 'OA'}
+                          </span>
                         </div>
                       </div>
-                      <div className="rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-[11px] leading-5 text-violet-100/80">
-                        {activeAbilityModule?.gainPerHour || DEFAULT_ABILITY_GAIN_PER_HOUR}{'\u002f\u5c0f\u65f6\uff0c\u5f53\u524d\u6a21\u5f0f\u4e3a'}
-                        {activeMotivationMode === 'ability' ? ` ${'\u80fd\u529b\u79ef\u7d2f'} · ${activeAbilityDimension || '\u80fd\u529b'}` : ` ${activeAbilityModule?.label || '\u6728\u9c7c'}`}
-                        {'\u3002'}
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={todayInitialEnergy}
+                        onChange={(e) => updateTodayInitialEnergy(Number(e.target.value))}
+                        className="mt-4 w-full accent-emerald-400"
+                      />
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+                        <span>{'\u4f4e\u7535\u91cf'}</span>
+                        <span>{todayKey}</span>
+                        <span>{'\u9ad8\u72b6\u6001'}</span>
                       </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                <div className={cn("rounded-2xl border p-4", pressureTone.card)}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">{'\u538b\u529b\u503c'}</p>
-                      <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
-                        <Gauge className="h-4 w-4" />
-                        {pressureTone.label}
-                      </h4>
-                    </div>
-                    <span className="text-2xl font-black text-white">{pressureScore}</span>
-                  </div>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/25">
-                    <div
-                      className={cn("h-full rounded-full bg-gradient-to-r", pressureTone.bar)}
-                      style={{ width: `${pressureScore}%` }}
-                    />
-                  </div>
-                  <p className="mt-2 text-[11px] text-current/80">
-                    {'\u5f85\u5904\u7406'} {dueTodayTasks.length} {'\u9879\uff0c\u9884\u8ba1'} {dueTodayEstimatedMinutes} {'\u5206\u949f\uff0c\u5df2\u8d85\u65f6'} {overdueTodayTasks.length} {'\u9879\u3002'}
-                  </p>
-                </div>
-
-                <div className={cn("rounded-2xl border p-4", energyTone.card)}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">{'\u5f53\u524d\u7cbe\u529b'}</p>
-                      <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
-                        <TrendingUp className="h-4 w-4" />
-                        {energyTone.label}
-                      </h4>
-                    </div>
-                    <span className="text-2xl font-black text-white">{energyScore}</span>
-                  </div>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/25">
-                    <div
-                      className={cn("h-full rounded-full bg-gradient-to-r", energyTone.bar)}
-                      style={{ width: `${energyScore}%` }}
-                    />
-                  </div>
-                  <p className="mt-2 text-[11px] text-current/80">
-                    {statusSummary}{'\u3002\u5df2\u5b8c\u6210'} {completedTodayTasks.length} {'\u9879\uff0c\u6062\u590d'} {(totalRestRecovery + behaviorRecovery).toFixed(1)} {'\uff0c\u5f53\u524d\u901f\u7387'} {liveEnergyBurnRate.toFixed(0)}{'\u002f\u5c0f\u65f6\u3002'}
-                  </p>
-                  <p className="mt-1 text-[11px] text-current/75">{latestBehaviorMessage}</p>
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <div className="text-[11px] text-current/80">
-                      {todayRestSession.is_resting ? '\u4f11\u606f\u4e2d\uff0c\u7cbe\u529b\u6b63\u5728\u7f13\u6162\u6062\u590d\u3002' : '\u9700\u8981\u7f13\u51b2\u65f6\uff0c\u53ef\u4ee5\u5f00\u4f11\u606f\u6a21\u5f0f\u56de\u4e00\u70b9\u7cbe\u529b\u3002'}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={toggleRestMode}
-                      className={cn(
-                        "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-[11px] font-bold transition-colors",
-                        todayRestSession.is_resting
-                          ? "border-emerald-400/40 bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30"
-                          : "border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
-                      )}
-                    >
-                      <Coffee className="h-3.5 w-3.5" />
-                      {todayRestSession.is_resting ? '\u7ed3\u675f\u4f11\u606f' : '\u5f00\u59cb\u4f11\u606f'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
-                  {topTaskPanelView === 'execution' ? '\u6267\u884c\u4e2d' : '\u4efb\u52a1\u76ee\u5f55'}
-                </p>
-                <h3 className="mt-1 flex items-center gap-2 text-lg font-bold text-white">
-                  {topTaskPanelView === 'execution' ? <Activity className="h-4 w-4 text-cyan-300" /> : <ListTodo className="h-4 w-4 text-cyan-300" />}
-                  {topTaskPanelView === 'execution' ? '\u5f53\u524d\u8ba1\u65f6\u4e0e\u6267\u884c\u5217\u8868' : '\u4efb\u52a1\u76ee\u5f55\u9884\u89c8'}
-                </h3>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="inline-flex rounded-xl border border-white/10 bg-slate-900/70 p-1">
-                  <button
-                    type="button"
-                    onClick={() => setTopTaskPanelView('execution')}
-                    className={cn(
-                      "rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
-                      topTaskPanelView === 'execution' ? 'bg-cyan-500/20 text-cyan-100' : 'text-slate-300 hover:bg-white/5'
-                    )}
-                  >
-                    {'\u6267\u884c\u5217\u8868'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTopTaskPanelView('directory')}
-                    className={cn(
-                      "rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
-                      topTaskPanelView === 'directory' ? 'bg-cyan-500/20 text-cyan-100' : 'text-slate-300 hover:bg-white/5'
-                    )}
-                  >
-                    {'\u4efb\u52a1\u76ee\u5f55'}
-                  </button>
-                </div>
-                <span className="rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-sm font-bold text-cyan-100">
-                  {topTaskPanelView === 'execution' ? (todayRestSession.is_resting ? '\u4f11\u606f\u4e2d' : `${runningTasks.length} \u6b63\u5728\u505a`) : `${sortedTasks.length} \u9879\u4efb\u52a1`}
-                </span>
-              </div>
-            </div>
-
-            {topTaskPanelView === 'execution' ? (
-              <div className="mt-4 grid gap-3 xl:grid-cols-[0.88fr_1.12fr] xl:items-stretch">
-                <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3 flex min-h-0 flex-col">
-                  <div className="mb-2 flex items-center justify-between">
-                    <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-100">{'\u5f53\u524d\u8ba1\u65f6'}</h4>
-                    <span className="text-[10px] font-semibold text-cyan-200">{runningTasks.length}</span>
-                  </div>
-                  {runningTasks.length === 0 ? (
-                    <p className="text-[11px] text-cyan-100/70">{'\u8fd8\u6ca1\u6709\u6807\u8bb0\u201c\u73b0\u5728\u6b63\u5728\u505a\u201d\u7684\u4efb\u52a1\u3002'}</p>
-                  ) : (
-                    <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto pr-1 max-h-[22rem]">
-                      {runningTasks.map((task) => (
-                        <div key={`running-top-${task.id}`} className="rounded-xl border border-cyan-300/20 bg-slate-900/55 px-2.5 py-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedTask(task)}
-                              className="truncate text-left text-[11px] font-semibold text-cyan-50"
-                            >
-                              {task.title || '\u672a\u547d\u540d\u4efb\u52a1'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => toggleTaskTracking(task)}
-                              className="rounded-lg border border-cyan-300/25 bg-cyan-500/15 p-1 text-cyan-100 transition-colors hover:bg-cyan-500/25"
-                              title={"\u6682\u505c\u8ba1\u65f6"}
-                            >
-                              <Pause className="h-3.5 w-3.5" />
-                            </button>
+                      <div className="mt-4 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{'\u6fc0\u52b1\u6a21\u5757'}</p>
+                            <h5 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                              <Sparkles className="h-4 w-4 text-violet-200" />
+                              {activeAbilityModule?.label || '\u6728\u9c7c'}
+                            </h5>
                           </div>
-                          <div className="mt-1 flex items-center justify-between text-[10px] text-cyan-100/80">
-                            <span>{formatDurationFromMs(getTrackedMs(task, nowTs))}</span>
-                            <span>{'\u8017\u80fd'} {getTaskLiveEnergyBurn(task, nowTs, behaviorBurnRateModifier).toFixed(1)}</span>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsMotivationPanelOpen(true)}
+                            className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-violet-300/30 bg-violet-500/15 px-2.5 py-1.5 text-[10px] font-bold text-violet-100 transition-colors hover:bg-violet-500/25"
+                          >
+                            <ChevronRight className="h-3 w-3" />
+                            {'\u8bbe\u7f6e'}
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-2xl border border-teal-400/25 bg-teal-500/10 p-3 flex min-h-0 flex-col">
-                  <div className="mb-2 flex items-center justify-between">
-                    <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-teal-100">{'\u6267\u884c\u5217\u8868'}</h4>
-                    <span className="text-[10px] font-semibold text-teal-200">{executableTasks.length}</span>
-                  </div>
-                  {executableTasks.length === 0 ? (
-                    <p className="text-[11px] text-teal-100/70">{'\u6682\u65e0\u53ef\u6267\u884c\u4efb\u52a1\uff08\u7b49\u5f85\u524d\u7f6e\u4efb\u52a1\u5b8c\u6210\uff09\u3002'}</p>
-                  ) : (
-                    <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto pr-1 max-h-[22rem]">
-                      {executableTasks.map((task) => (
-                        <div key={`ready-top-${task.id}`} className="rounded-xl border border-teal-300/20 bg-slate-900/50 px-3 py-2.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedTask(task)}
-                              className="truncate text-left text-[11px] font-semibold text-teal-50"
-                            >
-                              {task.title || '\u672a\u547d\u540d\u4efb\u52a1'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => toggleTaskTracking(task)}
-                              className={cn(
-                                "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold transition-colors",
-                                task.tracking_started_at
-                                  ? 'border-cyan-300/40 bg-cyan-500/20 text-cyan-100'
-                                  : 'border-white/15 bg-white/5 text-slate-200 hover:bg-white/10'
-                              )}
-                            >
-                              {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                              {task.tracking_started_at ? '\u6682\u505c' : '\u5f00\u59cb'}
-                            </button>
+                        <div className="mt-3 grid gap-3 lg:grid-cols-[170px_minmax(0,1fr)] lg:items-center">
+                          <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/35">
+                            {renderMotivationScene()}
                           </div>
-                          <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-300">
-                            <span>{'\u9884\u4f30'} {task.estimated_minutes}m</span>
-                            <span>{'\u5b9e\u9645'} {getDisplayedActualMinutes(task, nowTs)}m</span>
-                            <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 grid gap-3">
-                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2">
-                  <div className="text-[11px] text-slate-300">{'\u8fd9\u91cc\u5c55\u793a\u4efb\u52a1\u76ee\u5f55\u9884\u89c8\uff0c\u5b8c\u6574\u7f16\u8f91\u4ecd\u5728\u53f3\u4e0a\u89d2\u4efb\u52a1\u6e05\u5355\u91cc\u3002'}</div>
-                  <button
-                    type="button"
-                    onClick={() => setIsTaskListOpen(true)}
-                    className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-slate-200 transition-colors hover:bg-white/10"
-                  >
-                    {'\u6253\u5f00\u4efb\u52a1\u6e05\u5355'}
-                  </button>
-                </div>
-                {topDirectoryTasks.length === 0 ? (
-                  <div className="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-6 text-center text-[11px] text-slate-400">
-                    {'\u5f53\u524d\u6ca1\u6709\u4efb\u52a1\uff0c\u5148\u65b0\u5efa\u4e00\u4e2a\u4efb\u52a1\u3002'}
-                  </div>
-                ) : (
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    {topDirectoryTasks.map((task) => (
-                      <button
-                        key={`top-directory-${task.id}`}
-                        type="button"
-                        onClick={() => setSelectedTask(task)}
-                        className="rounded-2xl border border-white/10 bg-slate-950/55 px-3 py-3 text-left transition-colors hover:bg-slate-900"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-[11px] font-semibold text-white">{task.title || '\u672a\u547d\u540d\u4efb\u52a1'}</div>
-                            <div className="mt-1 text-[10px] text-slate-400">
-                              {'\u9884\u4f30'} {task.estimated_minutes}m / {'\u5b9e\u9645'} {getDisplayedActualMinutes(task, nowTs)}m
+                          <div className="grid gap-2">
+                            <p className="text-[11px] leading-5 text-violet-100/80">
+                              {activeAbilityModule?.description || '\u4efb\u52a1\u8ba1\u65f6\u65f6\u4f1a\u628a\u4e13\u6ce8\u65f6\u95f4\u8f6c\u6210\u5f53\u524d\u6fc0\u52b1\u6a21\u5757\u7684\u5b9e\u9645\u589e\u957f\u3002'}
+                            </p>
+                            <div className="grid gap-2 sm:grid-cols-3">
+                              <div className="rounded-xl border border-violet-300/20 bg-slate-950/60 px-3 py-2">
+                                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100/70">{'\u5f53\u524d\u6a21\u5757'}</div>
+                                <div className="mt-1 text-sm font-bold text-white">{activeAbilityModule?.label || '\u6728\u9c7c'}</div>
+                              </div>
+                              <div className="rounded-xl border border-violet-300/20 bg-slate-950/60 px-3 py-2">
+                                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100/70">{'\u5b9e\u65f6\u589e\u957f'}</div>
+                                <div className="mt-1 text-sm font-bold text-white">+{formatMetricValue(activeModuleLiveGain)}</div>
+                              </div>
+                              <div className="rounded-xl border border-violet-300/20 bg-slate-950/60 px-3 py-2">
+                                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100/70">{'\u7d2f\u8ba1\u503c'}</div>
+                                <div className="mt-1 text-sm font-bold text-white">{formatMetricValue(activeAbilityModuleScore)}</div>
+                              </div>
+                            </div>
+                            <div className="rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-[11px] leading-5 text-violet-100/80">
+                              {activeAbilityModule?.gainPerHour || DEFAULT_ABILITY_GAIN_PER_HOUR}{'\u002f\u5c0f\u65f6\uff0c\u5f53\u524d\u6a21\u5f0f\u4e3a'}
+                              {activeMotivationMode === 'ability' ? ` ${'\u80fd\u529b\u79ef\u7d2f'} · ${activeAbilityDimension || '\u80fd\u529b'}` : ` ${activeAbilityModule?.label || '\u6728\u9c7c'}`}
+                              {'\u3002'}
                             </div>
                           </div>
-                          <span
-                            className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
-                            style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                      <div className={cn("rounded-2xl border p-4", pressureTone.card)}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">{'\u538b\u529b\u503c'}</p>
+                            <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                              <Gauge className="h-4 w-4" />
+                              {pressureTone.label}
+                            </h4>
+                          </div>
+                          <span className="text-2xl font-black text-white">{pressureScore}</span>
+                        </div>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/25">
+                          <div
+                            className={cn("h-full rounded-full bg-gradient-to-r", pressureTone.bar)}
+                            style={{ width: `${pressureScore}%` }}
                           />
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
-                          <span className={cn("rounded-md border px-1.5 py-0.5", getTimelineAccent(task.timeline).badge)}>
-                            {task.timeline === 'long_term' ? '\u957f\u671f' : '\u4e34\u65f6'}
-                          </span>
-                          <span className="rounded-md border border-rose-400/25 bg-rose-500/10 px-1.5 py-0.5 text-rose-100">
-                            {'\u538b\u529b'} {(task.stress_score || 3)}/5
-                          </span>
-                          {task.tracking_started_at && (
-                            <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
-                              {'\u8ba1\u65f6\u4e2d'}
-                            </span>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-        </div>
-
-        <div className={cn("self-stretch rounded-2xl border border-white/10 bg-white/[0.03] p-2.5 transition-all duration-300 flex min-h-0 flex-col", !isSuggestionOpen && "suggestion-rail px-2 py-4")}>
-          <div className="flex items-center justify-between gap-3">
-            <div className={cn(!isSuggestionOpen && "xl:hidden")}>
-              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">建议窗口</p>
-              <h3 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
-                <Coffee className="h-4 w-4 text-amber-300" />
-                今日节奏建议
-              </h3>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsSuggestionOpen((prev) => !prev)}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-xl border border-white/10 bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-slate-300 transition-colors hover:bg-slate-900",
-                !isSuggestionOpen && "xl:h-full xl:w-full xl:flex-col xl:justify-center xl:px-2 xl:py-4"
-              )}
-            >
-              <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isSuggestionOpen && "rotate-90")} />
-              <span className={cn(!isSuggestionOpen && "suggestion-rail-label")}>
-                {isSuggestionOpen ? '收起' : '建议'}
-              </span>
-            </button>
-          </div>
-
-          {isSuggestionOpen ? (
-            <>
-              <div className="mt-2.5 grid min-h-0 gap-2.5 xl:flex-1 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
-                <div className="space-y-2.5">
-                  <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 px-3 py-2">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-100/70">外部行为状态</p>
-                        <p className="mt-1 text-[11px] leading-5 text-amber-50/85">{latestBehaviorMessage}</p>
+                        <p className="mt-2 text-[11px] text-current/80">
+                          {'\u5f85\u5904\u7406'} {dueTodayTasks.length} {'\u9879\uff0c\u9884\u8ba1'} {dueTodayEstimatedMinutes} {'\u5206\u949f\uff0c\u5df2\u8d85\u65f6'} {overdueTodayTasks.length} {'\u9879\u3002'}
+                        </p>
                       </div>
-                      <span className="rounded-lg border border-amber-300/25 bg-slate-950/50 px-2 py-1 text-[10px] font-bold text-amber-100">
-                        +{behaviorRecovery.toFixed(1)}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {activeBehaviorEvents.length === 0 ? (
-                        <span className="rounded-full border border-white/10 bg-slate-950/55 px-2 py-1 text-[10px] text-slate-300">
-                          暂无生效中的行为
-                        </span>
-                      ) : (
-                        activeBehaviorEvents.map((event) => (
-                          <span
-                            key={event.id}
-                            className="rounded-full border border-amber-300/25 bg-slate-950/55 px-2 py-1 text-[10px] font-semibold text-amber-50"
-                          >
-                            {event.label} · 还剩 {Math.max(1, Math.ceil((getBehaviorEventEndsAt(event) - nowTs) / 60000))} 分钟
-                          </span>
-                        ))
-                      )}
-                    </div>
-                  </div>
 
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">节奏提醒</p>
-                    <div className="mt-2 space-y-1.5">
-                      {wellbeingSuggestions.map((suggestion, index) => (
-                        <div
-                          key={`${todayKey}-${index}`}
-                          className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[11px] leading-5 text-slate-200"
-                        >
-                          {suggestion}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="border-t border-white/10 pt-2.5">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">当下建议先做</p>
-                    <div className="mt-2 space-y-1.5">
-                      {recommendedNowTasks.length === 0 ? (
-                        <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400">
-                          当前没有可执行任务，先解除阻塞项或安排休息。
-                        </div>
-                      ) : (
-                        recommendedNowTasks.map((task, index) => (
-                          <button
-                            key={`recommend-${task.id}`}
-                            onClick={() => setSelectedTask(task)}
-                            className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-left transition-colors hover:bg-slate-900"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-semibold text-white">{index + 1}. {task.title || '未命名任务'}</span>
-                              <span className="rounded-md border border-teal-400/25 bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold text-teal-100">
-                                {(task.stress_score || 3)}/5
-                              </span>
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-semibold">
-                              <span className="rounded-md border border-sky-400/25 bg-sky-500/10 px-1.5 py-0.5 text-sky-100">
-                                {getCognitiveLoadLabel(task.cognitive_load || 'low')}
-                              </span>
-                              <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-1.5 py-0.5 text-violet-100">
-                                {getCollaborationLevelLabel(task.collaboration_level || 'low')}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-[11px] leading-5 text-slate-300 line-clamp-2">
-                              {buildRecommendationReason(task, energyScore, nowTs)}
-                            </p>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="border-t border-white/10 pt-2.5">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">可一起处理的任务</p>
-                    <div className="mt-2 space-y-1.5">
-                      {bundleSuggestions.length === 0 ? (
-                        <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400">
-                          当前没有明显适合打包处理的任务，先完成一个主任务更稳。
-                        </div>
-                      ) : (
-                        bundleSuggestions.map((bundle, index) => (
-                          <div
-                            key={`bundle-${index}`}
-                            className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5"
-                          >
-                            <div className="text-[11px] font-semibold text-white">{bundle.title}</div>
-                            <p className="mt-0.5 text-[11px] leading-5 text-slate-300 line-clamp-2">{bundle.description}</p>
+                      <div className={cn("rounded-2xl border p-4", energyTone.card)}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-current/70">{'\u5f53\u524d\u7cbe\u529b'}</p>
+                            <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                              <TrendingUp className="h-4 w-4" />
+                              {energyTone.label}
+                            </h4>
                           </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex min-h-[22rem] min-w-0 flex-col rounded-[1.4rem] border border-cyan-300/18 bg-[linear-gradient(180deg,rgba(10,16,28,0.96),rgba(6,12,22,0.88))] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.25)] xl:min-h-0">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-cyan-100/65">行为聊天窗口</p>
-                      <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
-                        <MessageSquare className="h-4 w-4 text-cyan-300" />
-                        外部行为管理
-                      </h4>
-                      <p className="mt-1 text-[11px] leading-5 text-slate-400">
-                        直接说你刚做了什么，我会把它换算成实时精力恢复和耗能修正。
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1 text-right">
-                      <div className="text-[10px] font-bold text-cyan-100">{activeBehaviorEvents.length} 个效果</div>
-                      <div className="mt-0.5 text-[10px] text-cyan-100/70">耗能 {Math.round(behaviorBurnRateModifier * 100)}%</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {EXTERNAL_BEHAVIOR_PRESETS.slice(0, 4).map((preset) => (
-                      <button
-                        key={`quick-behavior-${preset.id}`}
-                        type="button"
-                        onClick={() => submitBehaviorChat(`我${preset.label}了`)}
-                        className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.09]"
-                      >
-                        我{preset.label}了
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950/55">
-                    <div className="border-b border-white/8 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      今日对话
-                    </div>
-                    <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto px-3 py-3">
-                      {todayChatMessages.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[11px] leading-5 text-slate-400">
-                          还没有记录。试试发送“我喝茶了”，系统会立刻把它转成精力恢复和耗能折扣。
+                          <span className="text-2xl font-black text-white">{energyScore}</span>
                         </div>
-                      ) : (
-                        todayChatMessages.map((message) => (
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/25">
                           <div
-                            key={message.id}
+                            className={cn("h-full rounded-full bg-gradient-to-r", energyTone.bar)}
+                            style={{ width: `${energyScore}%` }}
+                          />
+                        </div>
+                        <p className="mt-2 text-[11px] text-current/80">
+                          {statusSummary}{'\u3002\u5df2\u5b8c\u6210'} {completedTodayTasks.length} {'\u9879\uff0c\u6062\u590d'} {(totalRestRecovery + behaviorRecovery).toFixed(1)} {'\uff0c\u5f53\u524d\u901f\u7387'} {liveEnergyBurnRate.toFixed(0)}{'\u002f\u5c0f\u65f6\u3002'}
+                        </p>
+                        <p className="mt-1 text-[11px] text-current/75">{latestBehaviorMessage}</p>
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <div className="text-[11px] text-current/80">
+                            {todayRestSession.is_resting ? '\u4f11\u606f\u4e2d\uff0c\u7cbe\u529b\u6b63\u5728\u7f13\u6162\u6062\u590d\u3002' : '\u9700\u8981\u7f13\u51b2\u65f6\uff0c\u53ef\u4ee5\u5f00\u4f11\u606f\u6a21\u5f0f\u56de\u4e00\u70b9\u7cbe\u529b\u3002'}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={toggleRestMode}
                             className={cn(
-                              "max-w-[92%] rounded-2xl px-3 py-2 text-[11px] leading-5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]",
-                              message.role === 'user'
-                                ? 'ml-auto border border-cyan-300/20 bg-cyan-500/16 text-cyan-50'
-                                : 'border border-white/10 bg-white/[0.04] text-slate-200'
+                              "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-[11px] font-bold transition-colors",
+                              todayRestSession.is_resting
+                                ? "border-emerald-400/40 bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30"
+                                : "border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
                             )}
                           >
-                            <div className="whitespace-pre-wrap break-words">{message.text}</div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    <div className="border-t border-white/8 px-3 py-3">
-                      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                        <input
-                          type="text"
-                          value={behaviorChatInput}
-                          onChange={(e) => setBehaviorChatInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              submitBehaviorChat();
-                            }
-                          }}
-                          placeholder={BEHAVIOR_CHAT_PLACEHOLDER}
-                          className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => submitBehaviorChat()}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-500/16 text-cyan-100 transition-colors hover:bg-cyan-500/24"
-                          aria-label="发送行为记录"
-                        >
-                          <Send className="h-4 w-4" />
-                        </button>
+                            <Coffee className="h-3.5 w-3.5" />
+                            {todayRestSession.is_resting ? '\u7ed3\u675f\u4f11\u606f' : '\u5f00\u59cb\u4f11\u606f'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                        {topTaskPanelView === 'execution' ? '\u6267\u884c\u4e2d' : '\u4efb\u52a1\u76ee\u5f55'}
+                      </p>
+                      <h3 className="mt-1 flex items-center gap-2 text-lg font-bold text-white">
+                        {topTaskPanelView === 'execution' ? <Activity className="h-4 w-4 text-cyan-300" /> : <ListTodo className="h-4 w-4 text-cyan-300" />}
+                        {topTaskPanelView === 'execution' ? '\u5f53\u524d\u8ba1\u65f6\u4e0e\u6267\u884c\u5217\u8868' : '\u4efb\u52a1\u76ee\u5f55\u9884\u89c8'}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="inline-flex rounded-xl border border-white/10 bg-slate-900/70 p-1">
+                        <button
+                          type="button"
+                          onClick={() => setTopTaskPanelView('execution')}
+                          className={cn(
+                            "rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
+                            topTaskPanelView === 'execution' ? 'bg-cyan-500/20 text-cyan-100' : 'text-slate-300 hover:bg-white/5'
+                          )}
+                        >
+                          {'\u6267\u884c\u5217\u8868'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTopTaskPanelView('directory')}
+                          className={cn(
+                            "rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
+                            topTaskPanelView === 'directory' ? 'bg-cyan-500/20 text-cyan-100' : 'text-slate-300 hover:bg-white/5'
+                          )}
+                        >
+                          {'\u4efb\u52a1\u76ee\u5f55'}
+                        </button>
+                      </div>
+                      <span className="rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-sm font-bold text-cyan-100">
+                        {topTaskPanelView === 'execution' ? (todayRestSession.is_resting ? '\u4f11\u606f\u4e2d' : `${runningTasks.length} \u6b63\u5728\u505a`) : `${sortedTasks.length} \u9879\u4efb\u52a1`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {topTaskPanelView === 'execution' ? (
+                    <div className="mt-4 grid gap-3 xl:grid-cols-[0.88fr_1.12fr] xl:items-stretch">
+                      <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3 flex min-h-0 flex-col">
+                        <div className="mb-2 flex items-center justify-between">
+                          <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-100">{'\u5f53\u524d\u8ba1\u65f6'}</h4>
+                          <span className="text-[10px] font-semibold text-cyan-200">{runningTasks.length}</span>
+                        </div>
+                        {runningTasks.length === 0 ? (
+                          <p className="text-[11px] text-cyan-100/70">{'\u8fd8\u6ca1\u6709\u6807\u8bb0\u201c\u73b0\u5728\u6b63\u5728\u505a\u201d\u7684\u4efb\u52a1\u3002'}</p>
+                        ) : (
+                          <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto pr-1 max-h-[22rem]">
+                            {runningTasks.map((task) => (
+                              <div key={`running-top-${task.id}`} className="rounded-xl border border-cyan-300/20 bg-slate-900/55 px-2.5 py-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedTask(task)}
+                                    className="truncate text-left text-[11px] font-semibold text-cyan-50"
+                                  >
+                                    {task.title || '\u672a\u547d\u540d\u4efb\u52a1'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleTaskTracking(task)}
+                                    className="rounded-lg border border-cyan-300/25 bg-cyan-500/15 p-1 text-cyan-100 transition-colors hover:bg-cyan-500/25"
+                                    title={"\u6682\u505c\u8ba1\u65f6"}
+                                  >
+                                    <Pause className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                                <div className="mt-1 flex items-center justify-between text-[10px] text-cyan-100/80">
+                                  <span>{formatDurationFromMs(getTrackedMs(task, nowTs))}</span>
+                                  <span>{'\u8017\u80fd'} {getTaskLiveEnergyBurn(task, nowTs, behaviorBurnRateModifier).toFixed(1)}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="rounded-2xl border border-teal-400/25 bg-teal-500/10 p-3 flex min-h-0 flex-col">
+                        <div className="mb-2 flex items-center justify-between">
+                          <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-teal-100">{'\u6267\u884c\u5217\u8868'}</h4>
+                          <span className="text-[10px] font-semibold text-teal-200">{executableTasks.length}</span>
+                        </div>
+                        {executableTasks.length === 0 ? (
+                          <p className="text-[11px] text-teal-100/70">{'\u6682\u65e0\u53ef\u6267\u884c\u4efb\u52a1\uff08\u7b49\u5f85\u524d\u7f6e\u4efb\u52a1\u5b8c\u6210\uff09\u3002'}</p>
+                        ) : (
+                          <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto pr-1 max-h-[22rem]">
+                            {executableTasks.map((task) => (
+                              <div key={`ready-top-${task.id}`} className="rounded-xl border border-teal-300/20 bg-slate-900/50 px-3 py-2.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedTask(task)}
+                                    className="truncate text-left text-[11px] font-semibold text-teal-50"
+                                  >
+                                    {task.title || '\u672a\u547d\u540d\u4efb\u52a1'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleTaskTracking(task)}
+                                    className={cn(
+                                      "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold transition-colors",
+                                      task.tracking_started_at
+                                        ? 'border-cyan-300/40 bg-cyan-500/20 text-cyan-100'
+                                        : 'border-white/15 bg-white/5 text-slate-200 hover:bg-white/10'
+                                    )}
+                                  >
+                                    {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                                    {task.tracking_started_at ? '\u6682\u505c' : '\u5f00\u59cb'}
+                                  </button>
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-300">
+                                  <span>{'\u9884\u4f30'} {task.estimated_minutes}m</span>
+                                  <span>{'\u5b9e\u9645'} {getDisplayedActualMinutes(task, nowTs)}m</span>
+                                  <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 grid gap-3">
+                      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2">
+                        <div className="text-[11px] text-slate-300">{'\u8fd9\u91cc\u5c55\u793a\u4efb\u52a1\u76ee\u5f55\u9884\u89c8\uff0c\u5b8c\u6574\u7f16\u8f91\u4ecd\u5728\u53f3\u4e0a\u89d2\u4efb\u52a1\u6e05\u5355\u91cc\u3002'}</div>
+                        <button
+                          type="button"
+                          onClick={() => setIsTaskListOpen(true)}
+                          className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-slate-200 transition-colors hover:bg-white/10"
+                        >
+                          {'\u6253\u5f00\u4efb\u52a1\u6e05\u5355'}
+                        </button>
+                      </div>
+                      {topDirectoryTasks.length === 0 ? (
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-6 text-center text-[11px] text-slate-400">
+                          {'\u5f53\u524d\u6ca1\u6709\u4efb\u52a1\uff0c\u5148\u65b0\u5efa\u4e00\u4e2a\u4efb\u52a1\u3002'}
+                        </div>
+                      ) : (
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {topDirectoryTasks.map((task) => (
+                            <button
+                              key={`top-directory-${task.id}`}
+                              type="button"
+                              onClick={() => setSelectedTask(task)}
+                              className="rounded-2xl border border-white/10 bg-slate-950/55 px-3 py-3 text-left transition-colors hover:bg-slate-900"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="truncate text-[11px] font-semibold text-white">{task.title || '\u672a\u547d\u540d\u4efb\u52a1'}</div>
+                                  <div className="mt-1 text-[10px] text-slate-400">
+                                    {'\u9884\u4f30'} {task.estimated_minutes}m / {'\u5b9e\u9645'} {getDisplayedActualMinutes(task, nowTs)}m
+                                  </div>
+                                </div>
+                                <span
+                                  className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
+                                  style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+                                />
+                              </div>
+                              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                                <span className={cn("rounded-md border px-1.5 py-0.5", getTimelineAccent(task.timeline).badge)}>
+                                  {task.timeline === 'long_term' ? '\u957f\u671f' : '\u4e34\u65f6'}
+                                </span>
+                                <span className="rounded-md border border-rose-400/25 bg-rose-500/10 px-1.5 py-0.5 text-rose-100">
+                                  {'\u538b\u529b'} {(task.stress_score || 3)}/5
+                                </span>
+                                {task.tracking_started_at && (
+                                  <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
+                                    {'\u8ba1\u65f6\u4e2d'}
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
               </div>
-            </>
-          ) : null}
-        </div>
+
+              <div className={cn("self-stretch rounded-2xl border border-white/10 bg-white/[0.03] p-2.5 transition-all duration-300 flex min-h-0 flex-col", !isSuggestionOpen && "suggestion-rail px-2 py-4")}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className={cn(!isSuggestionOpen && "xl:hidden")}>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">建议窗口</p>
+                    <h3 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                      <Coffee className="h-4 w-4 text-amber-300" />
+                      今日节奏建议
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsSuggestionOpen((prev) => !prev)}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-xl border border-white/10 bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-slate-300 transition-colors hover:bg-slate-900",
+                      !isSuggestionOpen && "xl:h-full xl:w-full xl:flex-col xl:justify-center xl:px-2 xl:py-4"
+                    )}
+                  >
+                    <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isSuggestionOpen && "rotate-90")} />
+                    <span className={cn(!isSuggestionOpen && "suggestion-rail-label")}>
+                      {isSuggestionOpen ? '收起' : '建议'}
+                    </span>
+                  </button>
+                </div>
+
+                {isSuggestionOpen ? (
+                  <>
+                    <div className="mt-2.5 flex min-h-0 flex-col gap-2.5 xl:flex-1 overflow-y-auto custom-scrollbar pr-1">
+                      <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 px-3 py-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-100/70">外部行为状态</p>
+                            <p className="mt-1 text-[11px] leading-5 text-amber-50/85">{latestBehaviorMessage}</p>
+                          </div>
+                          <span className="rounded-lg border border-amber-300/25 bg-slate-950/50 px-2 py-1 text-[10px] font-bold text-amber-100">
+                            +{behaviorRecovery.toFixed(1)}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {activeBehaviorEvents.length === 0 ? (
+                            <span className="rounded-full border border-white/10 bg-slate-950/55 px-2 py-1 text-[10px] text-slate-300">
+                              暂无生效中的行为
+                            </span>
+                          ) : (
+                            activeBehaviorEvents.map((event) => (
+                              <span
+                                key={event.id}
+                                className="rounded-full border border-amber-300/25 bg-slate-950/55 px-2 py-1 text-[10px] font-semibold text-amber-50"
+                              >
+                                {event.label} · 还剩 {Math.max(1, Math.ceil((getBehaviorEventEndsAt(event) - nowTs) / 60000))} 分钟
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">节奏提醒</p>
+                        <div className="mt-2 space-y-1.5">
+                          {wellbeingSuggestions.map((suggestion, index) => (
+                            <div
+                              key={`${todayKey}-${index}`}
+                              className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[11px] leading-5 text-slate-200"
+                            >
+                              {suggestion}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="border-t border-white/10 pt-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">当下建议先做</p>
+                        <div className="mt-2 space-y-1.5">
+                          {recommendedNowTasks.length === 0 ? (
+                            <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400">
+                              当前没有可执行任务，先解除阻塞项或安排休息。
+                            </div>
+                          ) : (
+                            recommendedNowTasks.map((task, index) => (
+                              <button
+                                key={`recommend-${task.id}`}
+                                onClick={() => setSelectedTask(task)}
+                                className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-left transition-colors hover:bg-slate-900"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] font-semibold text-white">{index + 1}. {task.title || '未命名任务'}</span>
+                                  <span className="rounded-md border border-teal-400/25 bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold text-teal-100">
+                                    {(task.stress_score || 3)}/5
+                                  </span>
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                                  <span className="rounded-md border border-sky-400/25 bg-sky-500/10 px-1.5 py-0.5 text-sky-100">
+                                    {getCognitiveLoadLabel(task.cognitive_load || 'low')}
+                                  </span>
+                                  <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-1.5 py-0.5 text-violet-100">
+                                    {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-[11px] leading-5 text-slate-300 line-clamp-2">
+                                  {buildRecommendationReason(task, energyScore, nowTs)}
+                                </p>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="border-t border-white/10 pt-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">可一起处理的任务</p>
+                        <div className="mt-2 space-y-1.5">
+                          {bundleSuggestions.length === 0 ? (
+                            <div className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400">
+                              当前没有明显适合打包处理的任务，先完成一个主任务更稳。
+                            </div>
+                          ) : (
+                            bundleSuggestions.map((bundle, index) => (
+                              <div
+                                key={`bundle-${index}`}
+                                className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5"
+                              >
+                                <div className="text-[11px] font-semibold text-white">{bundle.title}</div>
+                                <p className="mt-0.5 text-[11px] leading-5 text-slate-300 line-clamp-2">{bundle.description}</p>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+                  </>
+                ) : null}
+              </div>
             </motion.section>
           )}
         </AnimatePresence>
@@ -3360,8 +3282,14 @@ export default function App() {
             ))}
 
             {activeTasks.length === 0 && archivedTasks.length === 0 && !isPlacementMode && (
-              <div className="pointer-events-none absolute inset-0 z-[4] flex items-center justify-center p-5 sm:p-8">
-                <DimensionEmptyState mode="stage" onCreateTask={handleAddTask} />
+              <div className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center p-5 sm:p-8">
+                <button
+                  type="button"
+                  onClick={handleAddTask}
+                  className="pointer-events-auto rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
+                >
+                  新建第一个任务
+                </button>
               </div>
             )}
           </div>
@@ -3444,14 +3372,18 @@ export default function App() {
                 </div>
 
                 {activeTasks.length === 0 && archivedTasks.length === 0 ? (
-                  <div className="flex h-full items-center justify-center text-slate-300">
-                    <DimensionEmptyState
-                      mode="sidebar"
-                      onCreateTask={() => {
+                  <div className="flex flex-col py-20 items-center justify-center text-slate-500 gap-4">
+                    <p className="text-xs">当前没有任务记录，从第一个任务开始吧。</p>
+                    <button
+                      type="button"
+                      onClick={() => {
                         setIsTaskListOpen(false);
                         handleAddTask();
                       }}
-                    />
+                      className="rounded-xl border border-violet-300/30 bg-violet-500/20 px-4 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/30 transition-colors"
+                    >
+                      立刻新建任务
+                    </button>
                   </div>
                 ) : (
                   <>
@@ -4190,7 +4122,125 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
-    </div>
+
+      {/* Draggable Group: Cat & Floating Chat Window */}
+      <motion.div
+        drag
+        dragMomentum={false}
+        className="fixed bottom-6 right-6 z-[60] flex flex-col items-end gap-3"
+      >
+        <AnimatePresence>
+          {isBehaviorChatOpen && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10, originX: 1, originY: 1 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="flex h-[28rem] w-80 min-w-0 flex-col rounded-[1.4rem] border border-cyan-300/18 bg-[linear-gradient(180deg,rgba(10,16,28,0.96),rgba(6,12,22,0.88))] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.8)] cursor-auto"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-cyan-100/65">行为聊天窗口</p>
+                  <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                    <MessageSquare className="h-4 w-4 text-cyan-300" />
+                    外部行为管理
+                  </h4>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-400">
+                    直接说你刚做了什么，小猫把它换算成精力恢复和耗能修正。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsBehaviorChatOpen(false)}
+                  className="rounded-xl border border-white/10 bg-white/5 p-1.5 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between text-[10px] text-cyan-100/70">
+                <span className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1">{activeBehaviorEvents.length} 个当前效果</span>
+                <span className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1">耗能 {Math.round(behaviorBurnRateModifier * 100)}%</span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {EXTERNAL_BEHAVIOR_PRESETS.slice(0, 4).map((preset) => (
+                  <button
+                    key={`quick-behavior-${preset.id}`}
+                    type="button"
+                    onClick={() => submitBehaviorChat(`我${preset.label}了`)}
+                    className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.09]"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950/55">
+                <div className="border-b border-white/8 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  今日对话
+                </div>
+                <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto px-3 py-3">
+                  {todayChatMessages.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[11px] leading-5 text-slate-400">
+                      还没有记录。试试告诉小猫“我喝茶了”，系统会立刻把它转成精力。
+                    </div>
+                  ) : (
+                    todayChatMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={cn(
+                          "max-w-[92%] rounded-2xl px-3 py-2 text-[11px] leading-5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]",
+                          message.role === 'user'
+                            ? 'ml-auto border border-cyan-300/20 bg-cyan-500/16 text-cyan-50'
+                            : 'border border-white/10 bg-white/[0.04] text-slate-200'
+                        )}
+                      >
+                        <div className="whitespace-pre-wrap break-words">{message.text}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="border-t border-white/8 px-3 py-3">
+                  <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <input
+                      type="text"
+                      value={behaviorChatInput}
+                      onChange={(e) => setBehaviorChatInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          submitBehaviorChat();
+                        }
+                      }}
+                      placeholder={BEHAVIOR_CHAT_PLACEHOLDER}
+                      className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => submitBehaviorChat()}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-500/16 text-cyan-100 transition-colors hover:bg-cyan-500/24"
+                      aria-label="发送行为记录"
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <button
+          onClick={() => setIsBehaviorChatOpen((prev) => !prev)}
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-800 shadow-[0_4px_20px_rgba(30,41,59,0.8)] transition-transform hover:scale-105 active:scale-95 border-2 border-slate-600/50 cursor-grab active:cursor-grabbing self-end"
+          title="和猫咪说话"
+        >
+          <span className="text-3xl leading-none pointer-events-none">🐱</span>
+        </button>
+      </motion.div>
+    </div >
   );
 }
 
