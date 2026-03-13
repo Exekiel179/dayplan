@@ -90,15 +90,54 @@ async function readTasks(username: string) {
   try {
     const text = await fs.promises.readFile(tasksFile, 'utf-8');
     const parsed = JSON.parse(text);
-    return Array.isArray(parsed) ? parsed : [];
+    // Support both old array format and new object format
+    if (Array.isArray(parsed)) {
+      return {
+        tasks: parsed,
+        ability_dimensions: [],
+        wellbeing: { daily_checkins: {}, daily_rest_sessions: {} },
+        ability_module: { active_module_id: 'special:mokugyo', special_totals: {}, tracked_ms_baseline: 0, updated_at: Date.now() },
+        rss_feeds: [],
+        news_items: [],
+        idea_notes: [],
+      };
+    }
+    return {
+      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+      ability_dimensions: Array.isArray(parsed.ability_dimensions) ? parsed.ability_dimensions : [],
+      wellbeing: parsed.wellbeing || { daily_checkins: {}, daily_rest_sessions: {} },
+      ability_module: parsed.ability_module || { active_module_id: 'special:mokugyo', special_totals: {}, tracked_ms_baseline: 0, updated_at: Date.now() },
+      rss_feeds: Array.isArray(parsed.rss_feeds) ? parsed.rss_feeds : [],
+      news_items: Array.isArray(parsed.news_items) ? parsed.news_items : [],
+      idea_notes: Array.isArray(parsed.idea_notes) ? parsed.idea_notes : [],
+    };
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       try {
         const text = await fs.promises.readFile(legacyTasksFile, 'utf-8');
         const parsed = JSON.parse(text);
-        return Array.isArray(parsed) ? parsed : [];
+        const tasks = Array.isArray(parsed) ? parsed : [];
+        return {
+          tasks,
+          ability_dimensions: [],
+          wellbeing: { daily_checkins: {}, daily_rest_sessions: {} },
+          ability_module: { active_module_id: 'special:mokugyo', special_totals: {}, tracked_ms_baseline: 0, updated_at: Date.now() },
+          rss_feeds: [],
+          news_items: [],
+          idea_notes: [],
+        };
       } catch (legacyError: unknown) {
-        if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') {
+          return {
+            tasks: [],
+            ability_dimensions: [],
+            wellbeing: { daily_checkins: {}, daily_rest_sessions: {} },
+            ability_module: { active_module_id: 'special:mokugyo', special_totals: {}, tracked_ms_baseline: 0, updated_at: Date.now() },
+            rss_feeds: [],
+            news_items: [],
+            idea_notes: [],
+          };
+        }
         throw legacyError;
       }
     }
@@ -106,10 +145,10 @@ async function readTasks(username: string) {
   }
 }
 
-async function writeTasks(username: string, tasks: unknown[]) {
+async function writeTasks(username: string, data: unknown) {
   const tasksFile = getUserTasksFile(username);
   await fs.promises.mkdir(path.dirname(tasksFile), { recursive: true });
-  await fs.promises.writeFile(tasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
+  await fs.promises.writeFile(tasksFile, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 async function readRegisteredUsers() {
@@ -427,10 +466,6 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
       if (req.method === 'PUT') {
         readJsonBody(req)
           .then(async (payload) => {
-            if (!Array.isArray(payload)) {
-              sendJson(res, 400, { error: 'payload must be an array' });
-              return;
-            }
             await writeTasks(session.username, payload);
             sendJson(res, 200, { ok: true });
           })

@@ -31,7 +31,19 @@ import {
   Pause,
   Activity,
   MessageSquare,
-  Send
+  Send,
+  Globe,
+  Rss,
+  BookOpen,
+  Tag,
+  FileText,
+  Briefcase,
+  Star,
+  Eye,
+  EyeOff,
+  Edit3,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
@@ -50,6 +62,9 @@ import {
   UserTaskData,
   WellbeingChatMessage,
   WellbeingSettings,
+  RSSFeed,
+  NewsItem,
+  IdeaNote,
 } from './types';
 
 type AppTheme = 'night' | 'day' | 'stardew';
@@ -1105,6 +1120,1140 @@ async function validateSession(token: string) {
   };
 }
 
+function WorldNewsView({
+  rssFeeds,
+  setRssFeeds,
+  newsItems,
+  setNewsItems,
+  ideaNotes,
+  setIdeaNotes,
+  tasks,
+  setTasks,
+}: {
+  rssFeeds: RSSFeed[];
+  setRssFeeds: (feeds: RSSFeed[]) => void;
+  newsItems: NewsItem[];
+  setNewsItems: (items: NewsItem[]) => void;
+  ideaNotes: IdeaNote[];
+  setIdeaNotes: (notes: IdeaNote[]) => void;
+  tasks: Task[];
+  setTasks: (tasks: Task[]) => void;
+}) {
+  const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
+  const [selectedNote, setSelectedNote] = useState<IdeaNote | null>(null);
+  const [mainView, setMainView] = useState<'news' | 'notes'>('news');
+  const [isAddingFeed, setIsAddingFeed] = useState(false);
+  const [newFeedName, setNewFeedName] = useState('');
+  const [newFeedUrl, setNewFeedUrl] = useState('');
+  const [newFeedCategory, setNewFeedCategory] = useState('');
+  const [isLoadingNews, setIsLoadingNews] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['默认']));
+  const [isCreatingNote, setIsCreatingNote] = useState(false);
+  const [newNoteTitle, setNewNoteTitle] = useState('');
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [newNoteType, setNewNoteType] = useState<'idea' | 'resume_tracking' | 'general'>('general');
+  const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
+  const [newNoteTagInput, setNewNoteTagInput] = useState('');
+  const [resumeCompany, setResumeCompany] = useState('');
+  const [resumePosition, setResumePosition] = useState('');
+  const [resumeStatus, setResumeStatus] = useState<'pending' | 'interview' | 'rejected' | 'accepted'>('pending');
+  const [resumeAppliedDate, setResumeAppliedDate] = useState('');
+  const [resumeDeadline, setResumeDeadline] = useState('');
+
+  const addRssFeed = () => {
+    if (!newFeedName.trim() || !newFeedUrl.trim()) return;
+
+    const newFeed: RSSFeed = {
+      id: `feed-${Date.now()}`,
+      name: newFeedName.trim(),
+      url: newFeedUrl.trim(),
+      category: newFeedCategory.trim() || '默认',
+      keywords: [],
+      enabled: true,
+      created_at: Date.now(),
+    };
+
+    setRssFeeds([...rssFeeds, newFeed]);
+    setNewFeedName('');
+    setNewFeedUrl('');
+    setNewFeedCategory('');
+    setIsAddingFeed(false);
+  };
+
+  const toggleFeed = (feedId: string) => {
+    setRssFeeds(rssFeeds.map(feed =>
+      feed.id === feedId ? { ...feed, enabled: !feed.enabled } : feed
+    ));
+  };
+
+  const deleteFeed = (feedId: string) => {
+    setRssFeeds(rssFeeds.filter(feed => feed.id !== feedId));
+  };
+
+  const toggleCategory = (category: string) => {
+    const newExpanded = new Set(expandedCategories);
+    if (newExpanded.has(category)) {
+      newExpanded.delete(category);
+    } else {
+      newExpanded.add(category);
+    }
+    setExpandedCategories(newExpanded);
+  };
+
+  const categories = Array.from(new Set(rssFeeds.map(f => f.category)));
+
+  const toggleNewsImportant = (newsId: string) => {
+    setNewsItems(newsItems.map(item =>
+      item.id === newsId ? { ...item, is_important: !item.is_important } : item
+    ));
+  };
+
+  const toggleNewsRead = (newsId: string) => {
+    setNewsItems(newsItems.map(item =>
+      item.id === newsId ? { ...item, is_read: !item.is_read } : item
+    ));
+  };
+
+  const createNoteFromNews = (news: NewsItem) => {
+    const newNote: IdeaNote = {
+      id: `note-${Date.now()}`,
+      title: news.title,
+      content: `# ${news.title}\n\n${news.content}\n\n[原文链接](${news.url})`,
+      tags: news.tags,
+      related_news_ids: [news.id],
+      note_type: 'general',
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    };
+    setIdeaNotes([...ideaNotes, newNote]);
+    setSelectedNote(newNote);
+    setMainView('notes');
+  };
+
+  const createNewNote = () => {
+    if (!newNoteTitle.trim()) return;
+
+    const newNote: IdeaNote = {
+      id: `note-${Date.now()}`,
+      title: newNoteTitle.trim(),
+      content: newNoteContent.trim(),
+      tags: newNoteTags,
+      related_news_ids: [],
+      note_type: newNoteType,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    };
+
+    // 如果是简历投递类型，添加元数据
+    if (newNoteType === 'resume_tracking') {
+      newNote.metadata = {
+        company: resumeCompany.trim(),
+        position: resumePosition.trim(),
+        status: resumeStatus,
+        applied_at: resumeAppliedDate ? new Date(resumeAppliedDate).getTime() : Date.now(),
+        deadline: resumeDeadline ? new Date(resumeDeadline).getTime() : undefined,
+      };
+    }
+
+    setIdeaNotes([...ideaNotes, newNote]);
+    setSelectedNote(newNote);
+    setIsCreatingNote(false);
+    setNewNoteTitle('');
+    setNewNoteContent('');
+    setNewNoteTags([]);
+    setNewNoteTagInput('');
+    setResumeCompany('');
+    setResumePosition('');
+    setResumeStatus('pending');
+    setResumeAppliedDate('');
+    setResumeDeadline('');
+  };
+
+  const addNoteTag = () => {
+    if (newNoteTagInput.trim() && !newNoteTags.includes(newNoteTagInput.trim())) {
+      setNewNoteTags([...newNoteTags, newNoteTagInput.trim()]);
+      setNewNoteTagInput('');
+    }
+  };
+
+  const removeNoteTag = (tag: string) => {
+    setNewNoteTags(newNoteTags.filter(t => t !== tag));
+  };
+
+  const convertNoteToTask = (note: IdeaNote) => {
+    // 解析笔记内容，提取任务信息
+    const lines = note.content.split('\n').filter(line => line.trim());
+    const description = lines.slice(0, 3).join('\n'); // 取前3行作为描述
+
+    // 检查是否有截止日期信息
+    let deadline: number | null = null;
+    const dateMatch = note.content.match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2})|(\d{1,2}[-/]\d{1,2})/);
+    if (dateMatch) {
+      try {
+        const dateStr = dateMatch[0];
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          deadline = date.getTime();
+        }
+      } catch (e) {
+        // 忽略日期解析错误
+      }
+    }
+
+    // 创建新任务
+    const newTask: Task = {
+      id: `task-${Date.now()}`,
+      title: note.title,
+      description: description,
+      x: 50, // 默认中等重要性
+      y: deadline ? 70 : 30, // 有截止日期则较紧急
+      status: 'pending',
+      timeline: deadline ? 'temporary' : 'long_term',
+      dependency_ids: [],
+      estimated_minutes: 60,
+      actual_minutes: 0,
+      deadline_at: deadline,
+      steps: [],
+      created_at: Date.now(),
+    };
+
+    // 如果是简历投递类型，添加特殊处理
+    if (note.note_type === 'resume_tracking' && note.metadata) {
+      newTask.title = `${note.metadata.company} - ${note.metadata.position}`;
+      newTask.description = `公司：${note.metadata.company}\n职位：${note.metadata.position}\n状态：${note.metadata.status || 'pending'}`;
+      if (note.metadata.deadline) {
+        newTask.deadline_at = note.metadata.deadline;
+        newTask.y = 80; // 简历截止日期通常很紧急
+      }
+    }
+
+    setTasks([...tasks, newTask]);
+
+    // 更新笔记，关联任务ID
+    const updatedNote = { ...note, related_task_id: newTask.id };
+    setIdeaNotes(ideaNotes.map(n => n.id === note.id ? updatedNote : n));
+
+    // 提示用户
+    alert(`已创建任务：${newTask.title}`);
+  };
+
+  const fetchTrendradarNews = async () => {
+    setIsLoadingNews(true);
+    try {
+      // 这里调用 trendradar MCP 工具
+      // 由于 MCP 工具只能在 Claude 端调用，这里先用模拟数据
+      const mockNews: NewsItem[] = [
+        {
+          id: `news-${Date.now()}-1`,
+          title: '示例新闻：AI 技术最新进展',
+          content: '人工智能领域取得重大突破，新的模型在多个基准测试中刷新记录...',
+          url: 'https://example.com/news/1',
+          published_at: Date.now(),
+          is_important: false,
+          is_read: false,
+          tags: ['AI', '技术'],
+          note_ids: [],
+          created_at: Date.now(),
+        },
+        {
+          id: `news-${Date.now()}-2`,
+          title: '示例新闻：全球经济动态',
+          content: '最新经济数据显示，全球市场呈现复苏态势...',
+          url: 'https://example.com/news/2',
+          published_at: Date.now(),
+          is_important: false,
+          is_read: false,
+          tags: ['经济', '全球'],
+          note_ids: [],
+          created_at: Date.now(),
+        },
+      ];
+
+      setNewsItems([...mockNews, ...newsItems]);
+    } catch (error) {
+      console.error('获取新闻失败:', error);
+    } finally {
+      setIsLoadingNews(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+      <div className="h-full flex">
+        {/* Left Sidebar - Enhanced Design */}
+        <motion.div
+          initial={{ x: -20, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ duration: 0.4 }}
+          className="w-72 border-r border-white/[0.08] backdrop-blur-xl bg-gradient-to-b from-slate-950/90 to-slate-900/90 overflow-y-auto"
+        >
+          <div className="p-5">
+            {/* RSS Header */}
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-gradient-to-br from-teal-500/20 to-cyan-500/20 border border-teal-500/30 shadow-lg shadow-teal-500/10">
+                  <Rss className="h-4 w-4 text-teal-300" />
+                </div>
+                <h2 className="text-sm font-bold bg-gradient-to-r from-teal-200 to-cyan-200 bg-clip-text text-transparent">
+                  RSS 订阅源
+                </h2>
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.05, rotate: 90 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setIsAddingFeed(true)}
+                className="p-2 rounded-xl bg-gradient-to-br from-teal-500/10 to-cyan-500/10 border border-teal-500/20 hover:border-teal-500/40 transition-all shadow-lg hover:shadow-teal-500/20"
+                title="添加订阅源"
+              >
+                <Plus className="h-4 w-4 text-teal-300" />
+              </motion.button>
+            </div>
+
+            {/* Add Feed Form - Enhanced */}
+            <AnimatePresence>
+              {isAddingFeed && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  transition={{ duration: 0.2 }}
+                  className="mb-5 p-4 rounded-2xl border border-teal-500/30 bg-gradient-to-br from-teal-500/10 via-cyan-500/5 to-teal-500/10 backdrop-blur-sm shadow-xl space-y-3"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-teal-200">新建订阅源</span>
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => setIsAddingFeed(false)}
+                      className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+                    >
+                      <X className="h-3 w-3 text-slate-400" />
+                    </motion.button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="订阅源名称"
+                    value={newFeedName}
+                    onChange={(e) => setNewFeedName(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/10 bg-slate-900/80 backdrop-blur-sm text-white placeholder:text-slate-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20 transition-all"
+                  />
+                  <input
+                    type="text"
+                    placeholder="RSS URL"
+                    value={newFeedUrl}
+                    onChange={(e) => setNewFeedUrl(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/10 bg-slate-900/80 backdrop-blur-sm text-white placeholder:text-slate-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20 transition-all"
+                  />
+                  <input
+                    type="text"
+                    placeholder="分类（可选）"
+                    value={newFeedCategory}
+                    onChange={(e) => setNewFeedCategory(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/10 bg-slate-900/80 backdrop-blur-sm text-white placeholder:text-slate-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20 transition-all"
+                  />
+                  <div className="flex gap-2">
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={addRssFeed}
+                      className="flex-1 px-3 py-2 text-xs rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 text-white font-semibold shadow-lg shadow-teal-500/30 hover:shadow-teal-500/50 transition-all"
+                    >
+                      添加
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setIsAddingFeed(false)}
+                      className="flex-1 px-3 py-2 text-xs rounded-xl bg-white/10 backdrop-blur-sm text-slate-300 hover:bg-white/20 transition-all font-semibold"
+                    >
+                      取消
+                    </motion.button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Feed List - Enhanced */}
+            {categories.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-center py-8 px-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.02]"
+              >
+                <Rss className="h-8 w-8 text-slate-600 mx-auto mb-2" />
+                <p className="text-xs text-slate-400">暂无订阅源</p>
+              </motion.div>
+            ) : (
+              <div className="space-y-2">
+                {categories.map((category, idx) => (
+                  <motion.div
+                    key={category}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.05 }}
+                  >
+                    <button
+                      onClick={() => toggleCategory(category)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/[0.05] text-xs font-semibold text-slate-300 transition-all group border border-transparent hover:border-white/10"
+                    >
+                      <span className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-teal-400 to-cyan-400" />
+                        {category}
+                      </span>
+                      <motion.div
+                        animate={{ rotate: expandedCategories.has(category) ? 180 : 0 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <ChevronDown className="h-3 w-3 text-slate-500 group-hover:text-teal-400 transition-colors" />
+                      </motion.div>
+                    </button>
+                    <AnimatePresence>
+                      {expandedCategories.has(category) && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="ml-4 mt-1 space-y-1 overflow-hidden"
+                        >
+                          {rssFeeds
+                            .filter(feed => feed.category === category)
+                            .map((feed, feedIdx) => (
+                              <motion.div
+                                key={feed.id}
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: feedIdx * 0.03 }}
+                                className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-gradient-to-r hover:from-teal-500/10 hover:to-transparent group border border-transparent hover:border-teal-500/20 transition-all"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={feed.enabled}
+                                  onChange={() => toggleFeed(feed.id)}
+                                  className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-teal-500 focus:ring-teal-500/50 focus:ring-offset-0 transition-all"
+                                />
+                                <span className="flex-1 text-xs text-slate-400 truncate group-hover:text-slate-300 transition-colors">
+                                  {feed.name}
+                                </span>
+                                <motion.button
+                                  whileHover={{ scale: 1.1 }}
+                                  whileTap={{ scale: 0.9 }}
+                                  onClick={() => deleteFeed(feed.id)}
+                                  className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-red-500/20 transition-all"
+                                >
+                                  <X className="h-3 w-3 text-red-400" />
+                                </motion.button>
+                              </motion.div>
+                            ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Notes Section - Enhanced */}
+          <div className="border-t border-white/[0.08] p-5 bg-gradient-to-b from-transparent to-slate-950/50">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30 shadow-lg shadow-violet-500/10">
+                <BookOpen className="h-4 w-4 text-violet-300" />
+              </div>
+              <h2 className="text-sm font-bold bg-gradient-to-r from-violet-200 to-purple-200 bg-clip-text text-transparent">
+                笔记分类
+              </h2>
+            </div>
+            <div className="space-y-1.5 text-xs">
+              {[
+                { icon: '💡', label: '想法', type: 'idea', color: 'from-amber-500/10 to-yellow-500/10 border-amber-500/20 hover:border-amber-500/40' },
+                { icon: '💼', label: '简历投递', type: 'resume_tracking', color: 'from-cyan-500/10 to-blue-500/10 border-cyan-500/20 hover:border-cyan-500/40' },
+                { icon: '📝', label: '通用', type: 'general', color: 'from-slate-500/10 to-slate-600/10 border-slate-500/20 hover:border-slate-500/40' }
+              ].map((item, idx) => (
+                <motion.button
+                  key={item.type}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.3 + idx * 0.05 }}
+                  whileHover={{ x: 4 }}
+                  className={cn(
+                    "w-full text-left px-3 py-2.5 rounded-xl transition-all border backdrop-blur-sm group",
+                    `bg-gradient-to-r ${item.color}`
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2 text-slate-300 group-hover:text-white transition-colors">
+                      <span className="text-base">{item.icon}</span>
+                      <span className="font-medium">{item.label}</span>
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-white/10 text-[10px] font-bold text-slate-400 group-hover:text-white group-hover:bg-white/20 transition-all">
+                      {ideaNotes.filter(n => n.note_type === item.type).length}
+                    </span>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Main Content - Enhanced */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="flex-1 overflow-y-auto"
+        >
+          <div className="p-6">
+            {/* Header with Tab Switcher */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-white/10 shadow-2xl">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setMainView('news')}
+                  className={cn(
+                    "px-5 py-2.5 rounded-xl text-sm font-bold transition-all relative overflow-hidden",
+                    mainView === 'news'
+                      ? "bg-gradient-to-r from-teal-500/30 to-cyan-500/30 text-teal-100 shadow-lg shadow-teal-500/20"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                  )}
+                >
+                  {mainView === 'news' && (
+                    <motion.div
+                      layoutId="activeTab"
+                      className="absolute inset-0 bg-gradient-to-r from-teal-500/20 to-cyan-500/20 border border-teal-500/30 rounded-xl"
+                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                    />
+                  )}
+                  <span className="relative flex items-center gap-2">
+                    <Globe className="h-4 w-4" />
+                    新闻
+                    <span className="px-2 py-0.5 rounded-full bg-teal-500/20 text-[10px] font-bold">
+                      {newsItems.length}
+                    </span>
+                  </span>
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setMainView('notes')}
+                  className={cn(
+                    "px-5 py-2.5 rounded-xl text-sm font-bold transition-all relative overflow-hidden",
+                    mainView === 'notes'
+                      ? "bg-gradient-to-r from-violet-500/30 to-purple-500/30 text-violet-100 shadow-lg shadow-violet-500/20"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                  )}
+                >
+                  {mainView === 'notes' && (
+                    <motion.div
+                      layoutId="activeTab"
+                      className="absolute inset-0 bg-gradient-to-r from-violet-500/20 to-purple-500/20 border border-violet-500/30 rounded-xl"
+                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                    />
+                  )}
+                  <span className="relative flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    笔记
+                    <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-[10px] font-bold">
+                      {ideaNotes.length}
+                    </span>
+                  </span>
+                </motion.button>
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={fetchTrendradarNews}
+                disabled={isLoadingNews}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-teal-500/20 to-cyan-500/20 text-teal-100 border border-teal-500/30 hover:border-teal-500/50 text-sm font-bold disabled:opacity-50 shadow-lg hover:shadow-teal-500/30 transition-all backdrop-blur-sm"
+              >
+                {isLoadingNews ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    加载中...
+                  </>
+                ) : (
+                  <>
+                    <TrendingUp className="h-4 w-4" />
+                    获取最新新闻
+                  </>
+                )}
+              </motion.button>
+            </div>
+
+            {mainView === 'news' ? (
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key="news-list"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-3"
+                >
+                  {newsItems.length === 0 ? (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="text-center py-16 px-6 rounded-3xl border border-dashed border-white/10 bg-gradient-to-br from-slate-900/50 to-slate-950/50 backdrop-blur-sm"
+                    >
+                      <div className="p-4 rounded-2xl bg-gradient-to-br from-teal-500/10 to-cyan-500/10 border border-teal-500/20 w-fit mx-auto mb-4">
+                        <Globe className="h-12 w-12 text-teal-400" />
+                      </div>
+                      <p className="text-slate-300 font-semibold mb-2">暂无新闻</p>
+                      <p className="text-xs text-slate-500">添加 RSS 订阅源或使用 trendradar 获取新闻</p>
+                    </motion.div>
+                  ) : (
+                    newsItems.map((news, idx) => (
+                      <motion.div
+                        key={news.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.05, duration: 0.3 }}
+                        whileHover={{ scale: 1.01, y: -2 }}
+                        onClick={() => setSelectedNews(news)}
+                        className={cn(
+                          "group p-5 rounded-2xl border cursor-pointer transition-all backdrop-blur-sm relative overflow-hidden",
+                          selectedNews?.id === news.id
+                            ? "border-teal-500/50 bg-gradient-to-br from-teal-500/15 to-cyan-500/10 shadow-xl shadow-teal-500/10"
+                            : "border-white/10 bg-gradient-to-br from-white/[0.03] to-white/[0.01] hover:border-teal-500/30 hover:bg-gradient-to-br hover:from-teal-500/10 hover:to-cyan-500/5 shadow-lg hover:shadow-teal-500/5",
+                          news.is_read && "opacity-60"
+                        )}
+                      >
+                        {/* Gradient overlay on hover */}
+                        <div className="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-cyan-500/5 to-teal-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+                        <div className="relative flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-sm font-bold text-white mb-2 line-clamp-2 group-hover:text-teal-100 transition-colors">
+                              {news.title}
+                            </h3>
+                            <p className="text-xs text-slate-400 line-clamp-2 mb-3 leading-relaxed">
+                              {news.content}
+                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {news.tags.map(tag => (
+                                <motion.span
+                                  key={tag}
+                                  whileHover={{ scale: 1.05 }}
+                                  className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500/20 to-purple-500/20 border border-violet-500/30 text-violet-200 text-[10px] font-bold backdrop-blur-sm"
+                                >
+                                  {tag}
+                                </motion.span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-2">
+                            <motion.button
+                              whileHover={{ scale: 1.1, rotate: 15 }}
+                              whileTap={{ scale: 0.9 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleNewsImportant(news.id);
+                              }}
+                              className={cn(
+                                "p-2 rounded-xl transition-all backdrop-blur-sm shadow-lg",
+                                news.is_important
+                                  ? "bg-gradient-to-br from-amber-500/30 to-yellow-500/30 border border-amber-500/50 text-amber-300 shadow-amber-500/20"
+                                  : "bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-amber-400 hover:border-amber-500/30"
+                              )}
+                            >
+                              <Star className={cn("h-4 w-4", news.is_important && "fill-current")} />
+                            </motion.button>
+                            <motion.button
+                              whileHover={{ scale: 1.1 }}
+                              whileTap={{ scale: 0.9 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleNewsRead(news.id);
+                              }}
+                              className="p-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-teal-400 hover:border-teal-500/30 transition-all backdrop-blur-sm shadow-lg"
+                            >
+                              {news.is_read ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                            </motion.button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            ) : (
+              <div className="space-y-3">
+                {isCreatingNote && (
+                  <div className="p-4 rounded-xl border border-teal-500/30 bg-teal-500/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-teal-100">新建笔记</h3>
+                      <button
+                        onClick={() => setIsCreatingNote(false)}
+                        className="p-1 rounded-lg hover:bg-white/10"
+                      >
+                        <X className="h-4 w-4 text-slate-400" />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="笔记标题"
+                      value={newNoteTitle}
+                      onChange={(e) => setNewNoteTitle(e.target.value)}
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500"
+                    />
+                    <textarea
+                      placeholder="笔记内容（支持 Markdown）"
+                      value={newNoteContent}
+                      onChange={(e) => setNewNoteContent(e.target.value)}
+                      rows={6}
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500 resize-none"
+                    />
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-2">笔记类型</label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setNewNoteType('general')}
+                          className={cn(
+                            "flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all",
+                            newNoteType === 'general'
+                              ? "bg-cyan-500/20 text-cyan-100 border border-cyan-500/30"
+                              : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
+                          )}
+                        >
+                          📝 通用
+                        </button>
+                        <button
+                          onClick={() => setNewNoteType('idea')}
+                          className={cn(
+                            "flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all",
+                            newNoteType === 'idea'
+                              ? "bg-cyan-500/20 text-cyan-100 border border-cyan-500/30"
+                              : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
+                          )}
+                        >
+                          💡 想法
+                        </button>
+                        <button
+                          onClick={() => setNewNoteType('resume_tracking')}
+                          className={cn(
+                            "flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all",
+                            newNoteType === 'resume_tracking'
+                              ? "bg-cyan-500/20 text-cyan-100 border border-cyan-500/30"
+                              : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
+                          )}
+                        >
+                          💼 简历
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-2">标签</label>
+                      <div className="flex gap-2 mb-2">
+                        <input
+                          type="text"
+                          placeholder="添加标签"
+                          value={newNoteTagInput}
+                          onChange={(e) => setNewNoteTagInput(e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && addNoteTag()}
+                          className="flex-1 px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500"
+                        />
+                        <button
+                          onClick={addNoteTag}
+                          className="px-3 py-1 rounded-lg bg-white/10 text-slate-300 hover:bg-white/20 text-xs"
+                        >
+                          添加
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {newNoteTags.map(tag => (
+                          <span
+                            key={tag}
+                            className="px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-200 text-[10px] font-semibold flex items-center gap-1"
+                          >
+                            {tag}
+                            <button
+                              onClick={() => removeNoteTag(tag)}
+                              className="hover:text-cyan-100"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {newNoteType === 'resume_tracking' && (
+                      <div className="space-y-3 p-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
+                        <h4 className="text-xs font-bold text-violet-200 flex items-center gap-2">
+                          <Briefcase className="h-3 w-3" />
+                          简历投递信息
+                        </h4>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            placeholder="公司名称"
+                            value={resumeCompany}
+                            onChange={(e) => setResumeCompany(e.target.value)}
+                            className="px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500"
+                          />
+                          <input
+                            type="text"
+                            placeholder="职位名称"
+                            value={resumePosition}
+                            onChange={(e) => setResumePosition(e.target.value)}
+                            className="px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-400 mb-1">状态</label>
+                          <div className="grid grid-cols-4 gap-1">
+                            <button
+                              onClick={() => setResumeStatus('pending')}
+                              className={cn(
+                                "px-2 py-1 rounded-lg text-[10px] font-semibold transition-all",
+                                resumeStatus === 'pending'
+                                  ? "bg-amber-500/30 text-amber-100 border border-amber-500/50"
+                                  : "bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
+                              )}
+                            >
+                              待定
+                            </button>
+                            <button
+                              onClick={() => setResumeStatus('interview')}
+                              className={cn(
+                                "px-2 py-1 rounded-lg text-[10px] font-semibold transition-all",
+                                resumeStatus === 'interview'
+                                  ? "bg-cyan-500/30 text-cyan-100 border border-cyan-500/50"
+                                  : "bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
+                              )}
+                            >
+                              面试
+                            </button>
+                            <button
+                              onClick={() => setResumeStatus('rejected')}
+                              className={cn(
+                                "px-2 py-1 rounded-lg text-[10px] font-semibold transition-all",
+                                resumeStatus === 'rejected'
+                                  ? "bg-red-500/30 text-red-100 border border-red-500/50"
+                                  : "bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
+                              )}
+                            >
+                              拒绝
+                            </button>
+                            <button
+                              onClick={() => setResumeStatus('accepted')}
+                              className={cn(
+                                "px-2 py-1 rounded-lg text-[10px] font-semibold transition-all",
+                                resumeStatus === 'accepted'
+                                  ? "bg-emerald-500/30 text-emerald-100 border border-emerald-500/50"
+                                  : "bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
+                              )}
+                            >
+                              通过
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-400 mb-1">投递日期</label>
+                            <input
+                              type="date"
+                              value={resumeAppliedDate}
+                              onChange={(e) => setResumeAppliedDate(e.target.value)}
+                              className="w-full px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-400 mb-1">截止日期</label>
+                            <input
+                              type="date"
+                              value={resumeDeadline}
+                              onChange={(e) => setResumeDeadline(e.target.value)}
+                              className="w-full px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      onClick={createNewNote}
+                      disabled={!newNoteTitle.trim()}
+                      className="w-full px-4 py-2 rounded-xl bg-teal-500 text-white hover:bg-teal-600 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      创建笔记
+                    </button>
+                  </div>
+                )}
+
+                {!isCreatingNote && (
+                  <button
+                    onClick={() => setIsCreatingNote(true)}
+                    className="w-full p-4 rounded-xl border-2 border-dashed border-white/20 hover:border-teal-500/50 hover:bg-teal-500/5 transition-all text-sm text-slate-400 hover:text-teal-300 font-semibold"
+                  >
+                    <Plus className="h-5 w-5 inline mr-2" />
+                    新建笔记
+                  </button>
+                )}
+
+                {ideaNotes.length === 0 && !isCreatingNote ? (
+                  <div className="text-center py-12">
+                    <FileText className="h-12 w-12 text-slate-600 mx-auto mb-4" />
+                    <p className="text-slate-400 mb-2">暂无笔记</p>
+                    <p className="text-xs text-slate-500">从新闻创建笔记或直接添加新笔记</p>
+                  </div>
+                ) : (
+                  ideaNotes.map(note => (
+                    <div
+                      key={note.id}
+                      onClick={() => setSelectedNote(note)}
+                      className={cn(
+                        "p-4 rounded-xl border cursor-pointer transition-all",
+                        selectedNote?.id === note.id
+                          ? "border-teal-500/50 bg-teal-500/10"
+                          : "border-white/10 bg-white/5 hover:bg-white/10"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-lg">
+                              {note.note_type === 'idea' ? '💡' : note.note_type === 'resume_tracking' ? '💼' : '📝'}
+                            </span>
+                            <h3 className="text-sm font-semibold text-white line-clamp-1">
+                              {note.title}
+                            </h3>
+                          </div>
+                          <p className="text-xs text-slate-400 line-clamp-2 mb-2">
+                            {note.content.substring(0, 100)}...
+                          </p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {note.note_type === 'resume_tracking' && note.metadata?.status && (
+                              <span
+                                className={cn(
+                                  "px-2 py-0.5 rounded-full text-[10px] font-semibold",
+                                  note.metadata.status === 'pending' && "bg-amber-500/20 text-amber-200",
+                                  note.metadata.status === 'interview' && "bg-cyan-500/20 text-cyan-200",
+                                  note.metadata.status === 'rejected' && "bg-red-500/20 text-red-200",
+                                  note.metadata.status === 'accepted' && "bg-emerald-500/20 text-emerald-200"
+                                )}
+                              >
+                                {note.metadata.status === 'pending' && '待定'}
+                                {note.metadata.status === 'interview' && '面试中'}
+                                {note.metadata.status === 'rejected' && '已拒绝'}
+                                {note.metadata.status === 'accepted' && '已通过'}
+                              </span>
+                            )}
+                            {note.tags.map(tag => (
+                              <span
+                                key={tag}
+                                className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-200 text-[10px] font-semibold"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </motion.div>
+
+        {/* Right Panel - Enhanced */}
+        <motion.div
+          initial={{ x: 20, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
+          className="w-96 border-l border-white/[0.08] bg-gradient-to-b from-slate-950/90 to-slate-900/90 backdrop-blur-xl overflow-y-auto"
+        >
+          <div className="p-5">
+            {selectedNews ? (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-gradient-to-br from-teal-500/20 to-cyan-500/20 border border-teal-500/30">
+                      <Globe className="h-4 w-4 text-teal-300" />
+                    </div>
+                    <h2 className="text-sm font-bold bg-gradient-to-r from-teal-200 to-cyan-200 bg-clip-text text-transparent">
+                      新闻详情
+                    </h2>
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.1, rotate: 90 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => setSelectedNews(null)}
+                    className="p-2 rounded-xl hover:bg-white/10 transition-all"
+                  >
+                    <X className="h-4 w-4 text-slate-400" />
+                  </motion.button>
+                </div>
+                <div className="space-y-4">
+                  <div className="p-5 rounded-2xl bg-gradient-to-br from-teal-500/10 via-cyan-500/5 to-teal-500/10 border border-teal-500/20 backdrop-blur-sm">
+                    <h3 className="text-base font-bold text-white leading-relaxed mb-3">{selectedNews.title}</h3>
+                    <p className="text-sm text-slate-300 leading-relaxed">{selectedNews.content}</p>
+                  </div>
+                  {selectedNews.url && (
+                    <motion.a
+                      whileHover={{ x: 4 }}
+                      href={selectedNews.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-teal-500/10 to-cyan-500/10 border border-teal-500/30 text-xs text-teal-300 hover:text-teal-200 hover:border-teal-500/50 transition-all font-semibold backdrop-blur-sm"
+                    >
+                      查看原文 <ChevronRight className="h-3 w-3" />
+                    </motion.a>
+                  )}
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => createNoteFromNews(selectedNews)}
+                    className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-teal-500/20 to-cyan-500/20 text-teal-100 border border-teal-500/30 hover:border-teal-500/50 text-sm font-bold shadow-lg hover:shadow-teal-500/20 transition-all backdrop-blur-sm flex items-center justify-center gap-2"
+                  >
+                    <Edit3 className="h-4 w-4" />
+                    创建笔记
+                  </motion.button>
+                </div>
+              </motion.div>
+            ) : selectedNote ? (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
+                      <FileText className="h-4 w-4 text-violet-300" />
+                    </div>
+                    <h2 className="text-sm font-bold bg-gradient-to-r from-violet-200 to-purple-200 bg-clip-text text-transparent">
+                      笔记详情
+                    </h2>
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.1, rotate: 90 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => setSelectedNote(null)}
+                    className="p-2 rounded-xl hover:bg-white/10 transition-all"
+                  >
+                    <X className="h-4 w-4 text-slate-400" />
+                  </motion.button>
+                </div>
+                <div className="space-y-4">
+                  <div className="p-5 rounded-2xl bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-violet-500/10 border border-violet-500/20 backdrop-blur-sm">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-2xl">
+                        {selectedNote.note_type === 'idea' ? '💡' : selectedNote.note_type === 'resume_tracking' ? '💼' : '📝'}
+                      </span>
+                      <h3 className="text-base font-bold text-white">{selectedNote.title}</h3>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {selectedNote.tags.map(tag => (
+                        <motion.span
+                          key={tag}
+                          whileHover={{ scale: 1.05 }}
+                          className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 text-cyan-200 text-[10px] font-bold backdrop-blur-sm"
+                        >
+                          {tag}
+                        </motion.span>
+                      ))}
+                    </div>
+                  </div>
+                  {selectedNote.note_type === 'resume_tracking' && selectedNote.metadata && (
+                    <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-500/15 to-purple-500/10 border border-violet-500/30 space-y-3 backdrop-blur-sm shadow-lg">
+                      <h4 className="text-xs font-bold text-violet-200 flex items-center gap-2">
+                        <Briefcase className="h-4 w-4" />
+                        简历投递信息
+                      </h4>
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div className="p-3 rounded-xl bg-slate-900/50 backdrop-blur-sm">
+                          <p className="text-slate-400 mb-1 text-[10px] font-semibold uppercase tracking-wider">公司</p>
+                          <p className="text-white font-bold">{selectedNote.metadata.company || '-'}</p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-slate-900/50 backdrop-blur-sm">
+                          <p className="text-slate-400 mb-1 text-[10px] font-semibold uppercase tracking-wider">职位</p>
+                          <p className="text-white font-bold">{selectedNote.metadata.position || '-'}</p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-slate-900/50 backdrop-blur-sm">
+                          <p className="text-slate-400 mb-1 text-[10px] font-semibold uppercase tracking-wider">状态</p>
+                          <span
+                            className={cn(
+                              "inline-block px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-lg",
+                              selectedNote.metadata.status === 'pending' && "bg-gradient-to-r from-amber-500/30 to-yellow-500/30 border border-amber-500/50 text-amber-100",
+                              selectedNote.metadata.status === 'interview' && "bg-gradient-to-r from-cyan-500/30 to-blue-500/30 border border-cyan-500/50 text-cyan-100",
+                              selectedNote.metadata.status === 'rejected' && "bg-gradient-to-r from-red-500/30 to-rose-500/30 border border-red-500/50 text-red-100",
+                              selectedNote.metadata.status === 'accepted' && "bg-gradient-to-r from-emerald-500/30 to-green-500/30 border border-emerald-500/50 text-emerald-100"
+                            )}
+                          >
+                            {selectedNote.metadata.status === 'pending' && '待定'}
+                            {selectedNote.metadata.status === 'interview' && '面试中'}
+                            {selectedNote.metadata.status === 'rejected' && '已拒绝'}
+                            {selectedNote.metadata.status === 'accepted' && '已通过'}
+                          </span>
+                        </div>
+                        <div className="p-3 rounded-xl bg-slate-900/50 backdrop-blur-sm">
+                          <p className="text-slate-400 mb-1 text-[10px] font-semibold uppercase tracking-wider">投递日期</p>
+                          <p className="text-white font-bold">
+                            {selectedNote.metadata.applied_at
+                              ? new Date(selectedNote.metadata.applied_at).toLocaleDateString('zh-CN')
+                              : '-'}
+                          </p>
+                        </div>
+                        {selectedNote.metadata.deadline && (
+                          <div className="col-span-2 p-3 rounded-xl bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border border-amber-500/30 backdrop-blur-sm">
+                            <p className="text-amber-300 mb-1 text-[10px] font-semibold uppercase tracking-wider">截止日期</p>
+                            <p className="text-amber-100 font-bold">
+                              {new Date(selectedNote.metadata.deadline).toLocaleDateString('zh-CN')}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <div className="p-5 rounded-2xl bg-slate-900/50 border border-white/10 backdrop-blur-sm prose prose-invert prose-sm max-w-none">
+                    <Markdown>{selectedNote.content}</Markdown>
+                  </div>
+                  {selectedNote.related_task_id ? (
+                    <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-500/15 to-green-500/10 border border-emerald-500/30 backdrop-blur-sm">
+                      <p className="text-xs text-emerald-200 flex items-center gap-2 font-semibold">
+                        <CheckCircle2 className="h-4 w-4" />
+                        已关联任务
+                      </p>
+                    </div>
+                  ) : (
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => convertNoteToTask(selectedNote)}
+                      className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-violet-500/20 to-purple-500/20 text-violet-100 border border-violet-500/30 hover:border-violet-500/50 text-sm font-bold flex items-center justify-center gap-2 shadow-lg hover:shadow-violet-500/20 transition-all backdrop-blur-sm"
+                    >
+                      <ListTodo className="h-4 w-4" />
+                      转换为任务
+                    </motion.button>
+                  )}
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="text-center py-16 px-6 rounded-3xl border border-dashed border-white/10 bg-gradient-to-br from-slate-900/30 to-slate-950/30 backdrop-blur-sm"
+              >
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-500/10 to-slate-600/10 border border-slate-500/20 w-fit mx-auto mb-4">
+                  <Info className="h-12 w-12 text-slate-500" />
+                </div>
+                <p className="text-sm text-slate-400 font-semibold">选择新闻或笔记查看详情</p>
+              </motion.div>
+            )}
+          </div>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [authToken, setAuthToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) || '' : ''));
   const [authUser, setAuthUser] = useState('');
@@ -1122,6 +2271,10 @@ export default function App() {
   const [abilityDimensions, setAbilityDimensions] = useState<string[]>([]);
   const [wellbeing, setWellbeing] = useState<WellbeingSettings>(createDefaultWellbeingSettings());
   const [abilityModule, setAbilityModule] = useState<AbilityModuleSettings>(createDefaultAbilityModuleSettings());
+  const [rssFeeds, setRssFeeds] = useState<RSSFeed[]>([]);
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [ideaNotes, setIdeaNotes] = useState<IdeaNote[]>([]);
+  const [currentView, setCurrentView] = useState<'tasks' | 'world_news'>('tasks');
   const [newAbilityDimension, setNewAbilityDimension] = useState('');
   const [behaviorChatInput, setBehaviorChatInput] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -1465,6 +2618,9 @@ export default function App() {
         setAbilityDimensions(loadedData.ability_dimensions);
         setWellbeing(loadedData.wellbeing);
         setAbilityModule(loadedData.ability_module);
+        setRssFeeds(loadedData.rss_feeds || []);
+        setNewsItems(loadedData.news_items || []);
+        setIdeaNotes(loadedData.idea_notes || []);
         setStorageError('');
       })
       .catch((e) => {
@@ -1502,6 +2658,9 @@ export default function App() {
         ability_dimensions: abilityDimensions,
         wellbeing,
         ability_module: abilityModule,
+        rss_feeds: rssFeeds,
+        news_items: newsItems,
+        idea_notes: ideaNotes,
       }, authToken)
         .then(() => setStorageError(''))
         .catch((e) => {
@@ -1516,7 +2675,7 @@ export default function App() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [tasks, abilityDimensions, wellbeing, abilityModule, isLoadingTasks, authToken]);
+  }, [tasks, abilityDimensions, wellbeing, abilityModule, rssFeeds, newsItems, ideaNotes, isLoadingTasks, authToken]);
 
   useEffect(() => {
     if (abilityModule.tracked_ms_baseline <= totalTrackedMsAllTasks) return;
@@ -2229,6 +3388,33 @@ export default function App() {
           </div>
         </div>
 
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCurrentView('tasks')}
+            className={cn(
+              "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all",
+              currentView === 'tasks'
+                ? "bg-teal-500/20 text-teal-100 border border-teal-500/30"
+                : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
+            )}
+          >
+            <LayoutGrid className="h-4 w-4" />
+            <span className="hidden sm:inline">任务</span>
+          </button>
+          <button
+            onClick={() => setCurrentView('world_news')}
+            className={cn(
+              "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all",
+              currentView === 'world_news'
+                ? "bg-teal-500/20 text-teal-100 border border-teal-500/30"
+                : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
+            )}
+          >
+            <Globe className="h-4 w-4" />
+            <span className="hidden sm:inline">世界消息</span>
+          </button>
+        </div>
+
         <div className="flex items-center gap-3 sm:gap-4">
           <span className="hidden text-xs font-semibold text-slate-300 sm:block">用户：{authUser || loginUsername}</span>
           {renderThemeSwitcher('compact')}
@@ -2297,6 +3483,8 @@ export default function App() {
         </div>
       </div>
 
+      {currentView === 'tasks' ? (
+        <>
       <div className="z-10 border-b border-white/[0.08] bg-slate-950/70">
         <div
           role="button"
@@ -4246,6 +5434,19 @@ export default function App() {
           <span className="text-3xl leading-none pointer-events-none">🐱</span>
         </button>
       </motion.div>
+        </>
+      ) : (
+        <WorldNewsView
+          rssFeeds={rssFeeds}
+          setRssFeeds={setRssFeeds}
+          newsItems={newsItems}
+          setNewsItems={setNewsItems}
+          ideaNotes={ideaNotes}
+          setIdeaNotes={setIdeaNotes}
+          tasks={tasks}
+          setTasks={setTasks}
+        />
+      )}
     </div >
   );
 }

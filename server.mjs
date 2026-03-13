@@ -290,6 +290,9 @@ function normalizeTaskPayload(payload) {
         daily_rest_sessions: {},
       },
       ability_module: normalizeAbilityModule(null),
+      rss_feeds: [],
+      news_items: [],
+      idea_notes: [],
     };
   }
   if (payload && typeof payload === 'object') {
@@ -346,6 +349,9 @@ function normalizeTaskPayload(payload) {
             daily_rest_sessions: {},
           },
       ability_module: normalizeAbilityModule(payload.ability_module),
+      rss_feeds: Array.isArray(payload.rss_feeds) ? payload.rss_feeds : [],
+      news_items: Array.isArray(payload.news_items) ? payload.news_items : [],
+      idea_notes: Array.isArray(payload.idea_notes) ? payload.idea_notes : [],
     };
   }
   return {
@@ -356,6 +362,9 @@ function normalizeTaskPayload(payload) {
       daily_rest_sessions: {},
     },
     ability_module: normalizeAbilityModule(null),
+    rss_feeds: [],
+    news_items: [],
+    idea_notes: [],
   };
 }
 
