@@ -59,6 +59,7 @@
 - 可选开启前端自助注册
 - 每个用户**独立的任务数据存储**，互不干扰
 - 密码 SHA-256 + salt 哈希，Bearer Token 会话管理
+- 管理员登录后可输入目标账号并重置密码
 
 ---
 
@@ -101,6 +102,7 @@ AI_BASE_URL=https://api.aipaibox.com
 AI_MODEL=gemini-3.1-pro-preview
 AUTH_USERNAME=admin
 AUTH_PASSWORD=your_password
+AUTH_ADMIN_USERS=admin
 AUTH_ALLOW_REGISTRATION=true
 EOF
 
@@ -123,6 +125,7 @@ docker compose --env-file .env up -d
 | `AI_MODEL` | ✅ | 使用的模型名称 |
 | `AUTH_USERNAME` | ✅ | 默认管理员用户名 |
 | `AUTH_PASSWORD` | ✅ | 默认管理员密码 |
+| `AUTH_ADMIN_USERS` | | 逗号分隔的管理员账号列表；未配置时默认取首个种子账号 |
 | `AUTH_USERS` | | 多用户 JSON 配置（优先级高于上面单用户配置） |
 | `AUTH_ALLOW_REGISTRATION` | | 是否开启前端自助注册（默认 `true`） |
 | `SESSION_TTL_MS` | | 会话有效期，默认 24 小时 |

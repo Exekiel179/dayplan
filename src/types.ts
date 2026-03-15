@@ -143,3 +143,20 @@ export interface UserTaskData {
   news_items?: NewsItem[];
   idea_notes?: IdeaNote[];
 }
+
+export interface AuthResult {
+  token: string;
+  username: string;
+  isAdmin: boolean;
+}
+
+export interface SessionValidationResult {
+  username: string;
+  isAdmin: boolean;
+}
+
+export interface AdminPasswordResetResult {
+  ok: boolean;
+  username: string;
+  message: string;
+}

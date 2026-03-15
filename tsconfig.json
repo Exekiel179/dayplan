@@ -22,5 +22,11 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "dist",
+    "node_modules",
+    "App_utf8.tsx",
+    "pre_revert_App.tsx"
+  ]
 }

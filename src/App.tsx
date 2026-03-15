@@ -49,6 +49,9 @@ import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import {
+  AdminPasswordResetResult,
+  AuthResult,
+  SessionValidationResult,
   AbilityModuleSettings,
   DailyEnergyCheckin,
   DailyRestSession,
@@ -1064,14 +1067,14 @@ async function persistTasksToApi(payload: UserTaskData, token: string) {
   }
 }
 
-async function loginByPassword(username: string, password: string) {
+async function loginByPassword(username: string, password: string): Promise<AuthResult> {
   const response = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
 
-  const payload = await response.json().catch(() => ({} as { error?: string; token?: string; username?: string }));
+  const payload = await response.json().catch(() => ({} as { error?: string; token?: string; username?: string; isAdmin?: boolean }));
   if (!response.ok) {
     throw new Error(payload?.error || '登录失败');
   }
@@ -1081,17 +1084,18 @@ async function loginByPassword(username: string, password: string) {
   return {
     token: payload.token,
     username: payload.username || username,
+    isAdmin: Boolean(payload.isAdmin),
   };
 }
 
-async function registerByPassword(username: string, password: string) {
+async function registerByPassword(username: string, password: string): Promise<AuthResult> {
   const response = await fetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
 
-  const payload = await response.json().catch(() => ({} as { error?: string; token?: string; username?: string }));
+  const payload = await response.json().catch(() => ({} as { error?: string; token?: string; username?: string; isAdmin?: boolean }));
   if (!response.ok) {
     throw new Error(payload?.error || '注册失败');
   }
@@ -1101,10 +1105,11 @@ async function registerByPassword(username: string, password: string) {
   return {
     token: payload.token,
     username: payload.username || username,
+    isAdmin: Boolean(payload.isAdmin),
   };
 }
 
-async function validateSession(token: string) {
+async function validateSession(token: string): Promise<SessionValidationResult> {
   const response = await fetch('/api/auth/session', {
     headers: withAuthHeaders(token),
   });
@@ -1114,10 +1119,242 @@ async function validateSession(token: string) {
   if (!response.ok) {
     throw new Error(`session check failed: ${response.status}`);
   }
-  const payload = await response.json().catch(() => ({} as { username?: string }));
+  const payload = await response.json().catch(() => ({} as { username?: string; isAdmin?: boolean }));
   return {
     username: payload?.username || '',
+    isAdmin: Boolean(payload?.isAdmin),
   };
+}
+
+async function resetPasswordByAdmin(username: string, newPassword: string, token: string): Promise<AdminPasswordResetResult> {
+  const response = await fetch('/api/admin/reset-password', {
+    method: 'POST',
+    headers: withAuthHeaders(token, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ username, newPassword }),
+  });
+
+  const payload = await response.json().catch(() => ({} as { error?: string; username?: string; message?: string; ok?: boolean }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (response.status === 403) {
+    throw new Error(payload?.error || '仅管理员可执行此操作');
+  }
+  if (!response.ok) {
+    throw new Error(payload?.error || `密码重置失败 (${response.status})`);
+  }
+
+  return {
+    ok: Boolean(payload.ok),
+    username: payload.username || username,
+    message: payload.message || `账号 ${username} 的密码已重置`,
+  };
+}
+
+function generateSuggestedPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  const bytes = new Uint8Array(14);
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    bytes.fill(0).forEach((_value, index) => {
+      bytes[index] = Math.floor(Math.random() * 256);
+    });
+  }
+
+  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join('');
+}
+
+function AdminResetView({
+  authToken,
+  currentUser,
+  onUnauthorized,
+}: {
+  authToken: string;
+  currentUser: string;
+  onUnauthorized: () => void;
+}) {
+  const [targetUsername, setTargetUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  const fillSuggestedPassword = () => {
+    const generated = generateSuggestedPassword();
+    setNewPassword(generated);
+    setConfirmPassword(generated);
+    setError('');
+    setSuccessMessage('已生成一组可直接使用的新密码。');
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!targetUsername.trim()) {
+      setError('请输入要重置的目标账号');
+      return;
+    }
+    if (!newPassword) {
+      setError('请输入新密码');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('两次输入的新密码不一致');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const result = await resetPasswordByAdmin(targetUsername.trim(), newPassword, authToken);
+      setSuccessMessage(result.message);
+      setTargetUsername('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onUnauthorized();
+        return;
+      }
+      setError(err instanceof Error ? err.message : '密码重置失败');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="px-4 py-5 sm:px-6 sm:py-6">
+      <div className="mx-auto grid max-w-6xl gap-6 xl:grid-cols-[minmax(0,1.18fr)_360px]">
+        <section className="overflow-hidden rounded-[2rem] border border-amber-400/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.18),rgba(15,23,42,0.92)_55%,rgba(120,113,108,0.22))] shadow-[0_24px_80px_rgba(15,23,42,0.42)]">
+          <div className="border-b border-white/10 px-5 py-5 sm:px-7">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-2xl">
+                <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-amber-200/70">Admin Console</p>
+                <h2 className="mt-2 text-2xl font-bold tracking-tight text-amber-50 sm:text-3xl">管理员密码重置入口</h2>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-amber-100/80">
+                  这里不展示旧密码。管理员只需输入目标账号和新密码，系统会直接覆盖原登录口令。
+                </p>
+              </div>
+              <div className="rounded-3xl border border-amber-300/20 bg-amber-50/10 px-4 py-3 text-right backdrop-blur-sm">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-amber-200/70">当前管理员</p>
+                <p className="mt-2 flex items-center justify-end gap-2 text-sm font-semibold text-amber-50">
+                  <Star className="h-4 w-4 text-amber-300" />
+                  {currentUser}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="grid gap-5 px-5 py-5 sm:px-7 sm:py-7">
+            <div className="grid gap-5 md:grid-cols-[1.1fr_0.9fr]">
+              <label className="grid gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/70">目标账号</span>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
+                  <input
+                    value={targetUsername}
+                    onChange={(event) => setTargetUsername(event.target.value)}
+                    placeholder="例如：admin / alice / demo_1204"
+                    className="w-full bg-transparent text-base font-semibold text-white outline-none placeholder:text-slate-500"
+                  />
+                </div>
+              </label>
+              <div className="rounded-[1.75rem] border border-white/10 bg-slate-950/35 p-4">
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">重置规则</p>
+                <div className="mt-3 grid gap-2 text-sm text-slate-200/85">
+                  <p>密码长度必须在 8 到 128 位之间。</p>
+                  <p>注册账号会直接更新哈希密码。</p>
+                  <p>预置账号会写入本地覆盖密码，修改后立即生效。</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="grid gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/70">新密码</span>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
+                    placeholder="输入新的登录密码"
+                    className="w-full bg-transparent text-base font-semibold text-white outline-none placeholder:text-slate-500"
+                  />
+                </div>
+              </label>
+              <label className="grid gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/70">确认新密码</span>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="再次输入新密码"
+                    className="w-full bg-transparent text-base font-semibold text-white outline-none placeholder:text-slate-500"
+                  />
+                </div>
+              </label>
+            </div>
+
+            {(error || successMessage) && (
+              <div className={cn(
+                "rounded-2xl border px-4 py-3 text-sm font-semibold",
+                error
+                  ? "border-rose-400/30 bg-rose-500/10 text-rose-100"
+                  : "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
+              )}>
+                {error || successMessage}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold transition-all",
+                  isSubmitting
+                    ? "cursor-not-allowed border border-white/10 bg-white/5 text-slate-500"
+                    : "border border-amber-300/30 bg-amber-500/15 text-amber-50 hover:bg-amber-500/20"
+                )}
+              >
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                执行密码重置
+              </button>
+              <button
+                type="button"
+                onClick={fillSuggestedPassword}
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/10"
+              >
+                <Edit3 className="h-4 w-4" />
+                生成随机密码
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <aside className="grid gap-4 content-start">
+          <div className="rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-5">
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">操作边界</p>
+            <div className="mt-4 grid gap-3 text-sm leading-6 text-slate-200/85">
+              <p>这里只处理账号密码，不碰用户任务数据。</p>
+              <p>如果重置的是当前登录账号，当前会话会保留，新的密码在下次登录时生效。</p>
+              <p>如果重置的是其他账号，对方旧会话会被踢下线，需要用新密码重新登录。</p>
+            </div>
+          </div>
+          <div className="rounded-[1.75rem] border border-teal-400/20 bg-teal-500/10 p-5">
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-teal-100/75">建议流程</p>
+            <div className="mt-4 grid gap-3 text-sm leading-6 text-teal-50/90">
+              <p>先确认目标用户名完全正确，再执行重置。</p>
+              <p>如需临时密码，可先点“生成随机密码”，再发给对应用户。</p>
+              <p>账号不存在时，系统会直接返回错误，不会新建陌生账号。</p>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
 }
 
 function WorldNewsView({
@@ -2257,6 +2494,7 @@ function WorldNewsView({
 export default function App() {
   const [authToken, setAuthToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) || '' : ''));
   const [authUser, setAuthUser] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [loginUsername, setLoginUsername] = useState('admin');
   const [loginPassword, setLoginPassword] = useState('');
@@ -2274,7 +2512,7 @@ export default function App() {
   const [rssFeeds, setRssFeeds] = useState<RSSFeed[]>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [ideaNotes, setIdeaNotes] = useState<IdeaNote[]>([]);
-  const [currentView, setCurrentView] = useState<'tasks' | 'world_news'>('tasks');
+  const [currentView, setCurrentView] = useState<'tasks' | 'world_news' | 'admin'>('tasks');
   const [newAbilityDimension, setNewAbilityDimension] = useState('');
   const [behaviorChatInput, setBehaviorChatInput] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -2310,6 +2548,8 @@ export default function App() {
   const clearAuth = () => {
     setAuthToken('');
     setAuthUser('');
+    setIsAdmin(false);
+    setCurrentView('tasks');
     setTasks([]);
     setAbilityDimensions([]);
     setWellbeing(createDefaultWellbeingSettings());
@@ -2586,6 +2826,7 @@ export default function App() {
       .then((session) => {
         if (canceled) return;
         setAuthUser(session.username);
+        setIsAdmin(session.isAdmin);
       })
       .catch((e) => {
         if (canceled) return;
@@ -2601,6 +2842,12 @@ export default function App() {
       canceled = true;
     };
   }, [authToken]);
+
+  useEffect(() => {
+    if (!isAdmin && currentView === 'admin') {
+      setCurrentView('tasks');
+    }
+  }, [currentView, isAdmin]);
 
   // Load tasks from disk-backed API
   useEffect(() => {
@@ -3194,6 +3441,7 @@ export default function App() {
       }
       setAuthToken(result.token);
       setAuthUser(result.username);
+      setIsAdmin(result.isAdmin);
       setLoginPassword('');
       setRegisterConfirmPassword('');
       setAuthMode('login');
@@ -3413,10 +3661,26 @@ export default function App() {
             <Globe className="h-4 w-4" />
             <span className="hidden sm:inline">世界消息</span>
           </button>
+          {isAdmin && (
+            <button
+              onClick={() => setCurrentView('admin')}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all",
+                currentView === 'admin'
+                  ? "bg-amber-500/20 text-amber-50 border border-amber-400/30"
+                  : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
+              )}
+            >
+              <Briefcase className="h-4 w-4" />
+              <span className="hidden sm:inline">管理员</span>
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-3 sm:gap-4">
-          <span className="hidden text-xs font-semibold text-slate-300 sm:block">用户：{authUser || loginUsername}</span>
+          <span className="hidden text-xs font-semibold text-slate-300 sm:block">
+            {isAdmin ? '管理员' : '用户'}：{authUser || loginUsername}
+          </span>
           {renderThemeSwitcher('compact')}
           <button
             onClick={clearAuth}
@@ -3453,7 +3717,7 @@ export default function App() {
         </div>
       </header>
 
-      {(isLoadingTasks || storageError) && (
+      {currentView !== 'admin' && (isLoadingTasks || storageError) && (
         <div className={cn(
           "z-20 px-4 py-2 text-xs font-semibold sm:px-6",
           storageError ? "bg-red-50 text-red-600" : "bg-slate-50 text-slate-500"
@@ -3462,26 +3726,28 @@ export default function App() {
         </div>
       )}
 
-      <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-6 sm:px-6">
-        <div className="rounded-lg border border-teal-400/30 bg-teal-500/10 px-3 py-2 text-teal-100">
-          可执行任务: <span className="font-bold">{executableTasks.length}</span>
+      {currentView !== 'admin' && (
+        <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-6 sm:px-6">
+          <div className="rounded-lg border border-teal-400/30 bg-teal-500/10 px-3 py-2 text-teal-100">
+            可执行任务: <span className="font-bold">{executableTasks.length}</span>
+          </div>
+          <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-100">
+            阻塞任务: <span className="font-bold">{blockedTasks.length}</span>
+          </div>
+          <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-emerald-100">
+            预估用时: <span className="font-bold">{totalEstimatedMinutes}m</span>
+          </div>
+          <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-violet-100">
+            实际用时: <span className="font-bold">{totalActualMinutes}m</span>
+          </div>
+          <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-cyan-100">
+            正在做: <span className="font-bold">{runningTasks.length}</span>
+          </div>
+          <div className="rounded-lg border border-slate-300/30 bg-slate-500/10 px-3 py-2 text-slate-100">
+            已归档: <span className="font-bold">{archivedTasks.length}</span>
+          </div>
         </div>
-        <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-100">
-          阻塞任务: <span className="font-bold">{blockedTasks.length}</span>
-        </div>
-        <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-emerald-100">
-          预估用时: <span className="font-bold">{totalEstimatedMinutes}m</span>
-        </div>
-        <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-violet-100">
-          实际用时: <span className="font-bold">{totalActualMinutes}m</span>
-        </div>
-        <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-cyan-100">
-          正在做: <span className="font-bold">{runningTasks.length}</span>
-        </div>
-        <div className="rounded-lg border border-slate-300/30 bg-slate-500/10 px-3 py-2 text-slate-100">
-          已归档: <span className="font-bold">{archivedTasks.length}</span>
-        </div>
-      </div>
+      )}
 
       {currentView === 'tasks' ? (
         <>
@@ -5435,7 +5701,7 @@ export default function App() {
         </button>
       </motion.div>
         </>
-      ) : (
+      ) : currentView === 'world_news' ? (
         <WorldNewsView
           rssFeeds={rssFeeds}
           setRssFeeds={setRssFeeds}
@@ -5445,6 +5711,15 @@ export default function App() {
           setIdeaNotes={setIdeaNotes}
           tasks={tasks}
           setTasks={setTasks}
+        />
+      ) : (
+        <AdminResetView
+          authToken={authToken}
+          currentUser={authUser || loginUsername}
+          onUnauthorized={() => {
+            clearAuth();
+            setLoginError('登录已过期，请重新登录。');
+          }}
         />
       )}
     </div >

@@ -33,6 +33,7 @@ type AuthConfig = {
     username: string;
     password: string;
   }>;
+  adminUsers: Set<string>;
   allowRegistration: boolean;
   sessionTtlMs: number;
 };
@@ -53,6 +54,9 @@ type RegisteredUser = {
   salt: string;
   password_hash: string;
   created_at: number;
+  updated_at?: number;
+  password_reset_at?: number;
+  auth_source?: string;
 };
 
 const sessions = new Map<string, SessionRecord>();
@@ -78,6 +82,28 @@ function isValidPassword(password: string) {
 function hashPassword(password: string, salt = crypto.randomBytes(16).toString('hex')) {
   const passwordHash = crypto.createHash('sha256').update(`${salt}:${password}`, 'utf-8').digest('hex');
   return { salt, passwordHash };
+}
+
+function parseAdminUsers(raw: string | undefined, seedUsers: Array<{ username: string }>) {
+  if (raw) {
+    const users = raw
+      .split(',')
+      .map((item) => normalizeUsername(item))
+      .filter(Boolean);
+    if (users.length > 0) {
+      return new Set(users);
+    }
+  }
+
+  if (seedUsers.length > 0) {
+    return new Set([normalizeUsername(seedUsers[0].username)]);
+  }
+
+  return new Set(['admin']);
+}
+
+function isAdminUsername(username: string, authConfig: AuthConfig) {
+  return authConfig.adminUsers.has(normalizeUsername(username));
 }
 
 function getUserTasksFile(username: string) {
@@ -303,7 +329,17 @@ function getSession(token: string) {
   return session;
 }
 
-function requireAuth(req: Req, res: Res) {
+function revokeSessionsForUsername(username: string, exceptToken = '') {
+  const normalized = normalizeUsername(username);
+  for (const [token, session] of sessions.entries()) {
+    if (token === exceptToken) continue;
+    if (normalizeUsername(session.username) === normalized) {
+      sessions.delete(token);
+    }
+  }
+}
+
+function requireAuth(req: Req, res: Res, authConfig: AuthConfig) {
   const rawHeader = req.headers?.authorization;
   const authHeader = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
   const token = parseBearerToken(authHeader);
@@ -312,7 +348,11 @@ function requireAuth(req: Req, res: Res) {
     sendJson(res, 401, { error: '未登录或会话已过期' });
     return null;
   }
-  return session;
+  return {
+    ...session,
+    token,
+    isAdmin: isAdminUsername(session.username, authConfig),
+  };
 }
 
 async function findUserForLogin(username: string, password: string, authConfig: AuthConfig) {
@@ -359,6 +399,46 @@ async function registerUser(username: string, password: string, authConfig: Auth
   return { username: newUser.username };
 }
 
+async function resetPasswordByAdmin(targetUsername: string, newPassword: string, authConfig: AuthConfig) {
+  const normalized = normalizeUsername(targetUsername);
+  if (!normalized) throw new Error('USER_NOT_FOUND');
+  if (!isValidPassword(newPassword)) throw new Error('INVALID_PASSWORD');
+
+  const users = await readRegisteredUsers();
+  const existingIndex = users.findIndex((user) => user.username_normalized === normalized);
+  const now = Date.now();
+  const { salt, passwordHash } = hashPassword(newPassword);
+
+  if (existingIndex >= 0) {
+    const existingUser = users[existingIndex];
+    users[existingIndex] = {
+      ...existingUser,
+      salt,
+      password_hash: passwordHash,
+      updated_at: now,
+      password_reset_at: now,
+    };
+    await writeRegisteredUsers(users);
+    return { username: users[existingIndex].username };
+  }
+
+  const seedUser = authConfig.seedUsers.find((user) => normalizeUsername(user.username) === normalized);
+  if (!seedUser) throw new Error('USER_NOT_FOUND');
+
+  users.push({
+    username: seedUser.username,
+    username_normalized: normalized,
+    salt,
+    password_hash: passwordHash,
+    created_at: now,
+    updated_at: now,
+    password_reset_at: now,
+    auth_source: 'seed_override',
+  });
+  await writeRegisteredUsers(users);
+  return { username: seedUser.username };
+}
+
 function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
   return (req: Req, res: Res, next: () => void) => {
     if (req.url?.startsWith('/api/auth/register')) {
@@ -378,6 +458,7 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
             sendJson(res, 201, {
               token,
               username: result.username,
+              isAdmin: isAdminUsername(result.username, authConfig),
               expiresAt: Date.now() + authConfig.sessionTtlMs,
             });
           } catch (error) {
@@ -431,6 +512,7 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
           sendJson(res, 200, {
             token,
             username: matchedUser.username,
+            isAdmin: isAdminUsername(matchedUser.username, authConfig),
             expiresAt: Date.now() + authConfig.sessionTtlMs,
           });
         })
@@ -443,17 +525,67 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
         sendJson(res, 405, { error: 'method not allowed' });
         return;
       }
-      const session = requireAuth(req, res);
+      const session = requireAuth(req, res, authConfig);
       if (!session) return;
       sendJson(res, 200, {
         ok: true,
         username: session.username,
+        isAdmin: session.isAdmin,
       });
       return;
     }
 
+    if (req.url?.startsWith('/api/admin/reset-password')) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method not allowed' });
+        return;
+      }
+
+      const session = requireAuth(req, res, authConfig);
+      if (!session) return;
+      if (!session.isAdmin) {
+        sendJson(res, 403, { error: '仅管理员可执行此操作' });
+        return;
+      }
+
+      readJsonBody(req)
+        .then(async (payload) => {
+          const body = (payload || {}) as { username?: string; newPassword?: string };
+          const username = typeof body.username === 'string' ? body.username.trim() : '';
+          const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+          if (!username || !newPassword) {
+            sendJson(res, 400, { error: '请输入目标账号和新密码' });
+            return;
+          }
+
+          const result = await resetPasswordByAdmin(username, newPassword, authConfig);
+          const keepToken = normalizeUsername(result.username) === normalizeUsername(session.username)
+            ? session.token
+            : '';
+          revokeSessionsForUsername(result.username, keepToken);
+          sendJson(res, 200, {
+            ok: true,
+            username: result.username,
+            message: `账号 ${result.username} 的密码已重置`,
+          });
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : '重置失败';
+          if (message === 'INVALID_PASSWORD') {
+            sendJson(res, 400, { error: '密码长度需在 8-128 位' });
+            return;
+          }
+          if (message === 'USER_NOT_FOUND') {
+            sendJson(res, 404, { error: '目标账号不存在' });
+            return;
+          }
+          sendJson(res, 500, { error: '重置失败，请稍后重试' });
+        });
+      return;
+    }
+
     if (req.url?.startsWith('/api/tasks')) {
-      const session = requireAuth(req, res);
+      const session = requireAuth(req, res, authConfig);
       if (!session) return;
 
       if (req.method === 'GET') {
@@ -478,7 +610,7 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
     }
 
     if (req.url?.startsWith('/api/ai/plan')) {
-      const session = requireAuth(req, res);
+      const session = requireAuth(req, res, authConfig);
       if (!session) return;
 
       if (req.method !== 'POST') {
@@ -540,6 +672,7 @@ export default defineConfig(({ mode }) => {
   };
   const authConfig: AuthConfig = {
     seedUsers,
+    adminUsers: parseAdminUsers(env.AUTH_ADMIN_USERS || process.env.AUTH_ADMIN_USERS, seedUsers),
     allowRegistration: (env.AUTH_ALLOW_REGISTRATION || process.env.AUTH_ALLOW_REGISTRATION || 'true').toLowerCase() !== 'false',
     sessionTtlMs: Number(env.SESSION_TTL_MS || process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24),
   };

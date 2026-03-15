@@ -21,6 +21,7 @@ const AI_API_KEY = process.env.AI_API_KEY || process.env.VITE_AI_API_KEY || '';
 const AUTH_ALLOW_REGISTRATION = (process.env.AUTH_ALLOW_REGISTRATION || 'true').toLowerCase() !== 'false';
 const SEED_USERS = parseSeedUsersFromEnv();
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24);
+const ADMIN_USERS = parseAdminUsersFromEnv(SEED_USERS);
 const sessions = new Map();
 
 const SYSTEM_PROMPT = `你是一位高执行力任务规划助手。请严格返回 JSON，不要有任何额外文字。
@@ -76,6 +77,29 @@ function parseSeedUsersFromEnv() {
   const fallbackUsername = process.env.AUTH_USERNAME || 'admin';
   const fallbackPassword = process.env.AUTH_PASSWORD || 'admin123456';
   return [{ username: fallbackUsername, password: fallbackPassword }];
+}
+
+function parseAdminUsersFromEnv(seedUsers) {
+  const raw = process.env.AUTH_ADMIN_USERS;
+  if (raw) {
+    const users = raw
+      .split(',')
+      .map((item) => normalizeUsername(item))
+      .filter(Boolean);
+    if (users.length > 0) {
+      return new Set(users);
+    }
+  }
+
+  if (seedUsers.length > 0) {
+    return new Set([normalizeUsername(seedUsers[0].username)]);
+  }
+
+  return new Set(['admin']);
+}
+
+function isAdminUsername(username) {
+  return ADMIN_USERS.has(normalizeUsername(username));
 }
 
 async function readRegisteredUsers() {
@@ -155,6 +179,52 @@ async function registerUser(username, password) {
   users.push(newUser);
   await writeRegisteredUsers(users);
   return newUser.username;
+}
+
+async function resetPasswordByAdmin(targetUsername, newPassword) {
+  const normalized = normalizeUsername(targetUsername);
+  if (!normalized) {
+    throw new Error('USER_NOT_FOUND');
+  }
+  if (!isValidPassword(newPassword)) {
+    throw new Error('INVALID_PASSWORD');
+  }
+
+  const users = await readRegisteredUsers();
+  const existingIndex = users.findIndex((user) => user.username_normalized === normalized);
+  const now = Date.now();
+  const { salt, passwordHash } = hashPassword(newPassword);
+
+  if (existingIndex >= 0) {
+    const existingUser = users[existingIndex];
+    users[existingIndex] = {
+      ...existingUser,
+      salt,
+      password_hash: passwordHash,
+      updated_at: now,
+      password_reset_at: now,
+    };
+    await writeRegisteredUsers(users);
+    return users[existingIndex].username;
+  }
+
+  const seedUser = SEED_USERS.find((user) => normalizeUsername(user.username) === normalized);
+  if (!seedUser) {
+    throw new Error('USER_NOT_FOUND');
+  }
+
+  users.push({
+    username: seedUser.username,
+    username_normalized: normalized,
+    salt,
+    password_hash: passwordHash,
+    created_at: now,
+    updated_at: now,
+    password_reset_at: now,
+    auth_source: 'seed_override',
+  });
+  await writeRegisteredUsers(users);
+  return seedUser.username;
 }
 
 function buildPrompt(task) {
@@ -397,6 +467,16 @@ async function writeTasks(username, payload) {
   await fs.promises.writeFile(userTasksFile, JSON.stringify(normalizeTaskPayload(payload), null, 2), 'utf-8');
 }
 
+function revokeSessionsForUsername(username, exceptToken = '') {
+  const normalized = normalizeUsername(username);
+  for (const [token, session] of sessions.entries()) {
+    if (token === exceptToken) continue;
+    if (normalizeUsername(session.username) === normalized) {
+      sessions.delete(token);
+    }
+  }
+}
+
 function createSessionToken(username) {
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, {
@@ -432,6 +512,16 @@ function requireAuth(req, res, next) {
     return;
   }
   req.authUser = session.username;
+  req.authToken = token;
+  req.authIsAdmin = isAdminUsername(session.username);
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.authIsAdmin) {
+    res.status(403).json({ error: '仅管理员可执行此操作' });
+    return;
+  }
   next();
 }
 
@@ -447,6 +537,7 @@ app.post('/api/auth/register', async (req, res) => {
     res.status(201).json({
       token,
       username: registeredUsername,
+      isAdmin: isAdminUsername(registeredUsername),
       expiresAt: Date.now() + SESSION_TTL_MS,
     });
   } catch (error) {
@@ -489,6 +580,7 @@ app.post('/api/auth/login', async (req, res) => {
   res.status(200).json({
     token,
     username: matchedUser.username,
+    isAdmin: isAdminUsername(matchedUser.username),
     expiresAt: Date.now() + SESSION_TTL_MS,
   });
 });
@@ -497,7 +589,41 @@ app.get('/api/auth/session', requireAuth, (req, res) => {
   res.status(200).json({
     ok: true,
     username: req.authUser,
+    isAdmin: req.authIsAdmin,
   });
+});
+
+app.post('/api/admin/reset-password', requireAuth, requireAdmin, async (req, res) => {
+  const targetUsername = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  if (!targetUsername || !newPassword) {
+    res.status(400).json({ error: '请输入目标账号和新密码' });
+    return;
+  }
+
+  try {
+    const updatedUsername = await resetPasswordByAdmin(targetUsername, newPassword);
+    const keepToken = normalizeUsername(updatedUsername) === normalizeUsername(req.authUser)
+      ? req.authToken
+      : '';
+    revokeSessionsForUsername(updatedUsername, keepToken);
+    res.status(200).json({
+      ok: true,
+      username: updatedUsername,
+      message: `账号 ${updatedUsername} 的密码已重置`,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '重置失败';
+    if (message === 'INVALID_PASSWORD') {
+      res.status(400).json({ error: '密码长度需在 8-128 位' });
+      return;
+    }
+    if (message === 'USER_NOT_FOUND') {
+      res.status(404).json({ error: '目标账号不存在' });
+      return;
+    }
+    res.status(500).json({ error: '重置失败，请稍后重试' });
+  }
 });
 
 app.get('/api/tasks', requireAuth, async (req, res) => {
