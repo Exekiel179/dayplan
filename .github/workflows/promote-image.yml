@@ -8,6 +8,9 @@ on:
         required: true
         type: string
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: promote-existing-image
   cancel-in-progress: false
@@ -24,7 +27,7 @@ jobs:
       SOURCE_DIGEST: ${{ inputs.source_digest }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve image names
         id: image_vars

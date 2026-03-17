@@ -3,6 +3,9 @@ name: Cleanup Image Versions
 on:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: cleanup-image-versions
   cancel-in-progress: false
@@ -18,7 +21,7 @@ jobs:
       REPOSITORY_OWNER: ${{ github.repository_owner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve image names
         id: vars
@@ -84,7 +87,7 @@ jobs:
           docker buildx imagetools create --tag "${DOCKERHUB_IMAGE}:bak" "${DOCKERHUB_IMAGE}:latest"
 
       - name: Delete extra GHCR package versions
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
