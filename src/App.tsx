@@ -143,6 +143,32 @@ type ExternalBehaviorPreset = {
   durationMinutes: number;
   reply: string;
 };
+type AIRssScoutSuggestion = {
+  id: string;
+  name: string;
+  url: string;
+  category: string;
+  keywords: string[];
+  reason: string;
+};
+type TrendradarSnapshotItem = {
+  platform_id: string;
+  platform_name: string;
+  title: string;
+  rank: number;
+  url: string;
+  mobile_url: string;
+  timestamp: string;
+};
+type TechnicalRssPreset = {
+  id: string;
+  name: string;
+  url: string;
+  homepage: string;
+  category: string;
+  keywords: string[];
+  reason: string;
+};
 
 const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
   {
@@ -165,6 +191,7 @@ const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
 const DEFAULT_ABILITY_GAIN_PER_HOUR = 36;
 const BEHAVIOR_CHAT_PLACEHOLDER = '例如：我喝茶了 / 我刚散步回来 / 我午睡了 20 分钟';
 const MAX_DAILY_CHAT_MESSAGES = 24;
+const RSS_SCOUT_COST = 88;
 const EXTERNAL_BEHAVIOR_PRESETS: ExternalBehaviorPreset[] = [
   {
     id: 'tea',
@@ -1008,6 +1035,23 @@ function withAuthHeaders(token: string, headers: Record<string, string> = {}) {
   };
 }
 
+function buildStableHash(text: string) {
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function normalizeFeedUrl(url: string) {
+  return url.trim().toLowerCase();
+}
+
+function buildWorldNewsFingerprint(title: string, url: string, sourceKey: string) {
+  return buildStableHash(`${sourceKey}::${title.trim().toLowerCase()}::${url.trim().toLowerCase()}`);
+}
+
 async function requestAIPlan(task: Task, token: string) {
   const response = await fetch('/api/ai/plan', {
     method: 'POST',
@@ -1036,6 +1080,117 @@ async function requestAIPlan(task: Task, token: string) {
     plan: typeof payload?.plan === 'string' ? payload.plan : '',
     steps,
   };
+}
+
+async function requestAIRssScout(
+  payload: { topic: string; guidance: string },
+  token: string
+) {
+  const response = await fetch('/api/ai/rss-scout', {
+    method: 'POST',
+    headers: withAuthHeaders(token, {
+      'Content-Type': 'application/json',
+    }),
+    body: JSON.stringify(payload),
+  });
+
+  const rawPayload = await response.json().catch(() => ({} as {
+    error?: string;
+    summary?: string;
+    feeds?: Array<Record<string, unknown>>;
+  }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
+  }
+
+  const createdAt = Date.now();
+  const feeds = Array.isArray(rawPayload?.feeds)
+    ? rawPayload.feeds
+      .map((feed, index) => {
+        if (!feed || typeof feed !== 'object') return null;
+        const name = typeof feed.name === 'string' ? feed.name.trim() : '';
+        const url = typeof feed.url === 'string' ? feed.url.trim() : '';
+        if (!name || !url) return null;
+        return {
+          id: `rss-scout-${createdAt}-${index}`,
+          name,
+          url,
+          category: typeof feed.category === 'string' && feed.category.trim()
+            ? feed.category.trim()
+            : 'AI 推荐',
+          keywords: Array.isArray(feed.keywords)
+            ? feed.keywords
+              .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+              .map((item) => item.trim())
+              .slice(0, 6)
+            : [],
+          reason: typeof feed.reason === 'string' ? feed.reason.trim() : '',
+        } satisfies AIRssScoutSuggestion;
+      })
+      .filter((feed): feed is AIRssScoutSuggestion => Boolean(feed))
+    : [];
+
+  return {
+    summary: typeof rawPayload?.summary === 'string' ? rawPayload.summary.trim() : '',
+    feeds,
+  };
+}
+
+async function requestTrendradarLatestNews(token: string, limit = 60) {
+  const response = await fetch(`/api/world-news/trendradar/latest?limit=${encodeURIComponent(String(limit))}`, {
+    cache: 'no-store',
+    headers: withAuthHeaders(token),
+  });
+
+  const payload = await response.json().catch(() => ({} as {
+    error?: string;
+    source?: string;
+    fetched_at?: string;
+    fallback_reason?: string;
+    items?: TrendradarSnapshotItem[];
+  }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(payload?.error || `TrendRadar 请求失败 (${response.status})`);
+  }
+
+  const items = Array.isArray(payload?.items)
+    ? payload.items.filter((item): item is TrendradarSnapshotItem => Boolean(item && typeof item.title === 'string' && typeof item.platform_id === 'string'))
+    : [];
+
+  return {
+    source: typeof payload?.source === 'string' ? payload.source : 'trendradar-live',
+    fetched_at: typeof payload?.fetched_at === 'string' ? payload.fetched_at : '',
+    fallback_reason: typeof payload?.fallback_reason === 'string' ? payload.fallback_reason : '',
+    items,
+  };
+}
+
+async function requestTechnicalRssPresets(token: string, limit = 90) {
+  const response = await fetch(`/api/rss/presets/technical?limit=${encodeURIComponent(String(limit))}`, {
+    cache: 'no-store',
+    headers: withAuthHeaders(token),
+  });
+
+  const payload = await response.json().catch(() => ({} as {
+    error?: string;
+    feeds?: TechnicalRssPreset[];
+  }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(payload?.error || `技术种子读取失败 (${response.status})`);
+  }
+
+  return Array.isArray(payload?.feeds)
+    ? payload.feeds.filter((feed): feed is TechnicalRssPreset => Boolean(feed && typeof feed.name === 'string' && typeof feed.url === 'string'))
+    : [];
 }
 
 async function loadTasksFromApi(token: string) {
@@ -1362,6 +1517,10 @@ function WorldNewsView({
   setRssFeeds,
   newsItems,
   setNewsItems,
+  abilityModule,
+  spendSpecialReward,
+  authToken,
+  onUnauthorized,
   ideaNotes,
   setIdeaNotes,
   tasks,
@@ -1371,6 +1530,10 @@ function WorldNewsView({
   setRssFeeds: (feeds: RSSFeed[]) => void;
   newsItems: NewsItem[];
   setNewsItems: (items: NewsItem[]) => void;
+  abilityModule: AbilityModuleSettings;
+  spendSpecialReward: (moduleId: string, amount: number) => boolean;
+  authToken: string;
+  onUnauthorized: () => void;
   ideaNotes: IdeaNote[];
   setIdeaNotes: (notes: IdeaNote[]) => void;
   tasks: Task[];
@@ -1396,6 +1559,16 @@ function WorldNewsView({
   const [resumeStatus, setResumeStatus] = useState<'pending' | 'interview' | 'rejected' | 'accepted'>('pending');
   const [resumeAppliedDate, setResumeAppliedDate] = useState('');
   const [resumeDeadline, setResumeDeadline] = useState('');
+  const [rssScoutTopic, setRssScoutTopic] = useState('');
+  const [rssScoutGuidance, setRssScoutGuidance] = useState('');
+  const [rssScoutPayWith, setRssScoutPayWith] = useState<string>(SPECIAL_ABILITY_MODULES[0]?.id || 'special:mokugyo');
+  const [rssScoutSummary, setRssScoutSummary] = useState('');
+  const [rssScoutResults, setRssScoutResults] = useState<AIRssScoutSuggestion[]>([]);
+  const [rssScoutError, setRssScoutError] = useState('');
+  const [isRssScouting, setIsRssScouting] = useState(false);
+  const [isImportingTechPresets, setIsImportingTechPresets] = useState(false);
+  const [techPresetMessage, setTechPresetMessage] = useState('');
+  const [newsSyncMessage, setNewsSyncMessage] = useState('');
 
   const addRssFeed = () => {
     if (!newFeedName.trim() || !newFeedUrl.trim()) return;
@@ -1449,6 +1622,137 @@ function WorldNewsView({
     setNewsItems(newsItems.map(item =>
       item.id === newsId ? { ...item, is_read: !item.is_read } : item
     ));
+  };
+
+  const deleteNewsItem = (newsId: string) => {
+    setNewsItems(newsItems.filter((item) => item.id !== newsId));
+    setIdeaNotes(ideaNotes.map((note) => ({
+      ...note,
+      related_news_ids: note.related_news_ids.filter((id) => id !== newsId),
+    })));
+    setSelectedNews((prev) => (prev?.id === newsId ? null : prev));
+  };
+
+  const clearAllNews = () => {
+    if (newsItems.length === 0) return;
+    setNewsItems([]);
+    setIdeaNotes(ideaNotes.map((note) => (
+      note.related_news_ids.length > 0
+        ? { ...note, related_news_ids: [] }
+        : note
+    )));
+    setSelectedNews(null);
+  };
+
+  const importFeeds = (feedsToImport: Array<{ name: string; url: string; category?: string; keywords?: string[] }>) => {
+    const existingUrls = new Set(rssFeeds.map((item) => normalizeFeedUrl(item.url)));
+    const createdAt = Date.now();
+    const nextCategories = new Set<string>();
+    const additions: RSSFeed[] = [];
+
+    feedsToImport.forEach((feed, index) => {
+      const normalizedUrl = normalizeFeedUrl(feed.url);
+      if (!normalizedUrl || existingUrls.has(normalizedUrl)) return;
+      existingUrls.add(normalizedUrl);
+      const category = feed.category?.trim() || '默认';
+      nextCategories.add(category);
+      additions.push({
+        id: `feed-${createdAt}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+        name: feed.name.trim(),
+        url: feed.url.trim(),
+        category,
+        keywords: (feed.keywords || []).filter((keyword) => keyword.trim().length > 0),
+        enabled: true,
+        created_at: createdAt,
+      });
+    });
+
+    if (additions.length > 0) {
+      setRssFeeds([...rssFeeds, ...additions]);
+      setExpandedCategories((prev) => {
+        const next = new Set(prev);
+        nextCategories.forEach((category) => next.add(category));
+        return next;
+      });
+    }
+
+    return additions.length;
+  };
+
+  const addSuggestedFeed = (feed: AIRssScoutSuggestion) => {
+    importFeeds([feed]);
+  };
+
+  const importTechnicalPresets = async (limit: number) => {
+    setIsImportingTechPresets(true);
+    setTechPresetMessage('');
+    try {
+      const presets = await requestTechnicalRssPresets(authToken, limit);
+      const addedCount = importFeeds(presets);
+      setTechPresetMessage(
+        addedCount > 0
+          ? `已从 ai-daily-digest 导入 ${addedCount} 个技术 RSS 种子。`
+          : '这些技术 RSS 已经都在当前订阅列表里了。'
+      );
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onUnauthorized();
+        return;
+      }
+      setTechPresetMessage(err instanceof Error ? err.message : '技术 RSS 导入失败。');
+    } finally {
+      setIsImportingTechPresets(false);
+    }
+  };
+
+  const runRssScout = async () => {
+    const topic = rssScoutTopic.trim();
+    const guidance = rssScoutGuidance.trim();
+    if (!topic) {
+      setRssScoutError('先输入要找的主题。');
+      return;
+    }
+
+    const paymentModule = SPECIAL_ABILITY_MODULES.find((item) => item.id === rssScoutPayWith) || SPECIAL_ABILITY_MODULES[0];
+    if (!paymentModule) {
+      setRssScoutError('当前没有可用的激励方式。');
+      return;
+    }
+
+    const balance = Number(abilityModule.special_totals[paymentModule.id] || 0);
+    if (balance < RSS_SCOUT_COST) {
+      setRssScoutError(`${paymentModule.label}余额不足，至少需要 ${RSS_SCOUT_COST} ${paymentModule.unit}。`);
+      return;
+    }
+
+    setIsRssScouting(true);
+    setRssScoutError('');
+    setRssScoutSummary('');
+    setRssScoutResults([]);
+
+    try {
+      const result = await requestAIRssScout({ topic, guidance }, authToken);
+      const charged = spendSpecialReward(paymentModule.id, RSS_SCOUT_COST);
+      if (!charged) {
+        setRssScoutError('激励余额刚发生变化，请重试。');
+        return;
+      }
+      setRssScoutSummary(
+        result.summary || `已按“${topic}”筛出 ${result.feeds.length} 个 RSS 候选，建议挑 2 到 4 个先订阅。`
+      );
+      setRssScoutResults(result.feeds);
+      if (result.feeds.length === 0) {
+        setRssScoutError('这次没有筛到足够可靠的订阅源，换一个方向词再试。');
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onUnauthorized();
+        return;
+      }
+      setRssScoutError(err instanceof Error ? err.message : 'AI 找订阅源失败，请稍后重试。');
+    } finally {
+      setIsRssScouting(false);
+    }
   };
 
   const createNoteFromNews = (news: NewsItem) => {
@@ -1576,39 +1880,70 @@ function WorldNewsView({
 
   const fetchTrendradarNews = async () => {
     setIsLoadingNews(true);
+    setNewsSyncMessage('');
     try {
-      // 这里调用 trendradar MCP 工具
-      // 由于 MCP 工具只能在 Claude 端调用，这里先用模拟数据
-      const mockNews: NewsItem[] = [
-        {
-          id: `news-${Date.now()}-1`,
-          title: '示例新闻：AI 技术最新进展',
-          content: '人工智能领域取得重大突破，新的模型在多个基准测试中刷新记录...',
-          url: 'https://example.com/news/1',
-          published_at: Date.now(),
-          is_important: false,
-          is_read: false,
-          tags: ['AI', '技术'],
-          note_ids: [],
-          created_at: Date.now(),
-        },
-        {
-          id: `news-${Date.now()}-2`,
-          title: '示例新闻：全球经济动态',
-          content: '最新经济数据显示，全球市场呈现复苏态势...',
-          url: 'https://example.com/news/2',
-          published_at: Date.now(),
-          is_important: false,
-          is_read: false,
-          tags: ['经济', '全球'],
-          note_ids: [],
-          created_at: Date.now(),
-        },
-      ];
+      const result = await requestTrendradarLatestNews(authToken, 60);
+      const relatedNewsIds = new Set(ideaNotes.flatMap((note) => note.related_news_ids));
+      const currentItemsByFingerprint = new Map(newsItems.map((item) => {
+        const sourceKey = item.feed_id || item.tags[0] || 'world';
+        return [buildWorldNewsFingerprint(item.title, item.url, sourceKey), item] as const;
+      }));
+      const nextFingerprints = new Set<string>();
+      const createdAt = Date.now();
 
-      setNewsItems([...mockNews, ...newsItems]);
+      const latestNews: NewsItem[] = result.items.map((item, index) => {
+        const sourceKey = `trendradar:${item.platform_id}`;
+        const url = item.mobile_url || item.url || '';
+        const fingerprint = buildWorldNewsFingerprint(item.title, url, sourceKey);
+        nextFingerprints.add(fingerprint);
+        const existing = currentItemsByFingerprint.get(fingerprint);
+        const freshnessTag = result.source === 'trendradar-local' ? '本地快照' : '实时热点';
+
+        return {
+          id: existing?.id || `news-${sourceKey}-${fingerprint}`,
+          feed_id: sourceKey,
+          title: item.title,
+          content: `${item.platform_name} 热榜第 ${item.rank} 位 · ${item.timestamp}`,
+          url,
+          published_at: existing?.published_at || createdAt + index,
+          is_important: existing?.is_important || false,
+          is_read: existing?.is_read || false,
+          tags: Array.from(new Set([item.platform_name, 'TrendRadar', freshnessTag])),
+          note_ids: existing?.note_ids || [],
+          created_at: existing?.created_at || createdAt + index,
+        };
+      });
+
+      const preservedItems = newsItems.filter((item) => {
+        const sourceKey = item.feed_id || item.tags[0] || 'world';
+        const fingerprint = buildWorldNewsFingerprint(item.title, item.url, sourceKey);
+        if (nextFingerprints.has(fingerprint)) return false;
+        return item.is_important || relatedNewsIds.has(item.id);
+      });
+
+      const nextNewsItems = [...latestNews, ...preservedItems];
+      setNewsItems(nextNewsItems);
+      setSelectedNews((prev) => {
+        if (!prev) return null;
+        const sourceKey = prev.feed_id || prev.tags[0] || 'world';
+        const fingerprint = buildWorldNewsFingerprint(prev.title, prev.url, sourceKey);
+        return nextNewsItems.find((item) => {
+          const currentSourceKey = item.feed_id || item.tags[0] || 'world';
+          return buildWorldNewsFingerprint(item.title, item.url, currentSourceKey) === fingerprint;
+        }) || null;
+      });
+      setNewsSyncMessage(
+        result.source === 'trendradar-local'
+          ? `已同步 ${latestNews.length} 条 TrendRadar 热榜，本次使用本地快照回退。`
+          : `已同步 ${latestNews.length} 条 TrendRadar 实时热榜。`
+      );
     } catch (error) {
       console.error('获取新闻失败:', error);
+      if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+        onUnauthorized();
+        return;
+      }
+      setNewsSyncMessage(error instanceof Error ? error.message : 'TrendRadar 获取失败');
     } finally {
       setIsLoadingNews(false);
     }
@@ -1709,6 +2044,203 @@ function WorldNewsView({
                 </motion.div>
               )}
             </AnimatePresence>
+
+            <div className="mb-5 rounded-2xl border border-violet-500/25 bg-gradient-to-br from-violet-500/14 via-slate-950/55 to-cyan-500/10 p-4 shadow-xl shadow-violet-500/10">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-violet-200/70">AI 订阅侦察</p>
+                  <h3 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                    <Brain className="h-4 w-4 text-violet-300" />
+                    找主题 RSS
+                  </h3>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-300/80">
+                    输入主题和提示方向，用功德或财富换一轮可选 RSS 候选。
+                  </p>
+                </div>
+                <span className="rounded-xl border border-violet-300/20 bg-violet-500/12 px-2.5 py-1 text-[10px] font-bold text-violet-100">
+                  {RSS_SCOUT_COST} 点 / 次
+                </span>
+              </div>
+
+              <div className="mt-3 space-y-3">
+                <input
+                  type="text"
+                  value={rssScoutTopic}
+                  onChange={(e) => setRssScoutTopic(e.target.value)}
+                  placeholder="主题，例如：AI 安全 / 游戏开发 / 独立博客"
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/75 px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition-all"
+                />
+                <textarea
+                  value={rssScoutGuidance}
+                  onChange={(e) => setRssScoutGuidance(e.target.value)}
+                  rows={3}
+                  placeholder="提示方向，例如：优先中文、技术深度高、更新稳定、避免营销号"
+                  className="w-full resize-none rounded-xl border border-white/10 bg-slate-950/75 px-3 py-2 text-xs leading-5 text-white placeholder:text-slate-500 focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition-all"
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  {SPECIAL_ABILITY_MODULES.map((module) => {
+                    const balance = Number((abilityModule.special_totals[module.id] || 0).toFixed(1));
+                    const isActive = rssScoutPayWith === module.id;
+                    const canAfford = balance >= RSS_SCOUT_COST;
+
+                    return (
+                      <button
+                        key={module.id}
+                        type="button"
+                        onClick={() => setRssScoutPayWith(module.id)}
+                        className={cn(
+                          "rounded-xl border px-3 py-2 text-left transition-all",
+                          isActive
+                            ? "border-violet-400/50 bg-violet-500/18 text-white shadow-lg shadow-violet-500/10"
+                            : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-violet-400/30 hover:bg-violet-500/8"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold">{module.label}</span>
+                          <span className={cn(
+                            "rounded-full px-2 py-0.5 text-[10px] font-bold",
+                            canAfford
+                              ? "bg-emerald-500/18 text-emerald-100"
+                              : "bg-amber-500/18 text-amber-100"
+                          )}>
+                            {balance}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[10px] text-slate-400">{module.unit}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={runRssScout}
+                  disabled={isRssScouting || !rssScoutTopic.trim()}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500/88 to-cyan-500/88 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-500/25 transition-all hover:shadow-violet-500/35 disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                  {isRssScouting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      侦察中...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      支付 {RSS_SCOUT_COST} 点调用 AI
+                    </>
+                  )}
+                </button>
+
+                {rssScoutError && (
+                  <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
+                    {rssScoutError}
+                  </div>
+                )}
+
+                {(rssScoutSummary || rssScoutResults.length > 0) && (
+                  <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                    {rssScoutSummary && (
+                      <p className="text-[11px] leading-5 text-slate-300">{rssScoutSummary}</p>
+                    )}
+                    <div className="space-y-2">
+                      {rssScoutResults.map((feed) => {
+                        const exists = rssFeeds.some((item) => item.url.trim().toLowerCase() === feed.url.trim().toLowerCase());
+
+                        return (
+                          <div
+                            key={feed.id}
+                            className="rounded-xl border border-white/8 bg-white/[0.03] p-3"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-semibold text-white">{feed.name}</span>
+                                  <span className="rounded-full bg-cyan-500/16 px-2 py-0.5 text-[10px] font-bold text-cyan-100">
+                                    {feed.category}
+                                  </span>
+                                </div>
+                                <a
+                                  href={feed.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-1 inline-flex max-w-full items-center gap-1 text-[10px] text-cyan-300 hover:text-cyan-200"
+                                >
+                                  <Link2 className="h-3 w-3 shrink-0" />
+                                  <span className="truncate">{feed.url}</span>
+                                </a>
+                                {feed.reason && (
+                                  <p className="mt-2 text-[11px] leading-5 text-slate-300/85">{feed.reason}</p>
+                                )}
+                                {feed.keywords.length > 0 && (
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    {feed.keywords.map((keyword) => (
+                                      <span
+                                        key={`${feed.id}-${keyword}`}
+                                        className="rounded-full bg-violet-500/14 px-2 py-0.5 text-[10px] font-semibold text-violet-100"
+                                      >
+                                        {keyword}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => addSuggestedFeed(feed)}
+                                disabled={exists}
+                                className={cn(
+                                  "shrink-0 rounded-xl border px-2.5 py-1.5 text-[10px] font-bold transition-all",
+                                  exists
+                                    ? "cursor-not-allowed border-emerald-400/20 bg-emerald-500/12 text-emerald-100/80"
+                                    : "border-violet-400/30 bg-violet-500/14 text-violet-100 hover:border-violet-300/50 hover:bg-violet-500/22"
+                                )}
+                              >
+                                {exists ? '已添加' : '采纳'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mb-5 rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/14 via-slate-950/55 to-emerald-500/10 p-4 shadow-xl shadow-cyan-500/10">
+              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-cyan-100/75">技术种子库</p>
+              <h3 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                <Rss className="h-4 w-4 text-cyan-300" />
+                ai-daily-digest 预设
+              </h3>
+              <p className="mt-1 text-[11px] leading-5 text-slate-300/80">
+                直接导入外部项目里整理好的技术博客 RSS，不用一个个手填。
+              </p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => importTechnicalPresets(20)}
+                  disabled={isImportingTechPresets}
+                  className="flex-1 rounded-xl border border-cyan-400/25 bg-cyan-500/12 px-3 py-2 text-xs font-bold text-cyan-100 transition-all hover:border-cyan-300/45 hover:bg-cyan-500/18 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isImportingTechPresets ? '导入中...' : '导入前 20 个'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => importTechnicalPresets(90)}
+                  disabled={isImportingTechPresets}
+                  className="flex-1 rounded-xl border border-emerald-400/25 bg-emerald-500/12 px-3 py-2 text-xs font-bold text-emerald-100 transition-all hover:border-emerald-300/45 hover:bg-emerald-500/18 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isImportingTechPresets ? '导入中...' : '导入全部种子'}
+                </button>
+              </div>
+              {techPresetMessage && (
+                <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] leading-5 text-slate-200">
+                  {techPresetMessage}
+                </div>
+              )}
+            </div>
 
             {/* Feed List - Enhanced */}
             {categories.length === 0 ? (
@@ -1897,26 +2429,44 @@ function WorldNewsView({
                   </span>
                 </motion.button>
               </div>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={fetchTrendradarNews}
-                disabled={isLoadingNews}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-teal-500/20 to-cyan-500/20 text-teal-100 border border-teal-500/30 hover:border-teal-500/50 text-sm font-bold disabled:opacity-50 shadow-lg hover:shadow-teal-500/30 transition-all backdrop-blur-sm"
-              >
-                {isLoadingNews ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    加载中...
-                  </>
-                ) : (
-                  <>
-                    <TrendingUp className="h-4 w-4" />
-                    获取最新新闻
-                  </>
-                )}
-              </motion.button>
+              <div className="flex items-center gap-2">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={fetchTrendradarNews}
+                  disabled={isLoadingNews}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-teal-500/20 to-cyan-500/20 text-teal-100 border border-teal-500/30 hover:border-teal-500/50 text-sm font-bold disabled:opacity-50 shadow-lg hover:shadow-teal-500/30 transition-all backdrop-blur-sm"
+                >
+                  {isLoadingNews ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      加载中...
+                    </>
+                  ) : (
+                    <>
+                      <TrendingUp className="h-4 w-4" />
+                      同步 TrendRadar 热榜
+                    </>
+                  )}
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: newsItems.length > 0 ? 1.05 : 1 }}
+                  whileTap={{ scale: newsItems.length > 0 ? 0.95 : 1 }}
+                  onClick={clearAllNews}
+                  disabled={newsItems.length === 0}
+                  className="flex items-center gap-2 rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-2.5 text-sm font-bold text-red-100 transition-all hover:border-red-400/40 hover:bg-red-500/16 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  清空新闻
+                </motion.button>
+              </div>
             </div>
+
+            {newsSyncMessage && (
+              <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs leading-5 text-slate-200">
+                {newsSyncMessage}
+              </div>
+            )}
 
             {mainView === 'news' ? (
               <AnimatePresence mode="wait">
@@ -2007,6 +2557,17 @@ function WorldNewsView({
                               className="p-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-teal-400 hover:border-teal-500/30 transition-all backdrop-blur-sm shadow-lg"
                             >
                               {news.is_read ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                            </motion.button>
+                            <motion.button
+                              whileHover={{ scale: 1.1 }}
+                              whileTap={{ scale: 0.9 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteNewsItem(news.id);
+                              }}
+                              className="p-2 rounded-xl bg-red-500/10 border border-red-400/20 text-red-200 hover:bg-red-500/18 hover:border-red-400/40 transition-all backdrop-blur-sm shadow-lg"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </motion.button>
                           </div>
                         </div>
@@ -2351,6 +2912,15 @@ function WorldNewsView({
                   >
                     <Edit3 className="h-4 w-4" />
                     创建笔记
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => deleteNewsItem(selectedNews.id)}
+                    className="w-full px-4 py-3 rounded-xl bg-red-500/12 text-red-100 border border-red-400/25 hover:border-red-400/45 text-sm font-bold shadow-lg hover:shadow-red-500/15 transition-all backdrop-blur-sm flex items-center justify-center gap-2"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    删除这条新闻
                   </motion.button>
                 </div>
               </motion.div>
@@ -3027,6 +3597,33 @@ export default function App() {
       }
       return [...prev, finalTask];
     });
+  };
+
+  const spendSpecialReward = (moduleId: string, amount: number) => {
+    const chargeAmount = Math.max(0, Number(amount) || 0);
+    if (!chargeAmount) return true;
+
+    const settledAt = Date.now();
+    const trackedMsAtMoment = tasks.reduce((sum, task) => sum + getTrackedMs(task, settledAt), 0);
+    const nextTotals = { ...(abilityModule.special_totals || {}) };
+    const activeModuleOption = buildAbilityModuleOptions(abilityDimensions).find((module) => module.id === abilityModule.active_module_id);
+    const delta = Math.max(0, trackedMsAtMoment - abilityModule.tracked_ms_baseline) / 3600000 * (activeModuleOption?.gainPerHour || 0);
+
+    if (delta > 0 && activeModuleOption) {
+      nextTotals[activeModuleOption.id] = Number(((nextTotals[activeModuleOption.id] || 0) + delta).toFixed(2));
+    }
+
+    const currentBalance = Number(nextTotals[moduleId] || 0);
+    if (currentBalance + 1e-6 < chargeAmount) return false;
+
+    nextTotals[moduleId] = Number(Math.max(0, currentBalance - chargeAmount).toFixed(2));
+    setAbilityModule({
+      active_module_id: abilityModule.active_module_id,
+      special_totals: nextTotals,
+      tracked_ms_baseline: trackedMsAtMoment,
+      updated_at: settledAt,
+    });
+    return true;
   };
 
   const settleAbilityModuleProgress = (nextModuleId?: string, settledAt = Date.now()) => {
@@ -5707,6 +6304,13 @@ export default function App() {
           setRssFeeds={setRssFeeds}
           newsItems={newsItems}
           setNewsItems={setNewsItems}
+          abilityModule={abilityModule}
+          spendSpecialReward={spendSpecialReward}
+          authToken={authToken}
+          onUnauthorized={() => {
+            clearAuth();
+            setLoginError('登录已过期，请重新登录。');
+          }}
           ideaNotes={ideaNotes}
           setIdeaNotes={setIdeaNotes}
           tasks={tasks}

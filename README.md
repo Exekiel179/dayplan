@@ -26,6 +26,11 @@
 - 自动拆解为至少 4 个可执行步骤
 - 支持 OpenAI Chat Completions 和 Gemini 双协议适配
 
+### 🌍 世界消息整合
+- 可从 **TrendRadar** 同步真实热榜到“世界消息”界面
+- 支持删除单条新闻、清空新闻，并保留重要标记/笔记关联
+- 可直接导入 **ai-daily-digest** 整理的技术 RSS 种子库
+
 ### 🔗 任务依赖 & 工作流
 - 任务间可设置**前置依赖关系**
 - 前置任务未完成时，后续任务显示锁定状态
@@ -130,6 +135,9 @@ docker compose --env-file .env up -d
 | `AUTH_ALLOW_REGISTRATION` | | 是否开启前端自助注册（默认 `true`） |
 | `SESSION_TTL_MS` | | 会话有效期，默认 24 小时 |
 | `DAYPLAN_IMAGE` | | Docker 镜像地址（docker-compose 使用） |
+| `TRENDRADAR_ROOT` | | 本地 TrendRadar 项目路径；未配置时默认找 `../TrendRadar` |
+| `AI_DAILY_DIGEST_ROOT` | | 本地 ai-daily-digest 项目路径；未配置时默认找 `../ai-daily-digest` |
+| `NEWSNOW_API_BASE` | | TrendRadar 热榜桥接使用的上游地址，默认 `https://newsnow.busiyi.world/api/s` |
 
 ---
 

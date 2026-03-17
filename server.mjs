@@ -14,6 +14,11 @@ const dataDir = path.resolve(__dirname, '.data');
 const legacyTasksFile = path.join(dataDir, 'tasks.json');
 const authUsersFile = path.join(dataDir, 'auth-users.json');
 const distDir = path.resolve(__dirname, 'dist');
+// [EXTERNAL] Local TrendRadar project: platform config and optional local snapshot fallback.
+const TRENDRADAR_ROOT = process.env.TRENDRADAR_ROOT || path.resolve(__dirname, '..', 'TrendRadar');
+// [EXTERNAL] Local ai-daily-digest project: curated technical RSS seed list.
+const AI_DAILY_DIGEST_ROOT = process.env.AI_DAILY_DIGEST_ROOT || path.resolve(__dirname, '..', 'ai-daily-digest');
+const NEWSNOW_API_BASE = (process.env.NEWSNOW_API_BASE || 'https://newsnow.busiyi.world/api/s').replace(/\/$/, '');
 
 const AI_MODEL = process.env.AI_MODEL || process.env.VITE_AI_MODEL || 'gemini-3.1-pro-preview';
 const AI_API_BASE = (process.env.AI_BASE_URL || process.env.VITE_AI_BASE_URL || 'https://api.aipaibox.com').replace(/\/$/, '');
@@ -34,6 +39,39 @@ const SYSTEM_PROMPT = `你是一位高执行力任务规划助手。请严格返
 1. steps 至少 4 条。
 2. 每条步骤要具体、可执行。
 3. plan 使用中文并包含小标题。`;
+const RSS_SCOUT_SYSTEM_PROMPT = `你是一位资深 RSS 订阅策展助手。请严格返回 JSON，不要有任何额外文字。
+返回结构:
+{
+  "summary": "一句中文总结",
+  "feeds": [
+    {
+      "name": "订阅源名称",
+      "url": "https://example.com/feed.xml",
+      "category": "分类名称",
+      "keywords": ["关键词1", "关键词2"],
+      "reason": "推荐理由"
+    }
+  ]
+}
+要求:
+1. feeds 返回 3 到 6 条，不确定时宁可少返回。
+2. 只返回公开可访问、尽量像 RSS/Atom 的直接订阅链接，避免网站首页。
+3. 优先选择长期稳定、更新频率合理、信息质量高的源。
+4. 如果 URL 把握不足，就不要编造。
+5. summary 和 reason 使用中文。`;
+const DEFAULT_TRENDRADAR_PLATFORMS = [
+  { id: 'toutiao', name: '今日头条' },
+  { id: 'baidu', name: '百度热搜' },
+  { id: 'wallstreetcn-hot', name: '华尔街见闻' },
+  { id: 'thepaper', name: '澎湃新闻' },
+  { id: 'bilibili-hot-search', name: 'bilibili 热搜' },
+  { id: 'cls-hot', name: '财联社热门' },
+  { id: 'ifeng', name: '凤凰网' },
+  { id: 'tieba', name: '贴吧' },
+  { id: 'weibo', name: '微博' },
+  { id: 'douyin', name: '抖音' },
+  { id: 'zhihu', name: '知乎' },
+];
 
 function normalizeUsername(username) {
   return username.trim().toLowerCase();
@@ -234,15 +272,129 @@ function buildPrompt(task) {
 请按要求返回。`;
 }
 
-function parsePlanPayload(raw) {
+function parseQuotedOrBareValue(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    return text.slice(1, -1).trim();
+  }
+  return text;
+}
+
+async function loadTrendRadarPlatforms() {
+  try {
+    const configPath = path.join(TRENDRADAR_ROOT, 'config', 'config.yaml');
+    const text = await fs.promises.readFile(configPath, 'utf-8');
+    const lines = text.split(/\r?\n/);
+    const platforms = [];
+    let inPlatforms = false;
+    let current = null;
+
+    for (const line of lines) {
+      if (!inPlatforms) {
+        if (/^platforms:\s*$/.test(line)) {
+          inPlatforms = true;
+        }
+        continue;
+      }
+
+      if (line.trim() && !/^\s/.test(line)) break;
+      const idMatch = line.match(/^\s*-\s+id:\s*(.+)\s*$/);
+      if (idMatch) {
+        if (current?.id) {
+          platforms.push({
+            id: current.id,
+            name: current.name || current.id,
+          });
+        }
+        current = { id: parseQuotedOrBareValue(idMatch[1]), name: '' };
+        continue;
+      }
+
+      const nameMatch = line.match(/^\s+name:\s*(.+)\s*$/);
+      if (nameMatch && current) {
+        current.name = parseQuotedOrBareValue(nameMatch[1]);
+      }
+    }
+
+    if (current?.id) {
+      platforms.push({
+        id: current.id,
+        name: current.name || current.id,
+      });
+    }
+
+    return platforms.length > 0 ? platforms : DEFAULT_TRENDRADAR_PLATFORMS;
+  } catch {
+    return DEFAULT_TRENDRADAR_PLATFORMS;
+  }
+}
+
+function filterTrendRadarPlatforms(allPlatforms, rawIds) {
+  if (!rawIds) return allPlatforms;
+  const requested = String(rawIds)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (requested.length === 0) return allPlatforms;
+  return allPlatforms.filter((platform) => requested.includes(platform.id));
+}
+
+function buildRssScoutPrompt({ topic, guidance }) {
+  return `请为这个主题挑选一组高质量 RSS/Atom 订阅源。
+主题：${topic}
+提示方向：${guidance || '无额外方向，优先信息质量、稳定更新、适合长期订阅。'}
+请按要求返回。`;
+}
+
+function extractJsonText(raw) {
   const trimmed = String(raw || '').trim();
   const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
-  const jsonText = jsonMatch?.[0] || trimmed;
+  return jsonMatch?.[0] || trimmed;
+}
+
+function parsePlanPayload(raw) {
+  const jsonText = extractJsonText(raw);
   const parsed = JSON.parse(jsonText);
   return {
     plan: typeof parsed.plan === 'string' ? parsed.plan : '',
     steps: Array.isArray(parsed.steps)
       ? parsed.steps.filter((s) => typeof s === 'string' && s.trim().length > 0)
+      : [],
+  };
+}
+
+function isValidHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function parseRssScoutPayload(raw) {
+  const jsonText = extractJsonText(raw);
+  const parsed = JSON.parse(jsonText);
+  return {
+    summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
+    feeds: Array.isArray(parsed.feeds)
+      ? parsed.feeds
+          .filter((feed) => feed && typeof feed === 'object')
+          .map((feed) => ({
+            name: typeof feed.name === 'string' ? feed.name.trim() : '',
+            url: typeof feed.url === 'string' ? feed.url.trim() : '',
+            category: typeof feed.category === 'string' ? feed.category.trim() : 'AI 推荐',
+            keywords: Array.isArray(feed.keywords)
+              ? feed.keywords
+                  .filter((item) => typeof item === 'string' && item.trim().length > 0)
+                  .map((item) => item.trim())
+                  .slice(0, 6)
+              : [],
+            reason: typeof feed.reason === 'string' ? feed.reason.trim() : '',
+          }))
+          .filter((feed) => feed.name && feed.url && isValidHttpUrl(feed.url))
+          .slice(0, 6)
       : [],
   };
 }
@@ -477,6 +629,282 @@ function revokeSessionsForUsername(username, exceptToken = '') {
   }
 }
 
+async function requestRssScoutByChatCompletions(params) {
+  const response = await fetch(`${AI_API_BASE}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      temperature: 0.25,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: RSS_SCOUT_SYSTEM_PROMPT },
+        { role: 'user', content: buildRssScoutPrompt(params) },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`chat completions failed: ${response.status}`);
+  }
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('chat completions returned empty content');
+  }
+  return parseRssScoutPayload(content);
+}
+
+async function requestRssScoutByGemini(params) {
+  const response = await fetch(`${AI_API_BASE}/v1beta/models/${AI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+      'x-goog-api-key': AI_API_KEY,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `${RSS_SCOUT_SYSTEM_PROMPT}\n\n${buildRssScoutPrompt(params)}` }] }],
+      generationConfig: {
+        temperature: 0.25,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`generateContent failed: ${response.status}`);
+  }
+  const data = await response.json();
+  const content = data?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('\n');
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('generateContent returned empty content');
+  }
+  return parseRssScoutPayload(content);
+}
+
+async function requestAIRssScout(params) {
+  if (!AI_API_KEY) {
+    throw new Error('服务器未配置 AI_API_KEY');
+  }
+  try {
+    return await requestRssScoutByChatCompletions(params);
+  } catch {
+    return requestRssScoutByGemini(params);
+  }
+}
+
+async function fetchTrendRadarLiveSnapshot({ limit = 60, platforms: rawPlatforms = '' } = {}) {
+  const allPlatforms = await loadTrendRadarPlatforms();
+  const targetPlatforms = filterTrendRadarPlatforms(allPlatforms, rawPlatforms);
+  if (targetPlatforms.length === 0) {
+    throw new Error('没有可用的 TrendRadar 平台配置');
+  }
+
+  const settled = await Promise.allSettled(targetPlatforms.map(async (platform) => {
+    const response = await fetch(`${NEWSNOW_API_BASE}?id=${encodeURIComponent(platform.id)}&latest`, {
+      headers: {
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'dayplan-trendradar-bridge/1.0',
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.items)) {
+      throw new Error('响应缺少 items');
+    }
+
+    return {
+      platform,
+      status: typeof payload.status === 'string' ? payload.status : 'unknown',
+      items: payload.items,
+    };
+  }));
+
+  const fetchTime = new Date().toISOString();
+  const items = [];
+  const failedPlatforms = [];
+
+  settled.forEach((result, index) => {
+    const platform = targetPlatforms[index];
+    if (result.status !== 'fulfilled') {
+      failedPlatforms.push(platform.id);
+      return;
+    }
+
+    result.value.items.forEach((item, itemIndex) => {
+      const title = typeof item?.title === 'string' ? item.title.trim() : '';
+      if (!title) return;
+
+      items.push({
+        platform_id: platform.id,
+        platform_name: platform.name,
+        title,
+        rank: itemIndex + 1,
+        url: typeof item?.url === 'string' ? item.url : '',
+        mobile_url: typeof item?.mobileUrl === 'string' ? item.mobileUrl : '',
+        timestamp: fetchTime,
+      });
+    });
+  });
+
+  items.sort((a, b) => a.rank - b.rank || a.platform_name.localeCompare(b.platform_name, 'zh-CN'));
+
+  return {
+    source: 'trendradar-live',
+    fetched_at: fetchTime,
+    platforms: targetPlatforms,
+    failed_platforms: failedPlatforms,
+    total: items.length,
+    items: items.slice(0, Math.max(1, Number(limit) || 60)),
+  };
+}
+
+function parseTrendRadarTxtSection(line) {
+  const rankMatch = String(line || '').trim().match(/^(\d+)\.\s+(.*)$/);
+  const rank = rankMatch ? Number(rankMatch[1]) : 0;
+  let titlePart = rankMatch ? rankMatch[2].trim() : String(line || '').trim();
+
+  let mobileUrl = '';
+  const mobileMatch = titlePart.match(/\s+\[MOBILE:([^\]]+)\]\s*$/);
+  if (mobileMatch) {
+    mobileUrl = mobileMatch[1];
+    titlePart = titlePart.slice(0, mobileMatch.index).trim();
+  }
+
+  let url = '';
+  const urlMatch = titlePart.match(/\s+\[URL:([^\]]+)\]\s*$/);
+  if (urlMatch) {
+    url = urlMatch[1];
+    titlePart = titlePart.slice(0, urlMatch.index).trim();
+  }
+
+  return {
+    rank,
+    title: titlePart,
+    url,
+    mobile_url: mobileUrl,
+  };
+}
+
+async function fetchTrendRadarLocalSnapshot({ limit = 60, platforms: rawPlatforms = '' } = {}) {
+  const outputRoot = path.join(TRENDRADAR_ROOT, 'output');
+  const allPlatforms = await loadTrendRadarPlatforms();
+  const targetPlatforms = filterTrendRadarPlatforms(allPlatforms, rawPlatforms);
+  const allowedIds = new Set(targetPlatforms.map((platform) => platform.id));
+
+  const dateDirs = (await fs.promises.readdir(outputRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((a, b) => b.localeCompare(a, 'zh-CN'));
+
+  let latestTxtPath = '';
+  let dateLabel = '';
+  for (const dateDir of dateDirs) {
+    const txtDir = path.join(outputRoot, dateDir, 'txt');
+    try {
+      const txtFiles = (await fs.promises.readdir(txtDir, { withFileTypes: true }))
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.txt'))
+        .map((entry) => entry.name)
+        .sort((a, b) => b.localeCompare(a, 'zh-CN'));
+      if (txtFiles.length === 0) continue;
+      latestTxtPath = path.join(txtDir, txtFiles[0]);
+      dateLabel = dateDir;
+      break;
+    } catch {
+      continue;
+    }
+  }
+
+  if (!latestTxtPath) {
+    throw new Error('TrendRadar 本地 output 中没有可用快照');
+  }
+
+  const fileText = await fs.promises.readFile(latestTxtPath, 'utf-8');
+  const timeLabel = path.basename(latestTxtPath, '.txt').replace('时', ':').replace('分', '');
+  const sections = fileText.split(/\r?\n\r?\n+/);
+  const items = [];
+
+  for (const section of sections) {
+    if (!section.trim() || section.includes('==== 以下ID请求失败 ====')) continue;
+    const lines = section.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    if (lines.length < 2) continue;
+
+    const [platformIdRaw, platformNameRaw] = lines[0].split(' | ');
+    const platformId = (platformIdRaw || '').trim();
+    const platformName = (platformNameRaw || platformIdRaw || '').trim();
+    if (!platformId || (allowedIds.size > 0 && !allowedIds.has(platformId))) continue;
+
+    lines.slice(1).forEach((line) => {
+      const parsed = parseTrendRadarTxtSection(line);
+      if (!parsed.title) return;
+      items.push({
+        platform_id: platformId,
+        platform_name: platformName || platformId,
+        title: parsed.title,
+        rank: parsed.rank || 0,
+        url: parsed.url,
+        mobile_url: parsed.mobile_url,
+        timestamp: `${dateLabel} ${timeLabel}`,
+      });
+    });
+  }
+
+  items.sort((a, b) => a.rank - b.rank || a.platform_name.localeCompare(b.platform_name, 'zh-CN'));
+  return {
+    source: 'trendradar-local',
+    fetched_at: `${dateLabel} ${timeLabel}`,
+    platforms: targetPlatforms,
+    failed_platforms: [],
+    total: items.length,
+    items: items.slice(0, Math.max(1, Number(limit) || 60)),
+  };
+}
+
+async function getTrendRadarSnapshot(options = {}) {
+  try {
+    return await fetchTrendRadarLiveSnapshot(options);
+  } catch (liveError) {
+    const fallback = await fetchTrendRadarLocalSnapshot(options);
+    return {
+      ...fallback,
+      fallback_reason: liveError instanceof Error ? liveError.message : 'live fetch failed',
+    };
+  }
+}
+
+async function loadTechnicalRssPresets(limit = 90) {
+  const digestPath = path.join(AI_DAILY_DIGEST_ROOT, 'scripts', 'digest.ts');
+  const source = await fs.promises.readFile(digestPath, 'utf-8');
+  const feeds = Array.from(source.matchAll(/\{\s*name:\s*"([^"]+)"\s*,\s*xmlUrl:\s*"([^"]+)"\s*,\s*htmlUrl:\s*"([^"]+)"/g))
+    .map((match, index) => ({
+      id: `digest-seed-${index + 1}`,
+      name: match[1].trim(),
+      url: match[2].trim(),
+      homepage: match[3].trim(),
+      category: '技术博客',
+      keywords: ['技术', '博客', 'AI Daily Digest'],
+      reason: '来自 ai-daily-digest 的高质量技术 RSS 种子库。',
+    }))
+    .filter((feed) => feed.name && feed.url)
+    .slice(0, Math.max(1, Number(limit) || 90));
+
+  return {
+    source: 'ai-daily-digest',
+    total: feeds.length,
+    feeds,
+  };
+}
+
 function createSessionToken(username) {
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, {
@@ -663,6 +1091,49 @@ app.post('/api/ai/plan', requireAuth, async (req, res) => {
     const message = error instanceof Error ? error.message : 'AI 生成失败';
     const status = message.includes('AI_API_KEY') ? 503 : 502;
     res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/ai/rss-scout', requireAuth, async (req, res) => {
+  try {
+    const topic = typeof req.body?.topic === 'string' ? req.body.topic.trim() : '';
+    const guidance = typeof req.body?.guidance === 'string' ? req.body.guidance.trim() : '';
+    if (!topic) {
+      res.status(400).json({ error: '主题不能为空' });
+      return;
+    }
+
+    const result = await requestAIRssScout({ topic, guidance });
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'AI 生成失败';
+    const status = message.includes('AI_API_KEY') ? 503 : 502;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get('/api/world-news/trendradar/latest', requireAuth, async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 60));
+    const platforms = typeof req.query.platforms === 'string' ? req.query.platforms : '';
+    const result = await getTrendRadarSnapshot({ limit, platforms });
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(502).json({
+      error: error instanceof Error ? error.message : 'TrendRadar 数据获取失败',
+    });
+  }
+});
+
+app.get('/api/rss/presets/technical', requireAuth, async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 90));
+    const result = await loadTechnicalRssPresets(limit);
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : '技术 RSS 种子读取失败',
+    });
   }
 });
 
