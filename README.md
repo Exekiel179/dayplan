@@ -135,8 +135,8 @@ docker compose --env-file .env up -d
 | `AUTH_ALLOW_REGISTRATION` | | 是否开启前端自助注册（默认 `true`） |
 | `SESSION_TTL_MS` | | 会话有效期，默认 24 小时 |
 | `DAYPLAN_IMAGE` | | Docker 镜像地址（docker-compose 使用） |
-| `TRENDRADAR_ROOT` | | 本地 TrendRadar 项目路径；未配置时默认找 `../TrendRadar` |
-| `AI_DAILY_DIGEST_ROOT` | | 本地 ai-daily-digest 项目路径；未配置时默认找 `../ai-daily-digest` |
+| `TRENDRADAR_ROOT` | | 可选的本地 TrendRadar 项目路径；未配置也可运行，仅在存在时用作本地增强/快照回退 |
+| `AI_DAILY_DIGEST_ROOT` | | 可选的本地 ai-daily-digest 项目路径；未配置也可运行，技术 RSS 默认使用项目内置种子库 |
 | `NEWSNOW_API_BASE` | | TrendRadar 热榜桥接使用的上游地址，默认 `https://newsnow.busiyi.world/api/s` |
 
 ---

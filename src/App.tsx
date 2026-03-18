@@ -1691,7 +1691,7 @@ function WorldNewsView({
       const addedCount = importFeeds(presets);
       setTechPresetMessage(
         addedCount > 0
-          ? `已从 ai-daily-digest 导入 ${addedCount} 个技术 RSS 种子。`
+          ? `已导入 ${addedCount} 个技术 RSS 种子。`
           : '这些技术 RSS 已经都在当前订阅列表里了。'
       );
     } catch (err) {
@@ -2212,10 +2212,10 @@ function WorldNewsView({
               <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-cyan-100/75">技术种子库</p>
               <h3 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
                 <Rss className="h-4 w-4 text-cyan-300" />
-                ai-daily-digest 预设
+                技术 RSS 预设
               </h3>
               <p className="mt-1 text-[11px] leading-5 text-slate-300/80">
-                直接导入外部项目里整理好的技术博客 RSS，不用一个个手填。
+                直接导入项目内置的高质量技术博客 RSS，服务器部署也能直接使用。
               </p>
               <div className="mt-3 flex gap-2">
                 <button

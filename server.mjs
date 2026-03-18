@@ -3,6 +3,7 @@ import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TECHNICAL_RSS_SEEDS } from './technical-rss-seeds.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,9 +16,9 @@ const legacyTasksFile = path.join(dataDir, 'tasks.json');
 const authUsersFile = path.join(dataDir, 'auth-users.json');
 const distDir = path.resolve(__dirname, 'dist');
 // [EXTERNAL] Local TrendRadar project: platform config and optional local snapshot fallback.
-const TRENDRADAR_ROOT = process.env.TRENDRADAR_ROOT || path.resolve(__dirname, '..', 'TrendRadar');
+const TRENDRADAR_ROOT = process.env.TRENDRADAR_ROOT || '';
 // [EXTERNAL] Local ai-daily-digest project: curated technical RSS seed list.
-const AI_DAILY_DIGEST_ROOT = process.env.AI_DAILY_DIGEST_ROOT || path.resolve(__dirname, '..', 'ai-daily-digest');
+const AI_DAILY_DIGEST_ROOT = process.env.AI_DAILY_DIGEST_ROOT || '';
 const NEWSNOW_API_BASE = (process.env.NEWSNOW_API_BASE || 'https://newsnow.busiyi.world/api/s').replace(/\/$/, '');
 
 const AI_MODEL = process.env.AI_MODEL || process.env.VITE_AI_MODEL || 'gemini-3.1-pro-preview';
@@ -28,6 +29,14 @@ const SEED_USERS = parseSeedUsersFromEnv();
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24);
 const ADMIN_USERS = parseAdminUsersFromEnv(SEED_USERS);
 const sessions = new Map();
+const TRENDRADAR_LIVE_HEADERS = {
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache',
+  'Referer': 'https://newsnow.busiyi.world/',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+};
 
 const SYSTEM_PROMPT = `你是一位高执行力任务规划助手。请严格返回 JSON，不要有任何额外文字。
 返回结构:
@@ -75,6 +84,39 @@ const DEFAULT_TRENDRADAR_PLATFORMS = [
 
 function normalizeUsername(username) {
   return username.trim().toLowerCase();
+}
+
+function buildExternalRootCandidates(rawRoot, projectName) {
+  const candidates = [];
+  const pushCandidate = (value) => {
+    if (!value || typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    if (path.isAbsolute(trimmed)) {
+      candidates.push(path.normalize(trimmed));
+      return;
+    }
+    candidates.push(path.resolve(process.cwd(), trimmed));
+    candidates.push(path.resolve(__dirname, trimmed));
+  };
+
+  pushCandidate(rawRoot);
+  candidates.push(path.resolve(__dirname, '..', projectName));
+  candidates.push(path.resolve(process.cwd(), '..', projectName));
+  candidates.push(path.resolve(process.cwd(), projectName));
+
+  return Array.from(new Set(candidates));
+}
+
+function resolveExternalRoot(rawRoot, projectName, requiredSegments = []) {
+  const candidates = buildExternalRootCandidates(rawRoot, projectName);
+  for (const candidate of candidates) {
+    const requiredPath = requiredSegments.length > 0 ? path.join(candidate, ...requiredSegments) : candidate;
+    if (fs.existsSync(requiredPath)) {
+      return candidate;
+    }
+  }
+  return '';
 }
 
 function isValidUsername(username) {
@@ -283,7 +325,11 @@ function parseQuotedOrBareValue(raw) {
 
 async function loadTrendRadarPlatforms() {
   try {
-    const configPath = path.join(TRENDRADAR_ROOT, 'config', 'config.yaml');
+    const trendRadarRoot = resolveExternalRoot(TRENDRADAR_ROOT, 'TrendRadar', ['config', 'config.yaml']);
+    if (!trendRadarRoot) {
+      return DEFAULT_TRENDRADAR_PLATFORMS;
+    }
+    const configPath = path.join(trendRadarRoot, 'config', 'config.yaml');
     const text = await fs.promises.readFile(configPath, 'utf-8');
     const lines = text.split(/\r?\n/);
     const platforms = [];
@@ -708,10 +754,7 @@ async function fetchTrendRadarLiveSnapshot({ limit = 60, platforms: rawPlatforms
 
   const settled = await Promise.allSettled(targetPlatforms.map(async (platform) => {
     const response = await fetch(`${NEWSNOW_API_BASE}?id=${encodeURIComponent(platform.id)}&latest`, {
-      headers: {
-        'Accept': 'application/json, text/plain, */*',
-        'User-Agent': 'dayplan-trendradar-bridge/1.0',
-      },
+      headers: TRENDRADAR_LIVE_HEADERS,
       signal: AbortSignal.timeout(12000),
     });
     if (!response.ok) {
@@ -758,6 +801,9 @@ async function fetchTrendRadarLiveSnapshot({ limit = 60, platforms: rawPlatforms
   });
 
   items.sort((a, b) => a.rank - b.rank || a.platform_name.localeCompare(b.platform_name, 'zh-CN'));
+  if (items.length === 0) {
+    throw new Error('TrendRadar 实时热榜为空');
+  }
 
   return {
     source: 'trendradar-live',
@@ -797,7 +843,11 @@ function parseTrendRadarTxtSection(line) {
 }
 
 async function fetchTrendRadarLocalSnapshot({ limit = 60, platforms: rawPlatforms = '' } = {}) {
-  const outputRoot = path.join(TRENDRADAR_ROOT, 'output');
+  const trendRadarRoot = resolveExternalRoot(TRENDRADAR_ROOT, 'TrendRadar', ['output']);
+  if (!trendRadarRoot) {
+    throw new Error('未找到可用的 TrendRadar 项目目录');
+  }
+  const outputRoot = path.join(trendRadarRoot, 'output');
   const allPlatforms = await loadTrendRadarPlatforms();
   const targetPlatforms = filterTrendRadarPlatforms(allPlatforms, rawPlatforms);
   const allowedIds = new Set(targetPlatforms.map((platform) => platform.id));
@@ -874,18 +924,43 @@ async function getTrendRadarSnapshot(options = {}) {
   try {
     return await fetchTrendRadarLiveSnapshot(options);
   } catch (liveError) {
-    const fallback = await fetchTrendRadarLocalSnapshot(options);
-    return {
-      ...fallback,
-      fallback_reason: liveError instanceof Error ? liveError.message : 'live fetch failed',
-    };
+    try {
+      const fallback = await fetchTrendRadarLocalSnapshot(options);
+      return {
+        ...fallback,
+        fallback_reason: liveError instanceof Error ? liveError.message : 'live fetch failed',
+      };
+    } catch (localError) {
+      const liveMessage = liveError instanceof Error ? liveError.message : 'live fetch failed';
+      const localMessage = localError instanceof Error ? localError.message : 'local fallback unavailable';
+      throw new Error(`TrendRadar 实时热榜获取失败：${liveMessage}；本地快照不可用：${localMessage}`);
+    }
   }
 }
 
 async function loadTechnicalRssPresets(limit = 90) {
-  const digestPath = path.join(AI_DAILY_DIGEST_ROOT, 'scripts', 'digest.ts');
+  const bundledFeeds = TECHNICAL_RSS_SEEDS.map((feed, index) => ({
+    id: `bundled-tech-seed-${index + 1}`,
+    name: feed.name.trim(),
+    url: feed.url.trim(),
+    homepage: feed.homepage.trim(),
+    category: '技术博客',
+    keywords: ['技术', '博客', '内置种子库'],
+    reason: '项目内置的高质量技术 RSS 种子库，可直接用于服务器部署。',
+  }));
+
+  const aiDailyDigestRoot = resolveExternalRoot(AI_DAILY_DIGEST_ROOT, 'ai-daily-digest', ['scripts', 'digest.ts']);
+  if (!aiDailyDigestRoot) {
+    return {
+      source: 'bundled-technical-seeds',
+      total: bundledFeeds.length,
+      feeds: bundledFeeds.slice(0, Math.max(1, Number(limit) || 90)),
+    };
+  }
+
+  const digestPath = path.join(aiDailyDigestRoot, 'scripts', 'digest.ts');
   const source = await fs.promises.readFile(digestPath, 'utf-8');
-  const feeds = Array.from(source.matchAll(/\{\s*name:\s*"([^"]+)"\s*,\s*xmlUrl:\s*"([^"]+)"\s*,\s*htmlUrl:\s*"([^"]+)"/g))
+  const externalFeeds = Array.from(source.matchAll(/\{\s*name:\s*"([^"]+)"\s*,\s*xmlUrl:\s*"([^"]+)"\s*,\s*htmlUrl:\s*"([^"]+)"/g))
     .map((match, index) => ({
       id: `digest-seed-${index + 1}`,
       name: match[1].trim(),
@@ -895,13 +970,21 @@ async function loadTechnicalRssPresets(limit = 90) {
       keywords: ['技术', '博客', 'AI Daily Digest'],
       reason: '来自 ai-daily-digest 的高质量技术 RSS 种子库。',
     }))
-    .filter((feed) => feed.name && feed.url)
-    .slice(0, Math.max(1, Number(limit) || 90));
+    .filter((feed) => feed.name && feed.url);
+
+  const dedupedFeeds = [];
+  const seenUrls = new Set();
+  for (const feed of [...externalFeeds, ...bundledFeeds]) {
+    const key = feed.url.toLowerCase();
+    if (seenUrls.has(key)) continue;
+    seenUrls.add(key);
+    dedupedFeeds.push(feed);
+  }
 
   return {
-    source: 'ai-daily-digest',
-    total: feeds.length,
-    feeds,
+    source: 'bundled-technical-seeds+ai-daily-digest',
+    total: dedupedFeeds.length,
+    feeds: dedupedFeeds.slice(0, Math.max(1, Number(limit) || 90)),
   };
 }
 
