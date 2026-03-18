@@ -21,6 +21,7 @@ ENV PORT=3000
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.mjs ./server.mjs
+COPY --from=builder /app/technical-rss-seeds.mjs ./technical-rss-seeds.mjs
 COPY --from=builder /app/package*.json ./
 
 EXPOSE 3000
