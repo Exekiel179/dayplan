@@ -44,6 +44,11 @@ import {
   Edit3,
   ChevronDown,
   ChevronUp,
+  Volume2,
+  VolumeX,
+  ExternalLink,
+  Disc3,
+  Waves,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
@@ -84,6 +89,7 @@ function cn(...inputs: ClassValue[]) {
 
 const AUTH_TOKEN_KEY = 'dayplan_auth_token';
 const THEME_STORAGE_KEY = 'dayplan_theme';
+const AMBIENT_AUDIO_STORAGE_KEY = 'dayplan_ambient_audio';
 const DEFAULT_INITIAL_ENERGY = 72;
 const REST_RECOVERY_PER_HOUR = 6;
 const MOTIVATION_SETTLE_INTERVAL_MS = 5000;
@@ -102,6 +108,530 @@ const COLLABORATION_LEVEL_OPTIONS: { value: TaskCollaborationLevel; label: strin
   { value: 'low', label: '协作程度低' },
   { value: 'high', label: '协作程度高' },
 ];
+
+type AmbientPresetId = 'white_noise' | 'brown_noise' | 'post_rock' | 'gaming_english';
+
+type AmbientPreset = {
+  id: AmbientPresetId;
+  label: string;
+  blurb: string;
+  accent: string;
+  qqUrl: string;
+  appleUrl: string;
+};
+
+type AmbientController = {
+  stop: () => void;
+  setVolume: (value: number) => void;
+};
+
+const AMBIENT_PRESETS: AmbientPreset[] = [
+  {
+    id: 'white_noise',
+    label: '白噪音',
+    blurb: '均匀铺底，适合屏蔽环境杂音。',
+    accent: 'border-sky-400/30 bg-sky-500/10 text-sky-100',
+    qqUrl: 'https://y.qq.com/n/ryqq/search?w=%E7%99%BD%E5%99%AA%E9%9F%B3%20%E6%AD%8C%E5%8D%95',
+    appleUrl: 'https://music.apple.com/us/search?term=white%20noise%20playlist',
+  },
+  {
+    id: 'brown_noise',
+    label: '褐噪音',
+    blurb: '更厚更沉，适合压低刺耳高频。',
+    accent: 'border-amber-400/30 bg-amber-500/10 text-amber-100',
+    qqUrl: 'https://y.qq.com/n/ryqq/search?w=%E8%A4%90%E5%99%AA%E9%9F%B3%20%E6%AD%8C%E5%8D%95',
+    appleUrl: 'https://music.apple.com/us/search?term=brown%20noise%20playlist',
+  },
+  {
+    id: 'post_rock',
+    label: '后摇',
+    blurb: '缓慢推进的长音垫和空间感，适合深度工作。',
+    accent: 'border-violet-400/30 bg-violet-500/10 text-violet-100',
+    qqUrl: 'https://y.qq.com/n/ryqq/search?w=%E5%90%8E%E6%91%87%20%E6%AD%8C%E5%8D%95',
+    appleUrl: 'https://music.apple.com/us/search?term=post-rock%20playlist',
+  },
+  {
+    id: 'gaming_english',
+    label: '游戏英语',
+    blurb: '偏游戏感的英文氛围节奏，适合提神和推进。',
+    accent: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100',
+    qqUrl: 'https://y.qq.com/n/ryqq/search?w=%E6%B8%B8%E6%88%8F%20%E8%8B%B1%E6%96%87%20%E6%AD%8C%E5%8D%95',
+    appleUrl: 'https://music.apple.com/us/search?term=gaming%20english%20playlist',
+  },
+];
+
+function midiToFrequency(midi: number) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function createNoiseController(context: AudioContext, mode: 'white' | 'brown'): AmbientController {
+  const output = context.createGain();
+  output.gain.value = 0.22;
+  output.connect(context.destination);
+
+  const filter = context.createBiquadFilter();
+  filter.type = mode === 'white' ? 'highpass' : 'lowpass';
+  filter.frequency.value = mode === 'white' ? 180 : 650;
+  filter.Q.value = 0.2;
+  filter.connect(output);
+
+  const frameCount = context.sampleRate * 2;
+  const buffer = context.createBuffer(1, frameCount, context.sampleRate);
+  const data = buffer.getChannelData(0);
+
+  if (mode === 'white') {
+    for (let index = 0; index < frameCount; index += 1) {
+      data[index] = (Math.random() * 2 - 1) * 0.35;
+    }
+  } else {
+    let lastOut = 0;
+    for (let index = 0; index < frameCount; index += 1) {
+      const white = Math.random() * 2 - 1;
+      lastOut = (lastOut + (0.02 * white)) / 1.02;
+      data[index] = lastOut * 4.8;
+    }
+  }
+
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.loop = true;
+  source.connect(filter);
+  source.start();
+
+  let stopped = false;
+  return {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      source.stop();
+      source.disconnect();
+      filter.disconnect();
+      output.disconnect();
+    },
+    setVolume(value: number) {
+      output.gain.cancelScheduledValues(context.currentTime);
+      output.gain.setTargetAtTime(Math.max(0, Math.min(0.8, value * 0.4)), context.currentTime, 0.08);
+    },
+  };
+}
+
+function createPostRockController(context: AudioContext): AmbientController {
+  const output = context.createGain();
+  output.gain.value = 0.18;
+  output.connect(context.destination);
+
+  const progression = [
+    [45, 52, 57, 61],
+    [40, 47, 52, 56],
+    [43, 50, 55, 59],
+    [47, 54, 59, 62],
+  ];
+  const activeTimeouts: number[] = [];
+  const activeNodes: Array<{ stop?: () => void; disconnect: () => void }> = [];
+
+  const playChord = (notes: number[]) => {
+    notes.forEach((note, noteIndex) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = noteIndex % 2 === 0 ? 'triangle' : 'sine';
+      oscillator.frequency.value = midiToFrequency(note);
+      oscillator.detune.value = noteIndex * 4 - 6;
+
+      const filter = context.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 980 - noteIndex * 90;
+
+      const gain = context.createGain();
+      const now = context.currentTime;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.055 - noteIndex * 0.008, now + 1.2);
+      gain.gain.linearRampToValueAtTime(0.0001, now + 4.8);
+
+      oscillator.connect(filter);
+      filter.connect(gain);
+      gain.connect(output);
+      oscillator.start(now);
+      oscillator.stop(now + 5.1);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      };
+      activeNodes.push(oscillator, filter, gain);
+    });
+  };
+
+  progression.forEach((notes, index) => {
+    activeTimeouts.push(window.setTimeout(() => playChord(notes), index * 3200));
+  });
+
+  const intervalId = window.setInterval(() => {
+    progression.forEach((notes, index) => {
+      activeTimeouts.push(window.setTimeout(() => playChord(notes), index * 3200));
+    });
+  }, progression.length * 3200);
+
+  let stopped = false;
+  return {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      window.clearInterval(intervalId);
+      activeTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      activeNodes.forEach((node) => {
+        if (typeof node.stop === 'function') {
+          try {
+            node.stop();
+          } catch {
+            // Ignore oscillators already stopped by scheduling.
+          }
+        }
+        node.disconnect();
+      });
+      output.disconnect();
+    },
+    setVolume(value: number) {
+      output.gain.cancelScheduledValues(context.currentTime);
+      output.gain.setTargetAtTime(Math.max(0, Math.min(0.8, value * 0.28)), context.currentTime, 0.12);
+    },
+  };
+}
+
+function createGamingEnglishController(context: AudioContext): AmbientController {
+  const output = context.createGain();
+  output.gain.value = 0.16;
+  output.connect(context.destination);
+
+  const pulsePattern = [64, 67, 71, 72, 71, 67, 64, 62];
+  const bassPattern = [40, 45, 43, 47];
+  let pulseStep = 0;
+  let bassStep = 0;
+
+  const activeNodes: Array<{ stop?: () => void; disconnect: () => void }> = [];
+
+  const playLead = () => {
+    const oscillator = context.createOscillator();
+    oscillator.type = pulseStep % 2 === 0 ? 'triangle' : 'sawtooth';
+    oscillator.frequency.value = midiToFrequency(pulsePattern[pulseStep % pulsePattern.length]);
+
+    const filter = context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1400;
+    filter.Q.value = 0.9;
+
+    const gain = context.createGain();
+    const now = context.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.07, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+
+    oscillator.connect(filter);
+    filter.connect(gain);
+    gain.connect(output);
+    oscillator.start(now);
+    oscillator.stop(now + 0.36);
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
+    activeNodes.push(oscillator, filter, gain);
+    pulseStep += 1;
+  };
+
+  const playBass = () => {
+    const oscillator = context.createOscillator();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = midiToFrequency(bassPattern[bassStep % bassPattern.length]);
+
+    const gain = context.createGain();
+    const now = context.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.085, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+
+    oscillator.connect(gain);
+    gain.connect(output);
+    oscillator.start(now);
+    oscillator.stop(now + 1.0);
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      gain.disconnect();
+    };
+    activeNodes.push(oscillator, gain);
+    bassStep += 1;
+  };
+
+  playLead();
+  playBass();
+  const leadInterval = window.setInterval(playLead, 360);
+  const bassInterval = window.setInterval(playBass, 1440);
+
+  let stopped = false;
+  return {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      window.clearInterval(leadInterval);
+      window.clearInterval(bassInterval);
+      activeNodes.forEach((node) => {
+        if (typeof node.stop === 'function') {
+          try {
+            node.stop();
+          } catch {
+            // Ignore oscillators already stopped by scheduling.
+          }
+        }
+        node.disconnect();
+      });
+      output.disconnect();
+    },
+    setVolume(value: number) {
+      output.gain.cancelScheduledValues(context.currentTime);
+      output.gain.setTargetAtTime(Math.max(0, Math.min(0.8, value * 0.24)), context.currentTime, 0.08);
+    },
+  };
+}
+
+function createAmbientController(context: AudioContext, presetId: AmbientPresetId) {
+  if (presetId === 'white_noise') return createNoiseController(context, 'white');
+  if (presetId === 'brown_noise') return createNoiseController(context, 'brown');
+  if (presetId === 'post_rock') return createPostRockController(context);
+  return createGamingEnglishController(context);
+}
+
+function BackgroundAudioDock() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState<AmbientPresetId>('white_noise');
+  const [volume, setVolume] = useState(0.48);
+  const [audioError, setAudioError] = useState('');
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const controllerRef = useRef<AmbientController | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem(AMBIENT_AUDIO_STORAGE_KEY);
+    if (!saved) return;
+    try {
+      const payload = JSON.parse(saved);
+      if (typeof payload?.volume === 'number') {
+        setVolume(Math.max(0, Math.min(1, payload.volume)));
+      }
+      if (typeof payload?.selectedPreset === 'string' && AMBIENT_PRESETS.some((preset) => preset.id === payload.selectedPreset)) {
+        setSelectedPreset(payload.selectedPreset as AmbientPresetId);
+      }
+    } catch {
+      // Ignore malformed local preferences.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(AMBIENT_AUDIO_STORAGE_KEY, JSON.stringify({ selectedPreset, volume }));
+  }, [selectedPreset, volume]);
+
+  useEffect(() => {
+    controllerRef.current?.setVolume(volume);
+  }, [volume]);
+
+  useEffect(() => () => {
+    controllerRef.current?.stop();
+    controllerRef.current = null;
+    audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+  }, []);
+
+  const currentPreset = AMBIENT_PRESETS.find((preset) => preset.id === selectedPreset) || AMBIENT_PRESETS[0];
+
+  const stopPlayback = () => {
+    controllerRef.current?.stop();
+    controllerRef.current = null;
+    setIsPlaying(false);
+  };
+
+  const startPlayback = async (presetId: AmbientPresetId) => {
+    try {
+      setAudioError('');
+      const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) {
+        throw new Error('当前浏览器不支持 Web Audio。');
+      }
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContextCtor();
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
+      controllerRef.current?.stop();
+      controllerRef.current = createAmbientController(audioContextRef.current, presetId);
+      controllerRef.current.setVolume(volume);
+      setSelectedPreset(presetId);
+      setIsPlaying(true);
+    } catch (error) {
+      setAudioError(error instanceof Error ? error.message : '背景音乐启动失败');
+      setIsPlaying(false);
+    }
+  };
+
+  const togglePlayback = async () => {
+    if (isPlaying) {
+      stopPlayback();
+      return;
+    }
+    await startPlayback(selectedPreset);
+  };
+
+  const handlePresetClick = async (presetId: AmbientPresetId) => {
+    setSelectedPreset(presetId);
+    if (isPlaying) {
+      await startPlayback(presetId);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className={cn(
+          "group relative rounded-2xl border px-3 py-2 transition-all",
+          isPlaying
+            ? "border-emerald-400/35 bg-emerald-500/12 text-emerald-50 shadow-[0_10px_30px_rgba(16,185,129,0.18)]"
+            : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+        )}
+        title="背景音乐"
+      >
+        <div className="flex items-center gap-2">
+          <Disc3 className={cn("h-4 w-4 transition-transform", isPlaying && "animate-spin")} />
+          <span className="hidden text-xs font-semibold sm:inline">{isPlaying ? currentPreset.label : '背景音乐'}</span>
+          {isPlaying ? <Volume2 className="h-3.5 w-3.5 text-emerald-200" /> : <Waves className="h-3.5 w-3.5 text-slate-300" />}
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ duration: 0.18 }}
+            className="absolute right-0 top-[calc(100%+0.75rem)] z-30 w-[22rem] max-w-[min(22rem,92vw)] overflow-hidden rounded-[1.6rem] border border-white/10 bg-slate-950/96 shadow-[0_28px_70px_rgba(15,23,42,0.7)] backdrop-blur-xl"
+          >
+            <div className="border-b border-white/10 px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Ambient Deck</p>
+                  <h3 className="mt-1 text-sm font-semibold text-white">登录后可直接播放的背景音乐</h3>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-400">白噪音和褐噪音是本地生成，后摇和游戏英语是轻量氛围合成，同时给你外部歌单跳转。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={togglePlayback}
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-2xl border transition-all",
+                    isPlaying
+                      ? "border-rose-400/30 bg-rose-500/14 text-rose-100 hover:bg-rose-500/20"
+                      : "border-emerald-400/30 bg-emerald-500/14 text-emerald-100 hover:bg-emerald-500/20"
+                  )}
+                  title={isPlaying ? '暂停播放' : '开始播放'}
+                >
+                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4 px-4 py-4">
+              <div className="grid grid-cols-2 gap-2">
+                {AMBIENT_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handlePresetClick(preset.id)}
+                    className={cn(
+                      "rounded-2xl border px-3 py-3 text-left transition-all",
+                      selectedPreset === preset.id
+                        ? preset.accent
+                        : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold">{preset.label}</span>
+                      {selectedPreset === preset.id && (
+                        <span className="rounded-full border border-white/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em]">当前</span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] leading-5 text-slate-300/80">{preset.blurb}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3">
+                <div className="flex items-center justify-between gap-3 text-[11px] font-semibold text-slate-300">
+                  <span>音量</span>
+                  <span>{Math.round(volume * 100)}%</span>
+                </div>
+                <div className="mt-3 flex items-center gap-3">
+                  {volume <= 0.001 ? <VolumeX className="h-4 w-4 text-slate-500" /> : <Volume2 className="h-4 w-4 text-slate-300" />}
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={volume}
+                    onChange={(event) => setVolume(Number(event.target.value))}
+                    className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/10 accent-teal-400"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-white">外部歌单跳转</p>
+                    <p className="mt-1 text-[11px] leading-5 text-slate-400">为了保持链接稳定，这里使用主题直达搜索页，点开就能切到 QQ 音乐或 Apple Music 对应歌单。</p>
+                  </div>
+                  <div className={cn("rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em]", currentPreset.accent)}>
+                    {currentPreset.label}
+                  </div>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => window.open(currentPreset.qqUrl, '_blank', 'noopener,noreferrer')}
+                    className="flex-1 rounded-xl border border-emerald-400/25 bg-emerald-500/12 px-3 py-2 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-500/18"
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      QQ 音乐
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.open(currentPreset.appleUrl, '_blank', 'noopener,noreferrer')}
+                    className="flex-1 rounded-xl border border-slate-300/20 bg-slate-800/80 px-3 py-2 text-xs font-semibold text-slate-100 transition-all hover:bg-slate-700"
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      Apple Music
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {audioError && (
+                <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-[11px] leading-5 text-rose-100">
+                  {audioError}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 const EMPTY_DIMENSION_GUIDE = [
   {
@@ -4278,6 +4808,7 @@ export default function App() {
           <span className="hidden text-xs font-semibold text-slate-300 sm:block">
             {isAdmin ? '管理员' : '用户'}：{authUser || loginUsername}
           </span>
+          <BackgroundAudioDock />
           {renderThemeSwitcher('compact')}
           <button
             onClick={clearAuth}
