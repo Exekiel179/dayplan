@@ -27,6 +27,7 @@ import {
   BatteryMedium,
   Coffee,
   TrendingUp,
+  RefreshCw,
   Play,
   Pause,
   Activity,
@@ -49,6 +50,7 @@ import {
   ExternalLink,
   Disc3,
   Waves,
+  Stars,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
@@ -75,12 +77,13 @@ import {
   IdeaNote,
 } from './types';
 
-type AppTheme = 'night' | 'day' | 'stardew';
+type AppTheme = 'night' | 'day' | 'stardew' | 'starlit';
 
 const THEME_OPTIONS: { id: AppTheme; label: string; shortLabel: string }[] = [
   { id: 'night', label: '夜间霓光', shortLabel: '夜' },
   { id: 'day', label: '白昼莫兰迪', shortLabel: '昼' },
   { id: 'stardew', label: '星露谷', shortLabel: '谷' },
+  { id: 'starlit', label: '静谧星空', shortLabel: '星' },
 ];
 
 function cn(...inputs: ClassValue[]) {
@@ -109,7 +112,7 @@ const COLLABORATION_LEVEL_OPTIONS: { value: TaskCollaborationLevel; label: strin
   { value: 'high', label: '协作程度高' },
 ];
 
-type AmbientPresetId = 'white_noise' | 'brown_noise' | 'post_rock' | 'gaming_english';
+type AmbientPresetId = 'white_noise' | 'brown_noise' | 'post_rock' | 'gaming_music';
 
 type AmbientPreset = {
   id: AmbientPresetId;
@@ -151,12 +154,12 @@ const AMBIENT_PRESETS: AmbientPreset[] = [
     appleUrl: 'https://music.apple.com/us/search?term=post-rock%20playlist',
   },
   {
-    id: 'gaming_english',
-    label: '游戏英语',
-    blurb: '偏游戏感的英文氛围节奏，适合提神和推进。',
+    id: 'gaming_music',
+    label: '游戏音乐',
+    blurb: '偏游戏感的推进节奏和合成器线条，适合提神和推进。',
     accent: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100',
-    qqUrl: 'https://y.qq.com/n/ryqq/search?w=%E6%B8%B8%E6%88%8F%20%E8%8B%B1%E6%96%87%20%E6%AD%8C%E5%8D%95',
-    appleUrl: 'https://music.apple.com/us/search?term=gaming%20english%20playlist',
+    qqUrl: 'https://y.qq.com/n/ryqq/search?w=%E6%B8%B8%E6%88%8F%E9%9F%B3%E4%B9%90%20%E6%AD%8C%E5%8D%95',
+    appleUrl: 'https://music.apple.com/us/search?term=video%20game%20music%20playlist',
   },
 ];
 
@@ -296,7 +299,7 @@ function createPostRockController(context: AudioContext): AmbientController {
   };
 }
 
-function createGamingEnglishController(context: AudioContext): AmbientController {
+function createGamingMusicController(context: AudioContext): AmbientController {
   const output = context.createGain();
   output.gain.value = 0.16;
   output.connect(context.destination);
@@ -396,7 +399,7 @@ function createAmbientController(context: AudioContext, presetId: AmbientPresetI
   if (presetId === 'white_noise') return createNoiseController(context, 'white');
   if (presetId === 'brown_noise') return createNoiseController(context, 'brown');
   if (presetId === 'post_rock') return createPostRockController(context);
-  return createGamingEnglishController(context);
+  return createGamingMusicController(context);
 }
 
 function BackgroundAudioDock() {
@@ -495,18 +498,14 @@ function BackgroundAudioDock() {
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className={cn(
-          "group relative rounded-2xl border px-3 py-2 transition-all",
-          isPlaying
-            ? "border-emerald-400/35 bg-emerald-500/12 text-emerald-50 shadow-[0_10px_30px_rgba(16,185,129,0.18)]"
-            : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
-        )}
+        data-playing={isPlaying ? 'true' : 'false'}
+        className="ambient-dock-trigger group relative rounded-2xl border px-3 py-2 transition-all"
         title="背景音乐"
       >
         <div className="flex items-center gap-2">
           <Disc3 className={cn("h-4 w-4 transition-transform", isPlaying && "animate-spin")} />
           <span className="hidden text-xs font-semibold sm:inline">{isPlaying ? currentPreset.label : '背景音乐'}</span>
-          {isPlaying ? <Volume2 className="h-3.5 w-3.5 text-emerald-200" /> : <Waves className="h-3.5 w-3.5 text-slate-300" />}
+          {isPlaying ? <Volume2 className="h-3.5 w-3.5" /> : <Waves className="h-3.5 w-3.5" />}
         </div>
       </button>
 
@@ -517,24 +516,20 @@ function BackgroundAudioDock() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.98 }}
             transition={{ duration: 0.18 }}
-            className="absolute right-0 top-[calc(100%+0.75rem)] z-30 w-[22rem] max-w-[min(22rem,92vw)] overflow-hidden rounded-[1.6rem] border border-white/10 bg-slate-950/96 shadow-[0_28px_70px_rgba(15,23,42,0.7)] backdrop-blur-xl"
+            className="ambient-dock-panel absolute right-0 top-[calc(100%+0.75rem)] z-30 w-[22rem] max-w-[min(22rem,92vw)] overflow-hidden rounded-[1.6rem] border backdrop-blur-xl"
           >
-            <div className="border-b border-white/10 px-4 py-4">
+            <div className="border-b border-white/8 px-4 py-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Ambient Deck</p>
-                  <h3 className="mt-1 text-sm font-semibold text-white">登录后可直接播放的背景音乐</h3>
-                  <p className="mt-1 text-[11px] leading-5 text-slate-400">白噪音和褐噪音是本地生成，后摇和游戏英语是轻量氛围合成，同时给你外部歌单跳转。</p>
+                  <p className="ambient-dock-kicker">Ambient Deck</p>
+                  <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">登录后可直接播放的背景音乐</h3>
+                  <p className="mt-1 text-[11px] leading-5 text-[color:var(--text-secondary)]">白噪音和褐噪音是本地生成，后摇和游戏音乐是轻量氛围合成，同时给你外部歌单跳转。</p>
                 </div>
                 <button
                   type="button"
                   onClick={togglePlayback}
-                  className={cn(
-                    "flex h-10 w-10 items-center justify-center rounded-2xl border transition-all",
-                    isPlaying
-                      ? "border-rose-400/30 bg-rose-500/14 text-rose-100 hover:bg-rose-500/20"
-                      : "border-emerald-400/30 bg-emerald-500/14 text-emerald-100 hover:bg-emerald-500/20"
-                  )}
+                  data-playing={isPlaying ? 'true' : 'false'}
+                  className="ambient-dock-toggle flex h-10 w-10 items-center justify-center rounded-2xl border transition-all"
                   title={isPlaying ? '暂停播放' : '开始播放'}
                 >
                   {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
@@ -549,12 +544,8 @@ function BackgroundAudioDock() {
                     key={preset.id}
                     type="button"
                     onClick={() => handlePresetClick(preset.id)}
-                    className={cn(
-                      "rounded-2xl border px-3 py-3 text-left transition-all",
-                      selectedPreset === preset.id
-                        ? preset.accent
-                        : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]"
-                    )}
+                    data-active={selectedPreset === preset.id ? 'true' : 'false'}
+                    className={cn("ambient-dock-option rounded-2xl border px-3 py-3 text-left transition-all", selectedPreset === preset.id && preset.accent)}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-semibold">{preset.label}</span>
@@ -562,18 +553,18 @@ function BackgroundAudioDock() {
                         <span className="rounded-full border border-white/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em]">当前</span>
                       )}
                     </div>
-                    <p className="mt-1 text-[11px] leading-5 text-slate-300/80">{preset.blurb}</p>
+                    <p className="mt-1 text-[11px] leading-5 text-[color:var(--text-secondary)]">{preset.blurb}</p>
                   </button>
                 ))}
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3">
-                <div className="flex items-center justify-between gap-3 text-[11px] font-semibold text-slate-300">
+              <div className="ambient-dock-card rounded-2xl border px-3 py-3">
+                <div className="flex items-center justify-between gap-3 text-[11px] font-semibold text-[color:var(--text-secondary)]">
                   <span>音量</span>
                   <span>{Math.round(volume * 100)}%</span>
                 </div>
                 <div className="mt-3 flex items-center gap-3">
-                  {volume <= 0.001 ? <VolumeX className="h-4 w-4 text-slate-500" /> : <Volume2 className="h-4 w-4 text-slate-300" />}
+                  {volume <= 0.001 ? <VolumeX className="h-4 w-4 text-[color:var(--text-muted)]" /> : <Volume2 className="h-4 w-4 text-[color:var(--text-secondary)]" />}
                   <input
                     type="range"
                     min={0}
@@ -581,18 +572,18 @@ function BackgroundAudioDock() {
                     step={0.01}
                     value={volume}
                     onChange={(event) => setVolume(Number(event.target.value))}
-                    className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/10 accent-teal-400"
+                    className="ambient-dock-slider h-1.5 flex-1 cursor-pointer appearance-none rounded-full"
                   />
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3">
+              <div className="ambient-dock-card rounded-2xl border px-3 py-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold text-white">外部歌单跳转</p>
-                    <p className="mt-1 text-[11px] leading-5 text-slate-400">为了保持链接稳定，这里使用主题直达搜索页，点开就能切到 QQ 音乐或 Apple Music 对应歌单。</p>
+                    <p className="text-xs font-semibold text-[color:var(--text-strong)]">外部歌单跳转</p>
+                    <p className="mt-1 text-[11px] leading-5 text-[color:var(--text-secondary)]">为了保持链接稳定，这里使用主题直达搜索页，点开就能切到 QQ 音乐或 Apple Music 对应歌单。</p>
                   </div>
-                  <div className={cn("rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em]", currentPreset.accent)}>
+                  <div className="ambient-dock-badge rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em]">
                     {currentPreset.label}
                   </div>
                 </div>
@@ -600,7 +591,7 @@ function BackgroundAudioDock() {
                   <button
                     type="button"
                     onClick={() => window.open(currentPreset.qqUrl, '_blank', 'noopener,noreferrer')}
-                    className="flex-1 rounded-xl border border-emerald-400/25 bg-emerald-500/12 px-3 py-2 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-500/18"
+                    className="ambient-dock-link ambient-dock-link-primary flex-1 rounded-xl border px-3 py-2 text-xs font-semibold transition-all"
                   >
                     <span className="inline-flex items-center gap-2">
                       QQ 音乐
@@ -610,7 +601,7 @@ function BackgroundAudioDock() {
                   <button
                     type="button"
                     onClick={() => window.open(currentPreset.appleUrl, '_blank', 'noopener,noreferrer')}
-                    className="flex-1 rounded-xl border border-slate-300/20 bg-slate-800/80 px-3 py-2 text-xs font-semibold text-slate-100 transition-all hover:bg-slate-700"
+                    className="ambient-dock-link flex-1 rounded-xl border px-3 py-2 text-xs font-semibold transition-all"
                   >
                     <span className="inline-flex items-center gap-2">
                       Apple Music
@@ -621,7 +612,7 @@ function BackgroundAudioDock() {
               </div>
 
               {audioError && (
-                <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-[11px] leading-5 text-rose-100">
+                <div className="ambient-dock-error rounded-2xl border px-3 py-2 text-[11px] leading-5">
                   {audioError}
                 </div>
               )}
@@ -698,6 +689,14 @@ type TechnicalRssPreset = {
   category: string;
   keywords: string[];
   reason: string;
+};
+type RssSyncPreviewItem = {
+  title: string;
+  url: string;
+  summary: string;
+  published_at: string;
+  source_title: string;
+  tags: string[];
 };
 
 const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
@@ -1723,6 +1722,40 @@ async function requestTechnicalRssPresets(token: string, limit = 90) {
     : [];
 }
 
+async function requestRssFeedSync(
+  payload: { name: string; url: string; category?: string; keywords?: string[]; limit?: number },
+  token: string
+) {
+  const response = await fetch('/api/world-news/rss/sync', {
+    method: 'POST',
+    headers: withAuthHeaders(token, {
+      'Content-Type': 'application/json',
+    }),
+    body: JSON.stringify(payload),
+  });
+
+  const rawPayload = await response.json().catch(() => ({} as {
+    error?: string;
+    fetched_at?: string;
+    feed_title?: string;
+    items?: RssSyncPreviewItem[];
+  }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(rawPayload?.error || `RSS 同步失败 (${response.status})`);
+  }
+
+  return {
+    fetched_at: typeof rawPayload?.fetched_at === 'string' ? rawPayload.fetched_at : '',
+    feed_title: typeof rawPayload?.feed_title === 'string' ? rawPayload.feed_title : payload.name,
+    items: Array.isArray(rawPayload?.items)
+      ? rawPayload.items.filter((item): item is RssSyncPreviewItem => Boolean(item && typeof item.title === 'string' && typeof item.url === 'string'))
+      : [],
+  };
+}
+
 async function loadTasksFromApi(token: string) {
   const response = await fetch('/api/tasks', {
     cache: 'no-store',
@@ -1750,6 +1783,24 @@ async function persistTasksToApi(payload: UserTaskData, token: string) {
   if (!response.ok) {
     throw new Error(`persist tasks failed: ${response.status}`);
   }
+}
+
+function formatCompactDateTime(value?: number | string | null) {
+  if (!value) return '未同步';
+  const date = typeof value === 'number' ? new Date(value) : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return '未同步';
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function summarizePreviewText(text: string, maxLength = 140) {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 async function loginByPassword(username: string, password: string): Promise<AuthResult> {
@@ -2057,26 +2108,30 @@ function WorldNewsView({
   setTasks,
 }: {
   rssFeeds: RSSFeed[];
-  setRssFeeds: (feeds: RSSFeed[]) => void;
+  setRssFeeds: React.Dispatch<React.SetStateAction<RSSFeed[]>>;
   newsItems: NewsItem[];
-  setNewsItems: (items: NewsItem[]) => void;
+  setNewsItems: React.Dispatch<React.SetStateAction<NewsItem[]>>;
   abilityModule: AbilityModuleSettings;
   spendSpecialReward: (moduleId: string, amount: number) => boolean;
   authToken: string;
   onUnauthorized: () => void;
   ideaNotes: IdeaNote[];
-  setIdeaNotes: (notes: IdeaNote[]) => void;
+  setIdeaNotes: React.Dispatch<React.SetStateAction<IdeaNote[]>>;
   tasks: Task[];
-  setTasks: (tasks: Task[]) => void;
+  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
 }) {
   const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
   const [selectedNote, setSelectedNote] = useState<IdeaNote | null>(null);
+  const [detailMode, setDetailMode] = useState<'news' | 'note' | null>(null);
   const [mainView, setMainView] = useState<'news' | 'notes'>('news');
+  const [noteFilter, setNoteFilter] = useState<'all' | IdeaNote['note_type']>('all');
   const [isAddingFeed, setIsAddingFeed] = useState(false);
   const [newFeedName, setNewFeedName] = useState('');
   const [newFeedUrl, setNewFeedUrl] = useState('');
   const [newFeedCategory, setNewFeedCategory] = useState('');
   const [isLoadingNews, setIsLoadingNews] = useState(false);
+  const [isSyncingAllFeeds, setIsSyncingAllFeeds] = useState(false);
+  const [syncingFeedIds, setSyncingFeedIds] = useState<string[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['默认']));
   const [isCreatingNote, setIsCreatingNote] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState('');
@@ -2098,11 +2153,59 @@ function WorldNewsView({
   const [isRssScouting, setIsRssScouting] = useState(false);
   const [isImportingTechPresets, setIsImportingTechPresets] = useState(false);
   const [techPresetMessage, setTechPresetMessage] = useState('');
-  const [newsSyncMessage, setNewsSyncMessage] = useState('');
+  const [rssActivityMessage, setRssActivityMessage] = useState('');
+  const [workspaceMessage, setWorkspaceMessage] = useState('');
+
+  const noteTypeOptions = [
+    { type: 'all', label: '全部', icon: BookOpen },
+    { type: 'idea', label: '想法', icon: Sparkles },
+    { type: 'resume_tracking', label: '简历', icon: Briefcase },
+    { type: 'general', label: '通用', icon: FileText },
+  ] as const;
+
+  const categories = Array.from(new Set(rssFeeds.map((item) => item.category || '默认'))).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const enabledFeeds = rssFeeds.filter((feed) => feed.enabled);
+  const unreadCount = newsItems.filter((item) => !item.is_read).length;
+  const importantCount = newsItems.filter((item) => item.is_important).length;
+  const filteredNotes = [...ideaNotes]
+    .filter((note) => noteFilter === 'all' ? true : note.note_type === noteFilter)
+    .sort((a, b) => b.updated_at - a.updated_at);
+  const sortedNews = [...newsItems].sort((a, b) => b.published_at - a.published_at);
+  const detailVisible = Boolean(detailMode === 'news' ? selectedNews : detailMode === 'note' ? selectedNote : null);
+
+  const closeDetail = () => {
+    setDetailMode(null);
+    setSelectedNews(null);
+    setSelectedNote(null);
+  };
+
+  const openNewsDetail = (news: NewsItem) => {
+    const nextNews = news.is_read ? newsItems : newsItems.map((item) => item.id === news.id ? { ...item, is_read: true } : item);
+    if (!news.is_read) {
+      setNewsItems(nextNews);
+    }
+    setSelectedNote(null);
+    setSelectedNews(nextNews.find((item) => item.id === news.id) || { ...news, is_read: true });
+    setDetailMode('news');
+  };
+
+  const openNoteDetail = (note: IdeaNote) => {
+    setSelectedNews(null);
+    setSelectedNote(note);
+    setDetailMode('note');
+  };
+
+  const toggleCategory = (category: string) => {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
 
   const addRssFeed = () => {
     if (!newFeedName.trim() || !newFeedUrl.trim()) return;
-
     const newFeed: RSSFeed = {
       id: `feed-${Date.now()}`,
       name: newFeedName.trim(),
@@ -2112,66 +2215,56 @@ function WorldNewsView({
       enabled: true,
       created_at: Date.now(),
     };
-
-    setRssFeeds([...rssFeeds, newFeed]);
+    setRssFeeds((prev) => [newFeed, ...prev]);
+    setExpandedCategories((prev) => new Set(prev).add(newFeed.category));
     setNewFeedName('');
     setNewFeedUrl('');
     setNewFeedCategory('');
     setIsAddingFeed(false);
+    setRssActivityMessage(`已添加订阅源：${newFeed.name}`);
   };
 
   const toggleFeed = (feedId: string) => {
-    setRssFeeds(rssFeeds.map(feed =>
-      feed.id === feedId ? { ...feed, enabled: !feed.enabled } : feed
-    ));
+    setRssFeeds((prev) => prev.map((feed) => feed.id === feedId ? { ...feed, enabled: !feed.enabled } : feed));
   };
 
   const deleteFeed = (feedId: string) => {
-    setRssFeeds(rssFeeds.filter(feed => feed.id !== feedId));
+    const target = rssFeeds.find((feed) => feed.id === feedId);
+    setRssFeeds((prev) => prev.filter((feed) => feed.id !== feedId));
+    setRssActivityMessage(target ? `已删除订阅源：${target.name}` : '已删除订阅源。');
   };
-
-  const toggleCategory = (category: string) => {
-    const newExpanded = new Set(expandedCategories);
-    if (newExpanded.has(category)) {
-      newExpanded.delete(category);
-    } else {
-      newExpanded.add(category);
-    }
-    setExpandedCategories(newExpanded);
-  };
-
-  const categories = Array.from(new Set(rssFeeds.map(f => f.category)));
 
   const toggleNewsImportant = (newsId: string) => {
-    setNewsItems(newsItems.map(item =>
-      item.id === newsId ? { ...item, is_important: !item.is_important } : item
-    ));
+    setNewsItems((prev) => prev.map((item) => item.id === newsId ? { ...item, is_important: !item.is_important } : item));
+    setSelectedNews((prev) => prev?.id === newsId ? { ...prev, is_important: !prev.is_important } : prev);
   };
 
   const toggleNewsRead = (newsId: string) => {
-    setNewsItems(newsItems.map(item =>
-      item.id === newsId ? { ...item, is_read: !item.is_read } : item
-    ));
+    setNewsItems((prev) => prev.map((item) => item.id === newsId ? { ...item, is_read: !item.is_read } : item));
+    setSelectedNews((prev) => prev?.id === newsId ? { ...prev, is_read: !prev.is_read } : prev);
   };
 
   const deleteNewsItem = (newsId: string) => {
-    setNewsItems(newsItems.filter((item) => item.id !== newsId));
-    setIdeaNotes(ideaNotes.map((note) => ({
-      ...note,
-      related_news_ids: note.related_news_ids.filter((id) => id !== newsId),
-    })));
-    setSelectedNews((prev) => (prev?.id === newsId ? null : prev));
+    setNewsItems((prev) => prev.filter((item) => item.id !== newsId));
+    setIdeaNotes((prev) => prev.map((note) => ({ ...note, related_news_ids: note.related_news_ids.filter((id) => id !== newsId) })));
+    if (selectedNews?.id === newsId) closeDetail();
+    setWorkspaceMessage('已删除新闻。');
+  };
+
+  const deleteNote = (noteId: string) => {
+    const target = ideaNotes.find((note) => note.id === noteId);
+    setIdeaNotes((prev) => prev.filter((note) => note.id !== noteId));
+    setNewsItems((prev) => prev.map((item) => item.note_ids.includes(noteId) ? { ...item, note_ids: item.note_ids.filter((id) => id !== noteId) } : item));
+    if (selectedNote?.id === noteId) closeDetail();
+    setWorkspaceMessage(target ? `已删除笔记：${target.title}` : '已删除笔记。');
   };
 
   const clearAllNews = () => {
     if (newsItems.length === 0) return;
     setNewsItems([]);
-    setIdeaNotes(ideaNotes.map((note) => (
-      note.related_news_ids.length > 0
-        ? { ...note, related_news_ids: [] }
-        : note
-    )));
-    setSelectedNews(null);
+    setIdeaNotes((prev) => prev.map((note) => note.related_news_ids.length > 0 ? { ...note, related_news_ids: [] } : note));
+    closeDetail();
+    setWorkspaceMessage('新闻列表已清空。');
   };
 
   const importFeeds = (feedsToImport: Array<{ name: string; url: string; category?: string; keywords?: string[] }>) => {
@@ -2179,7 +2272,6 @@ function WorldNewsView({
     const createdAt = Date.now();
     const nextCategories = new Set<string>();
     const additions: RSSFeed[] = [];
-
     feedsToImport.forEach((feed, index) => {
       const normalizedUrl = normalizeFeedUrl(feed.url);
       if (!normalizedUrl || existingUrls.has(normalizedUrl)) return;
@@ -2196,21 +2288,20 @@ function WorldNewsView({
         created_at: createdAt,
       });
     });
-
     if (additions.length > 0) {
-      setRssFeeds([...rssFeeds, ...additions]);
+      setRssFeeds((prev) => [...additions, ...prev]);
       setExpandedCategories((prev) => {
         const next = new Set(prev);
         nextCategories.forEach((category) => next.add(category));
         return next;
       });
     }
-
     return additions.length;
   };
 
   const addSuggestedFeed = (feed: AIRssScoutSuggestion) => {
-    importFeeds([feed]);
+    const addedCount = importFeeds([feed]);
+    if (addedCount > 0) setRssActivityMessage(`已采纳订阅源：${feed.name}`);
   };
 
   const importTechnicalPresets = async (limit: number) => {
@@ -2219,11 +2310,7 @@ function WorldNewsView({
     try {
       const presets = await requestTechnicalRssPresets(authToken, limit);
       const addedCount = importFeeds(presets);
-      setTechPresetMessage(
-        addedCount > 0
-          ? `已导入 ${addedCount} 个技术 RSS 种子。`
-          : '这些技术 RSS 已经都在当前订阅列表里了。'
-      );
+      setTechPresetMessage(addedCount > 0 ? `已导入 ${addedCount} 个技术 RSS 种子。` : '这些技术 RSS 已经都在当前订阅列表里了。');
     } catch (err) {
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {
         onUnauthorized();
@@ -2242,24 +2329,20 @@ function WorldNewsView({
       setRssScoutError('先输入要找的主题。');
       return;
     }
-
     const paymentModule = SPECIAL_ABILITY_MODULES.find((item) => item.id === rssScoutPayWith) || SPECIAL_ABILITY_MODULES[0];
     if (!paymentModule) {
       setRssScoutError('当前没有可用的激励方式。');
       return;
     }
-
     const balance = Number(abilityModule.special_totals[paymentModule.id] || 0);
     if (balance < RSS_SCOUT_COST) {
       setRssScoutError(`${paymentModule.label}余额不足，至少需要 ${RSS_SCOUT_COST} ${paymentModule.unit}。`);
       return;
     }
-
     setIsRssScouting(true);
     setRssScoutError('');
     setRssScoutSummary('');
     setRssScoutResults([]);
-
     try {
       const result = await requestAIRssScout({ topic, guidance }, authToken);
       const charged = spendSpecialReward(paymentModule.id, RSS_SCOUT_COST);
@@ -2267,9 +2350,7 @@ function WorldNewsView({
         setRssScoutError('激励余额刚发生变化，请重试。');
         return;
       }
-      setRssScoutSummary(
-        result.summary || `已按“${topic}”筛出 ${result.feeds.length} 个 RSS 候选，建议挑 2 到 4 个先订阅。`
-      );
+      setRssScoutSummary(result.summary || `已按“${topic}”筛出 ${result.feeds.length} 个 RSS 候选。`);
       setRssScoutResults(result.feeds);
       if (result.feeds.length === 0) {
         setRssScoutError('这次没有筛到足够可靠的订阅源，换一个方向词再试。');
@@ -2285,49 +2366,136 @@ function WorldNewsView({
     }
   };
 
+  const applyIncomingNews = (incomingItems: NewsItem[], replacedSourceKeys: Set<string>) => {
+    const relatedNewsIds = new Set(ideaNotes.flatMap((note) => note.related_news_ids));
+    let nextNewsItems: NewsItem[] = [];
+    setNewsItems((prev) => {
+      const currentItemsByFingerprint = new Map(prev.map((item) => {
+        const sourceKey = item.feed_id || item.tags[0] || 'world';
+        return [buildWorldNewsFingerprint(item.title, item.url, sourceKey), item] as const;
+      }));
+      const normalizedIncoming = incomingItems.map((item, index) => {
+        const sourceKey = item.feed_id || item.tags[0] || 'world';
+        const fingerprint = buildWorldNewsFingerprint(item.title, item.url, sourceKey);
+        const existing = currentItemsByFingerprint.get(fingerprint);
+        const fallbackTs = Date.now() - index * 1000;
+        return {
+          ...item,
+          id: existing?.id || item.id || `news-${sourceKey}-${fingerprint}`,
+          is_important: existing?.is_important || item.is_important,
+          is_read: existing?.is_read || item.is_read,
+          note_ids: existing?.note_ids || item.note_ids || [],
+          published_at: item.published_at || existing?.published_at || fallbackTs,
+          created_at: existing?.created_at || item.created_at || fallbackTs,
+        };
+      });
+      const nextFingerprints = new Set(normalizedIncoming.map((item) => {
+        const sourceKey = item.feed_id || item.tags[0] || 'world';
+        return buildWorldNewsFingerprint(item.title, item.url, sourceKey);
+      }));
+      const preservedItems = prev.filter((item) => {
+        const sourceKey = item.feed_id || item.tags[0] || 'world';
+        if (!replacedSourceKeys.has(sourceKey)) return true;
+        const fingerprint = buildWorldNewsFingerprint(item.title, item.url, sourceKey);
+        if (nextFingerprints.has(fingerprint)) return false;
+        return item.is_important || relatedNewsIds.has(item.id);
+      });
+      nextNewsItems = [...normalizedIncoming, ...preservedItems].sort((a, b) => b.published_at - a.published_at);
+      return nextNewsItems;
+    });
+    setSelectedNews((prev) => prev ? nextNewsItems.find((item) => item.id === prev.id) || null : null);
+    return nextNewsItems;
+  };
+
+  const syncSingleFeed = async (feed: RSSFeed, silent = false) => {
+    setSyncingFeedIds((prev) => prev.includes(feed.id) ? prev : [...prev, feed.id]);
+    try {
+      const result = await requestRssFeedSync({
+        name: feed.name,
+        url: feed.url,
+        category: feed.category,
+        keywords: feed.keywords,
+        limit: 8,
+      }, authToken);
+      const sourceKey = `rss:${feed.id}`;
+      const createdAt = Date.now();
+      const incomingItems: NewsItem[] = result.items.map((item, index) => {
+        const publishedAt = Date.parse(item.published_at);
+        return {
+          id: `news-${sourceKey}-${index}`,
+          feed_id: sourceKey,
+          title: item.title,
+          content: summarizePreviewText(item.summary || item.source_title || item.title, 180),
+          url: item.url,
+          published_at: Number.isNaN(publishedAt) ? createdAt - index * 1000 : publishedAt,
+          is_important: false,
+          is_read: false,
+          tags: Array.from(new Set(['RSS', feed.category, feed.name, ...feed.keywords.slice(0, 2)].filter(Boolean))),
+          note_ids: [],
+          created_at: createdAt - index * 1000,
+        };
+      });
+      applyIncomingNews(incomingItems, new Set([sourceKey]));
+      setRssFeeds((prev) => prev.map((item) => item.id === feed.id ? { ...item, last_fetched_at: Date.now() } : item));
+      if (!silent) setRssActivityMessage(`已从 ${result.feed_title || feed.name} 同步 ${incomingItems.length} 条内容。`);
+      return incomingItems.length;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+        onUnauthorized();
+        return 0;
+      }
+      if (!silent) setRssActivityMessage(error instanceof Error ? error.message : 'RSS 同步失败。');
+      throw error;
+    } finally {
+      setSyncingFeedIds((prev) => prev.filter((id) => id !== feed.id));
+    }
+  };
+
+  const syncEnabledFeeds = async () => {
+    if (enabledFeeds.length === 0) {
+      setRssActivityMessage('先启用至少一个订阅源。');
+      return;
+    }
+    setIsSyncingAllFeeds(true);
+    setRssActivityMessage('');
+    let successCount = 0;
+    let syncedItems = 0;
+    const failedFeeds: string[] = [];
+    for (const feed of enabledFeeds) {
+      try {
+        syncedItems += await syncSingleFeed(feed, true);
+        successCount += 1;
+      } catch {
+        failedFeeds.push(feed.name);
+      }
+    }
+    setIsSyncingAllFeeds(false);
+    setRssActivityMessage(failedFeeds.length === 0 ? `已同步 ${successCount} 个订阅源，共导入 ${syncedItems} 条新闻。` : `已同步 ${successCount} 个订阅源，共导入 ${syncedItems} 条新闻；失败：${failedFeeds.join('、')}`);
+  };
+
   const createNoteFromNews = (news: NewsItem) => {
+    const timestamp = Date.now();
     const newNote: IdeaNote = {
-      id: `note-${Date.now()}`,
+      id: `note-${timestamp}`,
       title: news.title,
-      content: `# ${news.title}\n\n${news.content}\n\n[原文链接](${news.url})`,
+      content: `# ${news.title}\n\n${news.content}\n\n${news.url ? `[原文链接](${news.url})` : ''}`.trim(),
       tags: news.tags,
       related_news_ids: [news.id],
       note_type: 'general',
-      created_at: Date.now(),
-      updated_at: Date.now(),
+      created_at: timestamp,
+      updated_at: timestamp,
     };
-    setIdeaNotes([...ideaNotes, newNote]);
-    setSelectedNote(newNote);
+    setIdeaNotes((prev) => [newNote, ...prev]);
+    setNewsItems((prev) => prev.map((item) => item.id === news.id ? { ...item, note_ids: Array.from(new Set([...item.note_ids, newNote.id])) } : item));
     setMainView('notes');
+    setNoteFilter('all');
+    setSelectedNews(null);
+    setSelectedNote(newNote);
+    setDetailMode('note');
+    setWorkspaceMessage('已从新闻生成笔记。');
   };
 
-  const createNewNote = () => {
-    if (!newNoteTitle.trim()) return;
-
-    const newNote: IdeaNote = {
-      id: `note-${Date.now()}`,
-      title: newNoteTitle.trim(),
-      content: newNoteContent.trim(),
-      tags: newNoteTags,
-      related_news_ids: [],
-      note_type: newNoteType,
-      created_at: Date.now(),
-      updated_at: Date.now(),
-    };
-
-    // 如果是简历投递类型，添加元数据
-    if (newNoteType === 'resume_tracking') {
-      newNote.metadata = {
-        company: resumeCompany.trim(),
-        position: resumePosition.trim(),
-        status: resumeStatus,
-        applied_at: resumeAppliedDate ? new Date(resumeAppliedDate).getTime() : Date.now(),
-        deadline: resumeDeadline ? new Date(resumeDeadline).getTime() : undefined,
-      };
-    }
-
-    setIdeaNotes([...ideaNotes, newNote]);
-    setSelectedNote(newNote);
+  const resetNoteComposer = () => {
     setIsCreatingNote(false);
     setNewNoteTitle('');
     setNewNoteContent('');
@@ -2340,44 +2508,64 @@ function WorldNewsView({
     setResumeDeadline('');
   };
 
-  const addNoteTag = () => {
-    if (newNoteTagInput.trim() && !newNoteTags.includes(newNoteTagInput.trim())) {
-      setNewNoteTags([...newNoteTags, newNoteTagInput.trim()]);
-      setNewNoteTagInput('');
+  const createNewNote = () => {
+    if (!newNoteTitle.trim()) return;
+    const timestamp = Date.now();
+    const newNote: IdeaNote = {
+      id: `note-${timestamp}`,
+      title: newNoteTitle.trim(),
+      content: newNoteContent.trim(),
+      tags: newNoteTags,
+      related_news_ids: [],
+      note_type: newNoteType,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    if (newNoteType === 'resume_tracking') {
+      newNote.metadata = {
+        company: resumeCompany.trim(),
+        position: resumePosition.trim(),
+        status: resumeStatus,
+        applied_at: resumeAppliedDate ? new Date(resumeAppliedDate).getTime() : timestamp,
+        deadline: resumeDeadline ? new Date(resumeDeadline).getTime() : undefined,
+      };
     }
+    setIdeaNotes((prev) => [newNote, ...prev]);
+    setNoteFilter(newNote.note_type);
+    setSelectedNote(newNote);
+    setSelectedNews(null);
+    setDetailMode('note');
+    resetNoteComposer();
+    setWorkspaceMessage('笔记已保存。');
+  };
+
+  const addNoteTag = () => {
+    const nextTag = newNoteTagInput.trim();
+    if (!nextTag || newNoteTags.includes(nextTag)) return;
+    setNewNoteTags((prev) => [...prev, nextTag]);
+    setNewNoteTagInput('');
   };
 
   const removeNoteTag = (tag: string) => {
-    setNewNoteTags(newNoteTags.filter(t => t !== tag));
+    setNewNoteTags((prev) => prev.filter((item) => item !== tag));
   };
 
   const convertNoteToTask = (note: IdeaNote) => {
-    // 解析笔记内容，提取任务信息
-    const lines = note.content.split('\n').filter(line => line.trim());
-    const description = lines.slice(0, 3).join('\n'); // 取前3行作为描述
-
-    // 检查是否有截止日期信息
+    const lines = note.content.split('\n').filter((line) => line.trim());
+    const description = lines.slice(0, 3).join('\n');
     let deadline: number | null = null;
     const dateMatch = note.content.match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2})|(\d{1,2}[-/]\d{1,2})/);
     if (dateMatch) {
-      try {
-        const dateStr = dateMatch[0];
-        const date = new Date(dateStr);
-        if (!isNaN(date.getTime())) {
-          deadline = date.getTime();
-        }
-      } catch (e) {
-        // 忽略日期解析错误
-      }
+      const parsed = new Date(dateMatch[0]);
+      if (!Number.isNaN(parsed.getTime())) deadline = parsed.getTime();
     }
-
-    // 创建新任务
+    const timestamp = Date.now();
     const newTask: Task = {
-      id: `task-${Date.now()}`,
+      id: `task-${timestamp}`,
       title: note.title,
-      description: description,
-      x: 50, // 默认中等重要性
-      y: deadline ? 70 : 30, // 有截止日期则较紧急
+      description,
+      x: 50,
+      y: deadline ? 70 : 30,
       status: 'pending',
       timeline: deadline ? 'temporary' : 'long_term',
       dependency_ids: [],
@@ -2385,347 +2573,188 @@ function WorldNewsView({
       actual_minutes: 0,
       deadline_at: deadline,
       steps: [],
-      created_at: Date.now(),
+      created_at: timestamp,
     };
-
-    // 如果是简历投递类型，添加特殊处理
     if (note.note_type === 'resume_tracking' && note.metadata) {
       newTask.title = `${note.metadata.company} - ${note.metadata.position}`;
       newTask.description = `公司：${note.metadata.company}\n职位：${note.metadata.position}\n状态：${note.metadata.status || 'pending'}`;
       if (note.metadata.deadline) {
         newTask.deadline_at = note.metadata.deadline;
-        newTask.y = 80; // 简历截止日期通常很紧急
+        newTask.y = 80;
       }
     }
-
-    setTasks([...tasks, newTask]);
-
-    // 更新笔记，关联任务ID
-    const updatedNote = { ...note, related_task_id: newTask.id };
-    setIdeaNotes(ideaNotes.map(n => n.id === note.id ? updatedNote : n));
-
-    // 提示用户
-    alert(`已创建任务：${newTask.title}`);
+    setTasks((prev) => [...prev, newTask]);
+    const updatedNote = { ...note, related_task_id: newTask.id, updated_at: Date.now() };
+    setIdeaNotes((prev) => prev.map((item) => item.id === note.id ? updatedNote : item));
+    setSelectedNote(updatedNote);
+    setDetailMode('note');
+    setWorkspaceMessage(`已创建任务：${newTask.title}`);
   };
 
   const fetchTrendradarNews = async () => {
     setIsLoadingNews(true);
-    setNewsSyncMessage('');
+    setWorkspaceMessage('');
     try {
       const result = await requestTrendradarLatestNews(authToken, 60);
-      const relatedNewsIds = new Set(ideaNotes.flatMap((note) => note.related_news_ids));
-      const currentItemsByFingerprint = new Map(newsItems.map((item) => {
-        const sourceKey = item.feed_id || item.tags[0] || 'world';
-        return [buildWorldNewsFingerprint(item.title, item.url, sourceKey), item] as const;
-      }));
-      const nextFingerprints = new Set<string>();
       const createdAt = Date.now();
-
-      const latestNews: NewsItem[] = result.items.map((item, index) => {
+      const incomingItems: NewsItem[] = result.items.map((item, index) => {
         const sourceKey = `trendradar:${item.platform_id}`;
-        const url = item.mobile_url || item.url || '';
-        const fingerprint = buildWorldNewsFingerprint(item.title, url, sourceKey);
-        nextFingerprints.add(fingerprint);
-        const existing = currentItemsByFingerprint.get(fingerprint);
         const freshnessTag = result.source === 'trendradar-local' ? '本地快照' : '实时热点';
-
+        const url = item.mobile_url || item.url || '';
         return {
-          id: existing?.id || `news-${sourceKey}-${fingerprint}`,
+          id: `news-${sourceKey}-${index}`,
           feed_id: sourceKey,
           title: item.title,
           content: `${item.platform_name} 热榜第 ${item.rank} 位 · ${item.timestamp}`,
           url,
-          published_at: existing?.published_at || createdAt + index,
-          is_important: existing?.is_important || false,
-          is_read: existing?.is_read || false,
+          published_at: createdAt - index * 1000,
+          is_important: false,
+          is_read: false,
           tags: Array.from(new Set([item.platform_name, 'TrendRadar', freshnessTag])),
-          note_ids: existing?.note_ids || [],
-          created_at: existing?.created_at || createdAt + index,
+          note_ids: [],
+          created_at: createdAt - index * 1000,
         };
       });
-
-      const preservedItems = newsItems.filter((item) => {
-        const sourceKey = item.feed_id || item.tags[0] || 'world';
-        const fingerprint = buildWorldNewsFingerprint(item.title, item.url, sourceKey);
-        if (nextFingerprints.has(fingerprint)) return false;
-        return item.is_important || relatedNewsIds.has(item.id);
-      });
-
-      const nextNewsItems = [...latestNews, ...preservedItems];
-      setNewsItems(nextNewsItems);
-      setSelectedNews((prev) => {
-        if (!prev) return null;
-        const sourceKey = prev.feed_id || prev.tags[0] || 'world';
-        const fingerprint = buildWorldNewsFingerprint(prev.title, prev.url, sourceKey);
-        return nextNewsItems.find((item) => {
-          const currentSourceKey = item.feed_id || item.tags[0] || 'world';
-          return buildWorldNewsFingerprint(item.title, item.url, currentSourceKey) === fingerprint;
-        }) || null;
-      });
-      setNewsSyncMessage(
-        result.source === 'trendradar-local'
-          ? `已同步 ${latestNews.length} 条 TrendRadar 热榜，本次使用本地快照回退。`
-          : `已同步 ${latestNews.length} 条 TrendRadar 实时热榜。`
-      );
+      const sourceKeys = new Set(incomingItems.map((item) => item.feed_id || 'world'));
+      applyIncomingNews(incomingItems, sourceKeys);
+      setWorkspaceMessage(result.source === 'trendradar-local' ? `已同步 ${incomingItems.length} 条 TrendRadar 热榜，本次使用本地快照回退。` : `已同步 ${incomingItems.length} 条 TrendRadar 实时热榜。`);
     } catch (error) {
-      console.error('获取新闻失败:', error);
       if (error instanceof Error && error.message === 'UNAUTHORIZED') {
         onUnauthorized();
         return;
       }
-      setNewsSyncMessage(error instanceof Error ? error.message : 'TrendRadar 获取失败');
+      setWorkspaceMessage(error instanceof Error ? error.message : 'TrendRadar 获取失败');
     } finally {
       setIsLoadingNews(false);
     }
   };
 
   return (
-    <div className="flex-1 overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-      <div className="h-full flex">
-        {/* Left Sidebar - Enhanced Design */}
-        <motion.div
-          initial={{ x: -20, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ duration: 0.4 }}
-          className="w-72 border-r border-white/[0.08] backdrop-blur-xl bg-gradient-to-b from-slate-950/90 to-slate-900/90 overflow-y-auto"
+    <div className="world-news-shell flex h-full min-h-0 flex-1 overflow-hidden">
+      <div className="grid h-full w-full min-h-0 gap-4 p-4 xl:grid-cols-[19rem_minmax(0,1fr)] xl:p-5">
+        <motion.aside
+          initial={{ opacity: 0, x: -18 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+          className="world-news-panel min-h-0 overflow-hidden rounded-[2rem]"
         >
-          <div className="p-5">
-            {/* RSS Header */}
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-gradient-to-br from-teal-500/20 to-cyan-500/20 border border-teal-500/30 shadow-lg shadow-teal-500/10">
-                  <Rss className="h-4 w-4 text-teal-300" />
-                </div>
-                <h2 className="text-sm font-bold bg-gradient-to-r from-teal-200 to-cyan-200 bg-clip-text text-transparent">
-                  RSS 订阅源
-                </h2>
-              </div>
-              <motion.button
-                whileHover={{ scale: 1.05, rotate: 90 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setIsAddingFeed(true)}
-                className="p-2 rounded-xl bg-gradient-to-br from-teal-500/10 to-cyan-500/10 border border-teal-500/20 hover:border-teal-500/40 transition-all shadow-lg hover:shadow-teal-500/20"
-                title="添加订阅源"
-              >
-                <Plus className="h-4 w-4 text-teal-300" />
-              </motion.button>
-            </div>
-
-            {/* Add Feed Form - Enhanced */}
-            <AnimatePresence>
-              {isAddingFeed && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                  transition={{ duration: 0.2 }}
-                  className="mb-5 p-4 rounded-2xl border border-teal-500/30 bg-gradient-to-br from-teal-500/10 via-cyan-500/5 to-teal-500/10 backdrop-blur-sm shadow-xl space-y-3"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-teal-200">新建订阅源</span>
-                    <motion.button
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                      onClick={() => setIsAddingFeed(false)}
-                      className="p-1 rounded-lg hover:bg-white/10 transition-colors"
-                    >
-                      <X className="h-3 w-3 text-slate-400" />
-                    </motion.button>
+          <div className="world-news-scroll h-full overflow-y-auto px-4 py-4">
+            <div className="grid gap-4">
+              <div className="border-b border-white/8 pb-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="world-news-kicker">订阅控制台</p>
+                    <h2 className="mt-1 text-lg font-semibold text-[color:var(--text-strong)]">RSS 订阅源</h2>
+                    <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">手动同步、导入种子、按需展开详情。</p>
                   </div>
-                  <input
-                    type="text"
-                    placeholder="订阅源名称"
-                    value={newFeedName}
-                    onChange={(e) => setNewFeedName(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/10 bg-slate-900/80 backdrop-blur-sm text-white placeholder:text-slate-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20 transition-all"
-                  />
-                  <input
-                    type="text"
-                    placeholder="RSS URL"
-                    value={newFeedUrl}
-                    onChange={(e) => setNewFeedUrl(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/10 bg-slate-900/80 backdrop-blur-sm text-white placeholder:text-slate-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20 transition-all"
-                  />
-                  <input
-                    type="text"
-                    placeholder="分类（可选）"
-                    value={newFeedCategory}
-                    onChange={(e) => setNewFeedCategory(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/10 bg-slate-900/80 backdrop-blur-sm text-white placeholder:text-slate-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20 transition-all"
-                  />
-                  <div className="flex gap-2">
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={addRssFeed}
-                      className="flex-1 px-3 py-2 text-xs rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 text-white font-semibold shadow-lg shadow-teal-500/30 hover:shadow-teal-500/50 transition-all"
-                    >
-                      添加
-                    </motion.button>
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => setIsAddingFeed(false)}
-                      className="flex-1 px-3 py-2 text-xs rounded-xl bg-white/10 backdrop-blur-sm text-slate-300 hover:bg-white/20 transition-all font-semibold"
-                    >
-                      取消
-                    </motion.button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div className="mb-5 rounded-2xl border border-violet-500/25 bg-gradient-to-br from-violet-500/14 via-slate-950/55 to-cyan-500/10 p-4 shadow-xl shadow-violet-500/10">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-violet-200/70">AI 订阅侦察</p>
-                  <h3 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
-                    <Brain className="h-4 w-4 text-violet-300" />
-                    找主题 RSS
-                  </h3>
-                  <p className="mt-1 text-[11px] leading-5 text-slate-300/80">
-                    输入主题和提示方向，用功德或财富换一轮可选 RSS 候选。
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingFeed((prev) => !prev)}
+                    className="world-news-icon-button"
+                    title="添加订阅源"
+                  >
+                    {isAddingFeed ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                  </button>
                 </div>
-                <span className="rounded-xl border border-violet-300/20 bg-violet-500/12 px-2.5 py-1 text-[10px] font-bold text-violet-100">
-                  {RSS_SCOUT_COST} 点 / 次
-                </span>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="world-news-pill">{rssFeeds.length} 个源</span>
+                  <span className="world-news-pill">{enabledFeeds.length} 个启用中</span>
+                  <span className="world-news-pill">{newsItems.length} 条消息</span>
+                </div>
               </div>
 
-              <div className="mt-3 space-y-3">
-                <input
-                  type="text"
-                  value={rssScoutTopic}
-                  onChange={(e) => setRssScoutTopic(e.target.value)}
-                  placeholder="主题，例如：AI 安全 / 游戏开发 / 独立博客"
-                  className="w-full rounded-xl border border-white/10 bg-slate-950/75 px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition-all"
-                />
-                <textarea
-                  value={rssScoutGuidance}
-                  onChange={(e) => setRssScoutGuidance(e.target.value)}
-                  rows={3}
-                  placeholder="提示方向，例如：优先中文、技术深度高、更新稳定、避免营销号"
-                  className="w-full resize-none rounded-xl border border-white/10 bg-slate-950/75 px-3 py-2 text-xs leading-5 text-white placeholder:text-slate-500 focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition-all"
-                />
-
-                <div className="grid grid-cols-2 gap-2">
-                  {SPECIAL_ABILITY_MODULES.map((module) => {
-                    const balance = Number((abilityModule.special_totals[module.id] || 0).toFixed(1));
-                    const isActive = rssScoutPayWith === module.id;
-                    const canAfford = balance >= RSS_SCOUT_COST;
-
-                    return (
-                      <button
-                        key={module.id}
-                        type="button"
-                        onClick={() => setRssScoutPayWith(module.id)}
-                        className={cn(
-                          "rounded-xl border px-3 py-2 text-left transition-all",
-                          isActive
-                            ? "border-violet-400/50 bg-violet-500/18 text-white shadow-lg shadow-violet-500/10"
-                            : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-violet-400/30 hover:bg-violet-500/8"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold">{module.label}</span>
-                          <span className={cn(
-                            "rounded-full px-2 py-0.5 text-[10px] font-bold",
-                            canAfford
-                              ? "bg-emerald-500/18 text-emerald-100"
-                              : "bg-amber-500/18 text-amber-100"
-                          )}>
-                            {balance}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-[10px] text-slate-400">{module.unit}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={runRssScout}
-                  disabled={isRssScouting || !rssScoutTopic.trim()}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500/88 to-cyan-500/88 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-500/25 transition-all hover:shadow-violet-500/35 disabled:cursor-not-allowed disabled:opacity-55"
-                >
-                  {isRssScouting ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      侦察中...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4" />
-                      支付 {RSS_SCOUT_COST} 点调用 AI
-                    </>
-                  )}
-                </button>
-
-                {rssScoutError && (
-                  <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
-                    {rssScoutError}
-                  </div>
+              <AnimatePresence initial={false}>
+                {isAddingFeed && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2, ease: 'easeOut' }}
+                    className="world-news-section"
+                  >
+                    <div className="grid gap-3">
+                      <input type="text" placeholder="订阅源名称" value={newFeedName} onChange={(event) => setNewFeedName(event.target.value)} className="world-news-input" />
+                      <input type="text" placeholder="RSS / Atom URL" value={newFeedUrl} onChange={(event) => setNewFeedUrl(event.target.value)} className="world-news-input" />
+                      <input type="text" placeholder="分类（可选）" value={newFeedCategory} onChange={(event) => setNewFeedCategory(event.target.value)} className="world-news-input" />
+                      <div className="flex gap-2">
+                        <button type="button" onClick={addRssFeed} className="world-news-button world-news-button-accent flex-1">保存订阅源</button>
+                        <button type="button" onClick={() => setIsAddingFeed(false)} className="world-news-button flex-1">取消</button>
+                      </div>
+                    </div>
+                  </motion.div>
                 )}
+              </AnimatePresence>
 
-                {(rssScoutSummary || rssScoutResults.length > 0) && (
-                  <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
-                    {rssScoutSummary && (
-                      <p className="text-[11px] leading-5 text-slate-300">{rssScoutSummary}</p>
-                    )}
-                    <div className="space-y-2">
+              <div className="world-news-section">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="world-news-kicker">手动同步</p>
+                    <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">消息详情默认关闭</h3>
+                    <p className="mt-1 text-[11px] leading-5 text-[color:var(--text-secondary)]">按需拉 RSS 或 TrendRadar，详情只在点击时从右侧抽出。</p>
+                  </div>
+                  <RefreshCw className="mt-1 h-4 w-4 text-[color:var(--accent)]" />
+                </div>
+                <div className="mt-3 grid gap-2">
+                  <button type="button" onClick={syncEnabledFeeds} disabled={isSyncingAllFeeds || enabledFeeds.length === 0} className="world-news-button world-news-button-accent justify-center">
+                    {isSyncingAllFeeds ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    同步已启用 RSS
+                  </button>
+                  <button type="button" onClick={fetchTrendradarNews} disabled={isLoadingNews} className="world-news-button justify-center">
+                    {isLoadingNews ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+                    同步 TrendRadar
+                  </button>
+                </div>
+                {rssActivityMessage && <div className="world-news-inline-message mt-3">{rssActivityMessage}</div>}
+              </div>
+
+              <div className="world-news-section">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="world-news-kicker">AI 订阅侦察</p>
+                    <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">按主题找 RSS</h3>
+                  </div>
+                  <span className="world-news-pill">{RSS_SCOUT_COST} 点 / 次</span>
+                </div>
+                <div className="mt-3 grid gap-3">
+                  <input type="text" value={rssScoutTopic} onChange={(event) => setRssScoutTopic(event.target.value)} placeholder="主题，例如：独立游戏 / AI 安全 / 开发博客" className="world-news-input" />
+                  <textarea value={rssScoutGuidance} onChange={(event) => setRssScoutGuidance(event.target.value)} rows={3} placeholder="提示方向，例如：优先中文、长期更新、少营销号" className="world-news-input min-h-24 resize-none" />
+                  <div className="grid grid-cols-2 gap-2">
+                    {SPECIAL_ABILITY_MODULES.map((module) => {
+                      const balance = Number((abilityModule.special_totals[module.id] || 0).toFixed(1));
+                      const active = rssScoutPayWith === module.id;
+                      return (
+                        <button key={module.id} type="button" onClick={() => setRssScoutPayWith(module.id)} data-active={active ? 'true' : 'false'} className="world-news-choice">
+                          <span className="text-xs font-semibold">{module.label}</span>
+                          <span className="text-[10px] text-[color:var(--text-secondary)]">{balance} {module.unit}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button type="button" onClick={runRssScout} disabled={isRssScouting || !rssScoutTopic.trim()} className="world-news-button world-news-button-accent justify-center">
+                    {isRssScouting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    调用 AI 侦察
+                  </button>
+                  {rssScoutError && <div className="world-news-inline-message world-news-inline-message-warn">{rssScoutError}</div>}
+                  {(rssScoutSummary || rssScoutResults.length > 0) && (
+                    <div className="grid gap-2">
+                      {rssScoutSummary && <p className="text-[11px] leading-5 text-[color:var(--text-secondary)]">{rssScoutSummary}</p>}
                       {rssScoutResults.map((feed) => {
-                        const exists = rssFeeds.some((item) => item.url.trim().toLowerCase() === feed.url.trim().toLowerCase());
-
+                        const exists = rssFeeds.some((item) => normalizeFeedUrl(item.url) === normalizeFeedUrl(feed.url));
                         return (
-                          <div
-                            key={feed.id}
-                            className="rounded-xl border border-white/8 bg-white/[0.03] p-3"
-                          >
+                          <div key={feed.id} className="world-news-subcard">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold text-white">{feed.name}</span>
-                                  <span className="rounded-full bg-cyan-500/16 px-2 py-0.5 text-[10px] font-bold text-cyan-100">
-                                    {feed.category}
-                                  </span>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-semibold text-[color:var(--text-strong)]">{feed.name}</span>
+                                  <span className="world-news-pill">{feed.category}</span>
                                 </div>
-                                <a
-                                  href={feed.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="mt-1 inline-flex max-w-full items-center gap-1 text-[10px] text-cyan-300 hover:text-cyan-200"
-                                >
+                                <a href={feed.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex max-w-full items-center gap-1 text-[11px] text-[color:var(--accent)]">
                                   <Link2 className="h-3 w-3 shrink-0" />
                                   <span className="truncate">{feed.url}</span>
                                 </a>
-                                {feed.reason && (
-                                  <p className="mt-2 text-[11px] leading-5 text-slate-300/85">{feed.reason}</p>
-                                )}
-                                {feed.keywords.length > 0 && (
-                                  <div className="mt-2 flex flex-wrap gap-1.5">
-                                    {feed.keywords.map((keyword) => (
-                                      <span
-                                        key={`${feed.id}-${keyword}`}
-                                        className="rounded-full bg-violet-500/14 px-2 py-0.5 text-[10px] font-semibold text-violet-100"
-                                      >
-                                        {keyword}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
+                                {feed.reason && <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)]">{feed.reason}</p>}
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => addSuggestedFeed(feed)}
-                                disabled={exists}
-                                className={cn(
-                                  "shrink-0 rounded-xl border px-2.5 py-1.5 text-[10px] font-bold transition-all",
-                                  exists
-                                    ? "cursor-not-allowed border-emerald-400/20 bg-emerald-500/12 text-emerald-100/80"
-                                    : "border-violet-400/30 bg-violet-500/14 text-violet-100 hover:border-violet-300/50 hover:bg-violet-500/22"
-                                )}
-                              >
+                              <button type="button" disabled={exists} onClick={() => addSuggestedFeed(feed)} className="world-news-button shrink-0">
                                 {exists ? '已添加' : '采纳'}
                               </button>
                             </div>
@@ -2733,859 +2762,431 @@ function WorldNewsView({
                         );
                       })}
                     </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="world-news-section">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="world-news-kicker">技术种子库</p>
+                    <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">项目内置可直接导入</h3>
+                  </div>
+                  <Rss className="mt-1 h-4 w-4 text-[color:var(--accent)]" />
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button type="button" onClick={() => importTechnicalPresets(20)} disabled={isImportingTechPresets} className="world-news-button flex-1">
+                    {isImportingTechPresets ? '导入中...' : '导入前 20 个'}
+                  </button>
+                  <button type="button" onClick={() => importTechnicalPresets(90)} disabled={isImportingTechPresets} className="world-news-button world-news-button-accent flex-1">
+                    {isImportingTechPresets ? '导入中...' : '导入全部'}
+                  </button>
+                </div>
+                {techPresetMessage && <div className="world-news-inline-message mt-3">{techPresetMessage}</div>}
+              </div>
+
+              <div>
+                <p className="world-news-kicker">源列表</p>
+                {categories.length === 0 ? (
+                  <div className="world-news-empty mt-3">
+                    <Rss className="h-8 w-8 text-[color:var(--text-muted)]" />
+                    <p className="mt-3 text-sm font-semibold text-[color:var(--text-strong)]">还没有订阅源</p>
+                    <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">先添加一个 RSS，再手动同步进消息列表。</p>
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {categories.map((category) => (
+                      <div key={category} className="world-news-category">
+                        <button type="button" onClick={() => toggleCategory(category)} className="world-news-category-toggle">
+                          <span className="flex items-center gap-2"><span className="world-news-category-dot" />{category}</span>
+                          <ChevronDown className={cn('h-4 w-4 transition-transform', expandedCategories.has(category) && 'rotate-180')} />
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {expandedCategories.has(category) && (
+                            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="mt-2 space-y-2">
+                              {rssFeeds.filter((feed) => feed.category === category).map((feed) => {
+                                const syncing = syncingFeedIds.includes(feed.id);
+                                return (
+                                  <div key={feed.id} className="world-news-feed-row">
+                                    <label className="flex min-w-0 flex-1 items-start gap-3">
+                                      <input type="checkbox" checked={feed.enabled} onChange={() => toggleFeed(feed.id)} className="mt-1 h-4 w-4 rounded border-white/20 bg-transparent" />
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-sm font-medium text-[color:var(--text-strong)]">{feed.name}</span>
+                                        <span className="mt-1 block truncate text-[11px] text-[color:var(--text-secondary)]">{formatCompactDateTime(feed.last_fetched_at)}</span>
+                                      </span>
+                                    </label>
+                                    <div className="flex shrink-0 gap-1">
+                                      <button type="button" onClick={() => syncSingleFeed(feed)} disabled={syncing} className="world-news-icon-button" title="同步订阅源">
+                                        {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                                      </button>
+                                      <button type="button" onClick={() => deleteFeed(feed.id)} className="world-news-icon-button" title="删除订阅源">
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-            </div>
 
-            <div className="mb-5 rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/14 via-slate-950/55 to-emerald-500/10 p-4 shadow-xl shadow-cyan-500/10">
-              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-cyan-100/75">技术种子库</p>
-              <h3 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
-                <Rss className="h-4 w-4 text-cyan-300" />
-                技术 RSS 预设
-              </h3>
-              <p className="mt-1 text-[11px] leading-5 text-slate-300/80">
-                直接导入项目内置的高质量技术博客 RSS，服务器部署也能直接使用。
-              </p>
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => importTechnicalPresets(20)}
-                  disabled={isImportingTechPresets}
-                  className="flex-1 rounded-xl border border-cyan-400/25 bg-cyan-500/12 px-3 py-2 text-xs font-bold text-cyan-100 transition-all hover:border-cyan-300/45 hover:bg-cyan-500/18 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isImportingTechPresets ? '导入中...' : '导入前 20 个'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => importTechnicalPresets(90)}
-                  disabled={isImportingTechPresets}
-                  className="flex-1 rounded-xl border border-emerald-400/25 bg-emerald-500/12 px-3 py-2 text-xs font-bold text-emerald-100 transition-all hover:border-emerald-300/45 hover:bg-emerald-500/18 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isImportingTechPresets ? '导入中...' : '导入全部种子'}
-                </button>
-              </div>
-              {techPresetMessage && (
-                <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] leading-5 text-slate-200">
-                  {techPresetMessage}
-                </div>
-              )}
-            </div>
-
-            {/* Feed List - Enhanced */}
-            {categories.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-center py-8 px-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.02]"
-              >
-                <Rss className="h-8 w-8 text-slate-600 mx-auto mb-2" />
-                <p className="text-xs text-slate-400">暂无订阅源</p>
-              </motion.div>
-            ) : (
-              <div className="space-y-2">
-                {categories.map((category, idx) => (
-                  <motion.div
-                    key={category}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.05 }}
-                  >
-                    <button
-                      onClick={() => toggleCategory(category)}
-                      className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/[0.05] text-xs font-semibold text-slate-300 transition-all group border border-transparent hover:border-white/10"
-                    >
-                      <span className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-teal-400 to-cyan-400" />
-                        {category}
-                      </span>
-                      <motion.div
-                        animate={{ rotate: expandedCategories.has(category) ? 180 : 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <ChevronDown className="h-3 w-3 text-slate-500 group-hover:text-teal-400 transition-colors" />
-                      </motion.div>
-                    </button>
-                    <AnimatePresence>
-                      {expandedCategories.has(category) && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="ml-4 mt-1 space-y-1 overflow-hidden"
-                        >
-                          {rssFeeds
-                            .filter(feed => feed.category === category)
-                            .map((feed, feedIdx) => (
-                              <motion.div
-                                key={feed.id}
-                                initial={{ opacity: 0, x: -10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: feedIdx * 0.03 }}
-                                className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-gradient-to-r hover:from-teal-500/10 hover:to-transparent group border border-transparent hover:border-teal-500/20 transition-all"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={feed.enabled}
-                                  onChange={() => toggleFeed(feed.id)}
-                                  className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-teal-500 focus:ring-teal-500/50 focus:ring-offset-0 transition-all"
-                                />
-                                <span className="flex-1 text-xs text-slate-400 truncate group-hover:text-slate-300 transition-colors">
-                                  {feed.name}
-                                </span>
-                                <motion.button
-                                  whileHover={{ scale: 1.1 }}
-                                  whileTap={{ scale: 0.9 }}
-                                  onClick={() => deleteFeed(feed.id)}
-                                  className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-red-500/20 transition-all"
-                                >
-                                  <X className="h-3 w-3 text-red-400" />
-                                </motion.button>
-                              </motion.div>
-                            ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Notes Section - Enhanced */}
-          <div className="border-t border-white/[0.08] p-5 bg-gradient-to-b from-transparent to-slate-950/50">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30 shadow-lg shadow-violet-500/10">
-                <BookOpen className="h-4 w-4 text-violet-300" />
-              </div>
-              <h2 className="text-sm font-bold bg-gradient-to-r from-violet-200 to-purple-200 bg-clip-text text-transparent">
-                笔记分类
-              </h2>
-            </div>
-            <div className="space-y-1.5 text-xs">
-              {[
-                { icon: '💡', label: '想法', type: 'idea', color: 'from-amber-500/10 to-yellow-500/10 border-amber-500/20 hover:border-amber-500/40' },
-                { icon: '💼', label: '简历投递', type: 'resume_tracking', color: 'from-cyan-500/10 to-blue-500/10 border-cyan-500/20 hover:border-cyan-500/40' },
-                { icon: '📝', label: '通用', type: 'general', color: 'from-slate-500/10 to-slate-600/10 border-slate-500/20 hover:border-slate-500/40' }
-              ].map((item, idx) => (
-                <motion.button
-                  key={item.type}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.3 + idx * 0.05 }}
-                  whileHover={{ x: 4 }}
-                  className={cn(
-                    "w-full text-left px-3 py-2.5 rounded-xl transition-all border backdrop-blur-sm group",
-                    `bg-gradient-to-r ${item.color}`
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-slate-300 group-hover:text-white transition-colors">
-                      <span className="text-base">{item.icon}</span>
-                      <span className="font-medium">{item.label}</span>
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full bg-white/10 text-[10px] font-bold text-slate-400 group-hover:text-white group-hover:bg-white/20 transition-all">
-                      {ideaNotes.filter(n => n.note_type === item.type).length}
-                    </span>
-                  </div>
-                </motion.button>
-              ))}
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Main Content - Enhanced */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="flex-1 overflow-y-auto"
-        >
-          <div className="p-6">
-            {/* Header with Tab Switcher */}
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-white/10 shadow-2xl">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setMainView('news')}
-                  className={cn(
-                    "px-5 py-2.5 rounded-xl text-sm font-bold transition-all relative overflow-hidden",
-                    mainView === 'news'
-                      ? "bg-gradient-to-r from-teal-500/30 to-cyan-500/30 text-teal-100 shadow-lg shadow-teal-500/20"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                  )}
-                >
-                  {mainView === 'news' && (
-                    <motion.div
-                      layoutId="activeTab"
-                      className="absolute inset-0 bg-gradient-to-r from-teal-500/20 to-cyan-500/20 border border-teal-500/30 rounded-xl"
-                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                    />
-                  )}
-                  <span className="relative flex items-center gap-2">
-                    <Globe className="h-4 w-4" />
-                    新闻
-                    <span className="px-2 py-0.5 rounded-full bg-teal-500/20 text-[10px] font-bold">
-                      {newsItems.length}
-                    </span>
-                  </span>
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setMainView('notes')}
-                  className={cn(
-                    "px-5 py-2.5 rounded-xl text-sm font-bold transition-all relative overflow-hidden",
-                    mainView === 'notes'
-                      ? "bg-gradient-to-r from-violet-500/30 to-purple-500/30 text-violet-100 shadow-lg shadow-violet-500/20"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                  )}
-                >
-                  {mainView === 'notes' && (
-                    <motion.div
-                      layoutId="activeTab"
-                      className="absolute inset-0 bg-gradient-to-r from-violet-500/20 to-purple-500/20 border border-violet-500/30 rounded-xl"
-                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                    />
-                  )}
-                  <span className="relative flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    笔记
-                    <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-[10px] font-bold">
-                      {ideaNotes.length}
-                    </span>
-                  </span>
-                </motion.button>
-              </div>
-              <div className="flex items-center gap-2">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={fetchTrendradarNews}
-                  disabled={isLoadingNews}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-teal-500/20 to-cyan-500/20 text-teal-100 border border-teal-500/30 hover:border-teal-500/50 text-sm font-bold disabled:opacity-50 shadow-lg hover:shadow-teal-500/30 transition-all backdrop-blur-sm"
-                >
-                  {isLoadingNews ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      加载中...
-                    </>
-                  ) : (
-                    <>
-                      <TrendingUp className="h-4 w-4" />
-                      同步 TrendRadar 热榜
-                    </>
-                  )}
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: newsItems.length > 0 ? 1.05 : 1 }}
-                  whileTap={{ scale: newsItems.length > 0 ? 0.95 : 1 }}
-                  onClick={clearAllNews}
-                  disabled={newsItems.length === 0}
-                  className="flex items-center gap-2 rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-2.5 text-sm font-bold text-red-100 transition-all hover:border-red-400/40 hover:bg-red-500/16 disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  清空新闻
-                </motion.button>
-              </div>
-            </div>
-
-            {newsSyncMessage && (
-              <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs leading-5 text-slate-200">
-                {newsSyncMessage}
-              </div>
-            )}
-
-            {mainView === 'news' ? (
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key="news-list"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-3"
-                >
-                  {newsItems.length === 0 ? (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="text-center py-16 px-6 rounded-3xl border border-dashed border-white/10 bg-gradient-to-br from-slate-900/50 to-slate-950/50 backdrop-blur-sm"
-                    >
-                      <div className="p-4 rounded-2xl bg-gradient-to-br from-teal-500/10 to-cyan-500/10 border border-teal-500/20 w-fit mx-auto mb-4">
-                        <Globe className="h-12 w-12 text-teal-400" />
-                      </div>
-                      <p className="text-slate-300 font-semibold mb-2">暂无新闻</p>
-                      <p className="text-xs text-slate-500">添加 RSS 订阅源或使用 trendradar 获取新闻</p>
-                    </motion.div>
-                  ) : (
-                    newsItems.map((news, idx) => (
-                      <motion.div
-                        key={news.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.05, duration: 0.3 }}
-                        whileHover={{ scale: 1.01, y: -2 }}
-                        onClick={() => setSelectedNews(news)}
-                        className={cn(
-                          "group p-5 rounded-2xl border cursor-pointer transition-all backdrop-blur-sm relative overflow-hidden",
-                          selectedNews?.id === news.id
-                            ? "border-teal-500/50 bg-gradient-to-br from-teal-500/15 to-cyan-500/10 shadow-xl shadow-teal-500/10"
-                            : "border-white/10 bg-gradient-to-br from-white/[0.03] to-white/[0.01] hover:border-teal-500/30 hover:bg-gradient-to-br hover:from-teal-500/10 hover:to-cyan-500/5 shadow-lg hover:shadow-teal-500/5",
-                          news.is_read && "opacity-60"
-                        )}
-                      >
-                        {/* Gradient overlay on hover */}
-                        <div className="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-cyan-500/5 to-teal-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-
-                        <div className="relative flex items-start justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-sm font-bold text-white mb-2 line-clamp-2 group-hover:text-teal-100 transition-colors">
-                              {news.title}
-                            </h3>
-                            <p className="text-xs text-slate-400 line-clamp-2 mb-3 leading-relaxed">
-                              {news.content}
-                            </p>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {news.tags.map(tag => (
-                                <motion.span
-                                  key={tag}
-                                  whileHover={{ scale: 1.05 }}
-                                  className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500/20 to-purple-500/20 border border-violet-500/30 text-violet-200 text-[10px] font-bold backdrop-blur-sm"
-                                >
-                                  {tag}
-                                </motion.span>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex flex-col gap-2">
-                            <motion.button
-                              whileHover={{ scale: 1.1, rotate: 15 }}
-                              whileTap={{ scale: 0.9 }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleNewsImportant(news.id);
-                              }}
-                              className={cn(
-                                "p-2 rounded-xl transition-all backdrop-blur-sm shadow-lg",
-                                news.is_important
-                                  ? "bg-gradient-to-br from-amber-500/30 to-yellow-500/30 border border-amber-500/50 text-amber-300 shadow-amber-500/20"
-                                  : "bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-amber-400 hover:border-amber-500/30"
-                              )}
-                            >
-                              <Star className={cn("h-4 w-4", news.is_important && "fill-current")} />
-                            </motion.button>
-                            <motion.button
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleNewsRead(news.id);
-                              }}
-                              className="p-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-teal-400 hover:border-teal-500/30 transition-all backdrop-blur-sm shadow-lg"
-                            >
-                              {news.is_read ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                            </motion.button>
-                            <motion.button
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteNewsItem(news.id);
-                              }}
-                              className="p-2 rounded-xl bg-red-500/10 border border-red-400/20 text-red-200 hover:bg-red-500/18 hover:border-red-400/40 transition-all backdrop-blur-sm shadow-lg"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </motion.button>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))
-                  )}
-                </motion.div>
-              </AnimatePresence>
-            ) : (
-              <div className="space-y-3">
-                {isCreatingNote && (
-                  <div className="p-4 rounded-xl border border-teal-500/30 bg-teal-500/10 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-bold text-teal-100">新建笔记</h3>
+              <div className="border-t border-white/8 pt-4">
+                <p className="world-news-kicker">笔记筛选</p>
+                <div className="mt-3 grid gap-2">
+                  {noteTypeOptions.map((option) => {
+                    const Icon = option.icon;
+                    const count = option.type === 'all' ? ideaNotes.length : ideaNotes.filter((note) => note.note_type === option.type).length;
+                    return (
                       <button
-                        onClick={() => setIsCreatingNote(false)}
-                        className="p-1 rounded-lg hover:bg-white/10"
+                        key={option.type}
+                        type="button"
+                        onClick={() => {
+                          setNoteFilter(option.type as 'all' | IdeaNote['note_type']);
+                          setMainView('notes');
+                          closeDetail();
+                        }}
+                        data-active={noteFilter === option.type ? 'true' : 'false'}
+                        className="world-news-filter-row"
                       >
-                        <X className="h-4 w-4 text-slate-400" />
+                        <span className="flex items-center gap-3"><Icon className="h-4 w-4" />{option.label}</span>
+                        <span>{count}</span>
                       </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </motion.aside>
+
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28, delay: 0.06, ease: 'easeOut' }}
+          className="world-news-panel relative min-h-0 overflow-hidden rounded-[2rem]"
+        >
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="border-b border-white/8 px-4 py-4 lg:px-5">
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="world-news-kicker">世界消息工作台</p>
+                    <h2 className="mt-1 text-xl font-semibold text-[color:var(--text-strong)]">{mainView === 'news' ? '消息流' : '笔记流'}</h2>
+                    <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">列表固定在当前视口内滚动，详情按需抽出，不再常驻占位。</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => { closeDetail(); setMainView('news'); }} data-active={mainView === 'news' ? 'true' : 'false'} className="world-news-tab">
+                      <Globe className="h-4 w-4" />
+                      新闻 {newsItems.length}
+                    </button>
+                    <button type="button" onClick={() => { closeDetail(); setMainView('notes'); }} data-active={mainView === 'notes' ? 'true' : 'false'} className="world-news-tab">
+                      <FileText className="h-4 w-4" />
+                      笔记 {ideaNotes.length}
+                    </button>
+                    {mainView === 'news' ? (
+                      <>
+                        <button type="button" onClick={fetchTrendradarNews} disabled={isLoadingNews} className="world-news-button">
+                          {isLoadingNews ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+                          TrendRadar
+                        </button>
+                        <button type="button" onClick={clearAllNews} disabled={newsItems.length === 0} className="world-news-button world-news-button-danger">
+                          <Trash2 className="h-4 w-4" />
+                          清空新闻
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" onClick={() => setIsCreatingNote((prev) => !prev)} className="world-news-button world-news-button-accent">
+                        <Plus className="h-4 w-4" />
+                        {isCreatingNote ? '收起编辑器' : '新建笔记'}
+                      </button>
+                    )}
+                    {detailVisible && (
+                      <button type="button" onClick={closeDetail} className="world-news-button">
+                        <EyeOff className="h-4 w-4" />
+                        关闭详情
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <span className="world-news-pill">{enabledFeeds.length} 个订阅源启用中</span>
+                  <span className="world-news-pill">{unreadCount} 条未读</span>
+                  <span className="world-news-pill">{importantCount} 条重点</span>
+                  {mainView === 'notes' && <span className="world-news-pill">{filteredNotes.length} 条已显示</span>}
+                </div>
+
+                {workspaceMessage && <div className="world-news-inline-message">{workspaceMessage}</div>}
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden px-4 pb-4 pt-4 lg:px-5">
+              <div className="h-full">
+                {mainView === 'news' ? (
+                  sortedNews.length === 0 ? (
+                    <div className="world-news-empty h-full">
+                      <Globe className="h-10 w-10 text-[color:var(--text-muted)]" />
+                      <p className="mt-3 text-base font-semibold text-[color:var(--text-strong)]">消息列表还是空的</p>
+                      <p className="mt-2 max-w-md text-center text-[11px] leading-5 text-[color:var(--text-secondary)]">你可以同步 TrendRadar，也可以同步左侧 RSS 订阅源。详情页不会常驻，点卡片时才会从右侧抽出。</p>
                     </div>
-                    <input
-                      type="text"
-                      placeholder="笔记标题"
-                      value={newNoteTitle}
-                      onChange={(e) => setNewNoteTitle(e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500"
-                    />
-                    <textarea
-                      placeholder="笔记内容（支持 Markdown）"
-                      value={newNoteContent}
-                      onChange={(e) => setNewNoteContent(e.target.value)}
-                      rows={6}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500 resize-none"
-                    />
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-2">笔记类型</label>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setNewNoteType('general')}
-                          className={cn(
-                            "flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all",
-                            newNoteType === 'general'
-                              ? "bg-cyan-500/20 text-cyan-100 border border-cyan-500/30"
-                              : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
-                          )}
-                        >
-                          📝 通用
-                        </button>
-                        <button
-                          onClick={() => setNewNoteType('idea')}
-                          className={cn(
-                            "flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all",
-                            newNoteType === 'idea'
-                              ? "bg-cyan-500/20 text-cyan-100 border border-cyan-500/30"
-                              : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
-                          )}
-                        >
-                          💡 想法
-                        </button>
-                        <button
-                          onClick={() => setNewNoteType('resume_tracking')}
-                          className={cn(
-                            "flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all",
-                            newNoteType === 'resume_tracking'
-                              ? "bg-cyan-500/20 text-cyan-100 border border-cyan-500/30"
-                              : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
-                          )}
-                        >
-                          💼 简历
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-2">标签</label>
-                      <div className="flex gap-2 mb-2">
-                        <input
-                          type="text"
-                          placeholder="添加标签"
-                          value={newNoteTagInput}
-                          onChange={(e) => setNewNoteTagInput(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && addNoteTag()}
-                          className="flex-1 px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500"
-                        />
-                        <button
-                          onClick={addNoteTag}
-                          className="px-3 py-1 rounded-lg bg-white/10 text-slate-300 hover:bg-white/20 text-xs"
-                        >
-                          添加
-                        </button>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {newNoteTags.map(tag => (
-                          <span
-                            key={tag}
-                            className="px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-200 text-[10px] font-semibold flex items-center gap-1"
+                  ) : (
+                    <div className="world-news-scroll h-full overflow-y-auto pr-1">
+                      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+                        {sortedNews.map((news) => (
+                          <motion.article
+                            key={news.id}
+                            layout
+                            transition={{ duration: 0.22, ease: 'easeOut' }}
+                            data-active={detailMode === 'news' && selectedNews?.id === news.id ? 'true' : 'false'}
+                            data-muted={news.is_read ? 'true' : 'false'}
+                            className="world-news-card group cursor-pointer"
+                            onClick={() => openNewsDetail(news)}
                           >
-                            {tag}
-                            <button
-                              onClick={() => removeNoteTag(tag)}
-                              className="hover:text-cyan-100"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </span>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap gap-2">
+                                  <span className="world-news-pill">{formatCompactDateTime(news.published_at)}</span>
+                                  {news.is_important && <span className="world-news-pill">重点</span>}
+                                  {news.note_ids.length > 0 && <span className="world-news-pill">{news.note_ids.length} 条关联笔记</span>}
+                                </div>
+                                <h3 className="mt-3 text-sm font-semibold leading-6 text-[color:var(--text-strong)] line-clamp-2">{news.title}</h3>
+                                <p className="mt-2 text-[12px] leading-6 text-[color:var(--text-secondary)] line-clamp-3">{news.content}</p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {news.tags.slice(0, 4).map((tag) => (
+                                    <span key={`${news.id}-${tag}`} className="world-news-chip">{tag}</span>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 flex-col gap-2 opacity-85 transition-opacity group-hover:opacity-100">
+                                <button type="button" onClick={(event) => { event.stopPropagation(); toggleNewsImportant(news.id); }} className="world-news-icon-button" title="标记重点">
+                                  <Star className={cn('h-4 w-4', news.is_important && 'fill-current')} />
+                                </button>
+                                <button type="button" onClick={(event) => { event.stopPropagation(); toggleNewsRead(news.id); }} className="world-news-icon-button" title="切换已读">
+                                  {news.is_read ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                                <button type="button" onClick={(event) => { event.stopPropagation(); deleteNewsItem(news.id); }} className="world-news-icon-button" title="删除新闻">
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </motion.article>
                         ))}
                       </div>
                     </div>
-                    {newNoteType === 'resume_tracking' && (
-                      <div className="space-y-3 p-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
-                        <h4 className="text-xs font-bold text-violet-200 flex items-center gap-2">
-                          <Briefcase className="h-3 w-3" />
-                          简历投递信息
-                        </h4>
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            type="text"
-                            placeholder="公司名称"
-                            value={resumeCompany}
-                            onChange={(e) => setResumeCompany(e.target.value)}
-                            className="px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500"
-                          />
-                          <input
-                            type="text"
-                            placeholder="职位名称"
-                            value={resumePosition}
-                            onChange={(e) => setResumePosition(e.target.value)}
-                            className="px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white placeholder:text-slate-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-slate-400 mb-1">状态</label>
-                          <div className="grid grid-cols-4 gap-1">
-                            <button
-                              onClick={() => setResumeStatus('pending')}
-                              className={cn(
-                                "px-2 py-1 rounded-lg text-[10px] font-semibold transition-all",
-                                resumeStatus === 'pending'
-                                  ? "bg-amber-500/30 text-amber-100 border border-amber-500/50"
-                                  : "bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
-                              )}
-                            >
-                              待定
-                            </button>
-                            <button
-                              onClick={() => setResumeStatus('interview')}
-                              className={cn(
-                                "px-2 py-1 rounded-lg text-[10px] font-semibold transition-all",
-                                resumeStatus === 'interview'
-                                  ? "bg-cyan-500/30 text-cyan-100 border border-cyan-500/50"
-                                  : "bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
-                              )}
-                            >
-                              面试
-                            </button>
-                            <button
-                              onClick={() => setResumeStatus('rejected')}
-                              className={cn(
-                                "px-2 py-1 rounded-lg text-[10px] font-semibold transition-all",
-                                resumeStatus === 'rejected'
-                                  ? "bg-red-500/30 text-red-100 border border-red-500/50"
-                                  : "bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
-                              )}
-                            >
-                              拒绝
-                            </button>
-                            <button
-                              onClick={() => setResumeStatus('accepted')}
-                              className={cn(
-                                "px-2 py-1 rounded-lg text-[10px] font-semibold transition-all",
-                                resumeStatus === 'accepted'
-                                  ? "bg-emerald-500/30 text-emerald-100 border border-emerald-500/50"
-                                  : "bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
-                              )}
-                            >
-                              通过
-                            </button>
+                  )
+                ) : (
+                  <div className="world-news-scroll h-full overflow-y-auto pr-1">
+                    <AnimatePresence initial={false}>
+                      {isCreatingNote && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -12 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          transition={{ duration: 0.22, ease: 'easeOut' }}
+                          className="world-news-section mb-4"
+                        >
+                          <div className="grid gap-3">
+                            <div className="grid gap-2 sm:grid-cols-3">
+                              {noteTypeOptions.filter((option) => option.type !== 'all').map((option) => (
+                                <button
+                                  key={option.type}
+                                  type="button"
+                                  data-active={newNoteType === option.type ? 'true' : 'false'}
+                                  onClick={() => setNewNoteType(option.type as IdeaNote['note_type'])}
+                                  className="world-news-choice justify-center"
+                                >
+                                  <span className="text-xs font-semibold">{option.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                            <input type="text" placeholder="笔记标题" value={newNoteTitle} onChange={(event) => setNewNoteTitle(event.target.value)} className="world-news-input" />
+                            {newNoteType === 'resume_tracking' && (
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <input type="text" value={resumeCompany} onChange={(event) => setResumeCompany(event.target.value)} placeholder="公司名称" className="world-news-input" />
+                                <input type="text" value={resumePosition} onChange={(event) => setResumePosition(event.target.value)} placeholder="职位名称" className="world-news-input" />
+                                <select value={resumeStatus} onChange={(event) => setResumeStatus(event.target.value as 'pending' | 'interview' | 'rejected' | 'accepted')} className="world-news-input">
+                                  <option value="pending">待定</option>
+                                  <option value="interview">面试中</option>
+                                  <option value="rejected">已拒绝</option>
+                                  <option value="accepted">已通过</option>
+                                </select>
+                                <input type="date" value={resumeAppliedDate} onChange={(event) => setResumeAppliedDate(event.target.value)} className="world-news-input" />
+                                <input type="date" value={resumeDeadline} onChange={(event) => setResumeDeadline(event.target.value)} className="world-news-input md:col-span-2" />
+                              </div>
+                            )}
+                            <textarea rows={7} placeholder="记录你的想法、摘要或下一步。" value={newNoteContent} onChange={(event) => setNewNoteContent(event.target.value)} className="world-news-input min-h-40 resize-y" />
+                            <div className="flex flex-wrap gap-2">
+                              <input
+                                type="text"
+                                placeholder="输入标签后回车"
+                                value={newNoteTagInput}
+                                onChange={(event) => setNewNoteTagInput(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    addNoteTag();
+                                  }
+                                }}
+                                className="world-news-input flex-1"
+                              />
+                              <button type="button" onClick={addNoteTag} className="world-news-button">添加标签</button>
+                            </div>
+                            {newNoteTags.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {newNoteTags.map((tag) => (
+                                  <button key={tag} type="button" onClick={() => removeNoteTag(tag)} className="world-news-chip">
+                                    {tag} <X className="h-3 w-3" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            <div className="flex flex-wrap gap-2">
+                              <button type="button" onClick={createNewNote} className="world-news-button world-news-button-accent"><Save className="h-4 w-4" />保存笔记</button>
+                              <button type="button" onClick={resetNoteComposer} className="world-news-button"><X className="h-4 w-4" />取消</button>
+                            </div>
                           </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-400 mb-1">投递日期</label>
-                            <input
-                              type="date"
-                              value={resumeAppliedDate}
-                              onChange={(e) => setResumeAppliedDate(e.target.value)}
-                              className="w-full px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-400 mb-1">截止日期</label>
-                            <input
-                              type="date"
-                              value={resumeDeadline}
-                              onChange={(e) => setResumeDeadline(e.target.value)}
-                              className="w-full px-2 py-1 text-xs rounded-lg border border-white/10 bg-slate-900 text-white"
-                            />
-                          </div>
-                        </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                    {filteredNotes.length === 0 ? (
+                      <div className="world-news-empty min-h-[22rem]">
+                        <FileText className="h-10 w-10 text-[color:var(--text-muted)]" />
+                        <p className="mt-3 text-base font-semibold text-[color:var(--text-strong)]">这个筛选下还没有笔记</p>
+                        <p className="mt-2 max-w-md text-center text-[11px] leading-5 text-[color:var(--text-secondary)]">你可以手动新建，也可以从新闻详情里一键转成笔记。</p>
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 xl:grid-cols-2">
+                        {filteredNotes.map((note) => (
+                          <motion.article
+                            key={note.id}
+                            layout
+                            transition={{ duration: 0.22, ease: 'easeOut' }}
+                            data-active={detailMode === 'note' && selectedNote?.id === note.id ? 'true' : 'false'}
+                            className="world-news-card group cursor-pointer"
+                            onClick={() => openNoteDetail(note)}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap gap-2">
+                                  <span className="world-news-pill">{formatCompactDateTime(note.updated_at)}</span>
+                                  <span className="world-news-pill">{note.note_type === 'idea' ? '想法' : note.note_type === 'resume_tracking' ? '简历' : '通用'}</span>
+                                  {note.related_task_id && <span className="world-news-pill">已转任务</span>}
+                                </div>
+                                <h3 className="mt-3 text-sm font-semibold leading-6 text-[color:var(--text-strong)] line-clamp-2">{note.title}</h3>
+                                <p className="mt-2 text-[12px] leading-6 text-[color:var(--text-secondary)] line-clamp-3">{note.content.replace(/[#*_`>\\[\\]\\(\\)]/g, ' ')}</p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {note.tags.slice(0, 4).map((tag) => (
+                                    <span key={`${note.id}-${tag}`} className="world-news-chip">{tag}</span>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 flex-col gap-2 opacity-85 transition-opacity group-hover:opacity-100">
+                                <button type="button" onClick={(event) => { event.stopPropagation(); deleteNote(note.id); }} className="world-news-icon-button" title="删除笔记">
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </motion.article>
+                        ))}
                       </div>
                     )}
-                    <button
-                      onClick={createNewNote}
-                      disabled={!newNoteTitle.trim()}
-                      className="w-full px-4 py-2 rounded-xl bg-teal-500 text-white hover:bg-teal-600 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      创建笔记
-                    </button>
                   </div>
-                )}
-
-                {!isCreatingNote && (
-                  <button
-                    onClick={() => setIsCreatingNote(true)}
-                    className="w-full p-4 rounded-xl border-2 border-dashed border-white/20 hover:border-teal-500/50 hover:bg-teal-500/5 transition-all text-sm text-slate-400 hover:text-teal-300 font-semibold"
-                  >
-                    <Plus className="h-5 w-5 inline mr-2" />
-                    新建笔记
-                  </button>
-                )}
-
-                {ideaNotes.length === 0 && !isCreatingNote ? (
-                  <div className="text-center py-12">
-                    <FileText className="h-12 w-12 text-slate-600 mx-auto mb-4" />
-                    <p className="text-slate-400 mb-2">暂无笔记</p>
-                    <p className="text-xs text-slate-500">从新闻创建笔记或直接添加新笔记</p>
-                  </div>
-                ) : (
-                  ideaNotes.map(note => (
-                    <div
-                      key={note.id}
-                      onClick={() => setSelectedNote(note)}
-                      className={cn(
-                        "p-4 rounded-xl border cursor-pointer transition-all",
-                        selectedNote?.id === note.id
-                          ? "border-teal-500/50 bg-teal-500/10"
-                          : "border-white/10 bg-white/5 hover:bg-white/10"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-lg">
-                              {note.note_type === 'idea' ? '💡' : note.note_type === 'resume_tracking' ? '💼' : '📝'}
-                            </span>
-                            <h3 className="text-sm font-semibold text-white line-clamp-1">
-                              {note.title}
-                            </h3>
-                          </div>
-                          <p className="text-xs text-slate-400 line-clamp-2 mb-2">
-                            {note.content.substring(0, 100)}...
-                          </p>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {note.note_type === 'resume_tracking' && note.metadata?.status && (
-                              <span
-                                className={cn(
-                                  "px-2 py-0.5 rounded-full text-[10px] font-semibold",
-                                  note.metadata.status === 'pending' && "bg-amber-500/20 text-amber-200",
-                                  note.metadata.status === 'interview' && "bg-cyan-500/20 text-cyan-200",
-                                  note.metadata.status === 'rejected' && "bg-red-500/20 text-red-200",
-                                  note.metadata.status === 'accepted' && "bg-emerald-500/20 text-emerald-200"
-                                )}
-                              >
-                                {note.metadata.status === 'pending' && '待定'}
-                                {note.metadata.status === 'interview' && '面试中'}
-                                {note.metadata.status === 'rejected' && '已拒绝'}
-                                {note.metadata.status === 'accepted' && '已通过'}
-                              </span>
-                            )}
-                            {note.tags.map(tag => (
-                              <span
-                                key={tag}
-                                className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-200 text-[10px] font-semibold"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
                 )}
               </div>
-            )}
-          </div>
-        </motion.div>
-
-        {/* Right Panel - Enhanced */}
-        <motion.div
-          initial={{ x: 20, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ duration: 0.4, delay: 0.3 }}
-          className="w-96 border-l border-white/[0.08] bg-gradient-to-b from-slate-950/90 to-slate-900/90 backdrop-blur-xl overflow-y-auto"
-        >
-          <div className="p-5">
-            {selectedNews ? (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-              >
-                <div className="flex items-center justify-between mb-5">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-gradient-to-br from-teal-500/20 to-cyan-500/20 border border-teal-500/30">
-                      <Globe className="h-4 w-4 text-teal-300" />
-                    </div>
-                    <h2 className="text-sm font-bold bg-gradient-to-r from-teal-200 to-cyan-200 bg-clip-text text-transparent">
-                      新闻详情
-                    </h2>
-                  </div>
+            </div>
+            <AnimatePresence>
+              {detailVisible && (
+                <>
                   <motion.button
-                    whileHover={{ scale: 1.1, rotate: 90 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => setSelectedNews(null)}
-                    className="p-2 rounded-xl hover:bg-white/10 transition-all"
+                    type="button"
+                    aria-label="关闭详情"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.16 }}
+                    className="world-news-drawer-backdrop absolute inset-0 z-20"
+                    onClick={closeDetail}
+                  />
+                  <motion.aside
+                    initial={{ opacity: 0, x: 24 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 24 }}
+                    transition={{ duration: 0.24, ease: 'easeOut' }}
+                    className="world-news-panel absolute inset-y-3 left-3 right-3 z-30 flex min-h-0 flex-col overflow-hidden rounded-[1.7rem] md:left-auto md:w-[30rem]"
                   >
-                    <X className="h-4 w-4 text-slate-400" />
-                  </motion.button>
-                </div>
-                <div className="space-y-4">
-                  <div className="p-5 rounded-2xl bg-gradient-to-br from-teal-500/10 via-cyan-500/5 to-teal-500/10 border border-teal-500/20 backdrop-blur-sm">
-                    <h3 className="text-base font-bold text-white leading-relaxed mb-3">{selectedNews.title}</h3>
-                    <p className="text-sm text-slate-300 leading-relaxed">{selectedNews.content}</p>
-                  </div>
-                  {selectedNews.url && (
-                    <motion.a
-                      whileHover={{ x: 4 }}
-                      href={selectedNews.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-teal-500/10 to-cyan-500/10 border border-teal-500/30 text-xs text-teal-300 hover:text-teal-200 hover:border-teal-500/50 transition-all font-semibold backdrop-blur-sm"
-                    >
-                      查看原文 <ChevronRight className="h-3 w-3" />
-                    </motion.a>
-                  )}
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => createNoteFromNews(selectedNews)}
-                    className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-teal-500/20 to-cyan-500/20 text-teal-100 border border-teal-500/30 hover:border-teal-500/50 text-sm font-bold shadow-lg hover:shadow-teal-500/20 transition-all backdrop-blur-sm flex items-center justify-center gap-2"
-                  >
-                    <Edit3 className="h-4 w-4" />
-                    创建笔记
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => deleteNewsItem(selectedNews.id)}
-                    className="w-full px-4 py-3 rounded-xl bg-red-500/12 text-red-100 border border-red-400/25 hover:border-red-400/45 text-sm font-bold shadow-lg hover:shadow-red-500/15 transition-all backdrop-blur-sm flex items-center justify-center gap-2"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    删除这条新闻
-                  </motion.button>
-                </div>
-              </motion.div>
-            ) : selectedNote ? (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-              >
-                <div className="flex items-center justify-between mb-5">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
-                      <FileText className="h-4 w-4 text-violet-300" />
-                    </div>
-                    <h2 className="text-sm font-bold bg-gradient-to-r from-violet-200 to-purple-200 bg-clip-text text-transparent">
-                      笔记详情
-                    </h2>
-                  </div>
-                  <motion.button
-                    whileHover={{ scale: 1.1, rotate: 90 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => setSelectedNote(null)}
-                    className="p-2 rounded-xl hover:bg-white/10 transition-all"
-                  >
-                    <X className="h-4 w-4 text-slate-400" />
-                  </motion.button>
-                </div>
-                <div className="space-y-4">
-                  <div className="p-5 rounded-2xl bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-violet-500/10 border border-violet-500/20 backdrop-blur-sm">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="text-2xl">
-                        {selectedNote.note_type === 'idea' ? '💡' : selectedNote.note_type === 'resume_tracking' ? '💼' : '📝'}
-                      </span>
-                      <h3 className="text-base font-bold text-white">{selectedNote.title}</h3>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {selectedNote.tags.map(tag => (
-                        <motion.span
-                          key={tag}
-                          whileHover={{ scale: 1.05 }}
-                          className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 text-cyan-200 text-[10px] font-bold backdrop-blur-sm"
-                        >
-                          {tag}
-                        </motion.span>
-                      ))}
-                    </div>
-                  </div>
-                  {selectedNote.note_type === 'resume_tracking' && selectedNote.metadata && (
-                    <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-500/15 to-purple-500/10 border border-violet-500/30 space-y-3 backdrop-blur-sm shadow-lg">
-                      <h4 className="text-xs font-bold text-violet-200 flex items-center gap-2">
-                        <Briefcase className="h-4 w-4" />
-                        简历投递信息
-                      </h4>
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div className="p-3 rounded-xl bg-slate-900/50 backdrop-blur-sm">
-                          <p className="text-slate-400 mb-1 text-[10px] font-semibold uppercase tracking-wider">公司</p>
-                          <p className="text-white font-bold">{selectedNote.metadata.company || '-'}</p>
-                        </div>
-                        <div className="p-3 rounded-xl bg-slate-900/50 backdrop-blur-sm">
-                          <p className="text-slate-400 mb-1 text-[10px] font-semibold uppercase tracking-wider">职位</p>
-                          <p className="text-white font-bold">{selectedNote.metadata.position || '-'}</p>
-                        </div>
-                        <div className="p-3 rounded-xl bg-slate-900/50 backdrop-blur-sm">
-                          <p className="text-slate-400 mb-1 text-[10px] font-semibold uppercase tracking-wider">状态</p>
-                          <span
-                            className={cn(
-                              "inline-block px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-lg",
-                              selectedNote.metadata.status === 'pending' && "bg-gradient-to-r from-amber-500/30 to-yellow-500/30 border border-amber-500/50 text-amber-100",
-                              selectedNote.metadata.status === 'interview' && "bg-gradient-to-r from-cyan-500/30 to-blue-500/30 border border-cyan-500/50 text-cyan-100",
-                              selectedNote.metadata.status === 'rejected' && "bg-gradient-to-r from-red-500/30 to-rose-500/30 border border-red-500/50 text-red-100",
-                              selectedNote.metadata.status === 'accepted' && "bg-gradient-to-r from-emerald-500/30 to-green-500/30 border border-emerald-500/50 text-emerald-100"
-                            )}
-                          >
-                            {selectedNote.metadata.status === 'pending' && '待定'}
-                            {selectedNote.metadata.status === 'interview' && '面试中'}
-                            {selectedNote.metadata.status === 'rejected' && '已拒绝'}
-                            {selectedNote.metadata.status === 'accepted' && '已通过'}
-                          </span>
-                        </div>
-                        <div className="p-3 rounded-xl bg-slate-900/50 backdrop-blur-sm">
-                          <p className="text-slate-400 mb-1 text-[10px] font-semibold uppercase tracking-wider">投递日期</p>
-                          <p className="text-white font-bold">
-                            {selectedNote.metadata.applied_at
-                              ? new Date(selectedNote.metadata.applied_at).toLocaleDateString('zh-CN')
-                              : '-'}
-                          </p>
-                        </div>
-                        {selectedNote.metadata.deadline && (
-                          <div className="col-span-2 p-3 rounded-xl bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border border-amber-500/30 backdrop-blur-sm">
-                            <p className="text-amber-300 mb-1 text-[10px] font-semibold uppercase tracking-wider">截止日期</p>
-                            <p className="text-amber-100 font-bold">
-                              {new Date(selectedNote.metadata.deadline).toLocaleDateString('zh-CN')}
-                            </p>
+                    {detailMode === 'news' && selectedNews ? (
+                      <>
+                        <div className="border-b border-white/8 px-4 py-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="world-news-kicker">消息详情</p>
+                              <h3 className="mt-1 text-lg font-semibold leading-7 text-[color:var(--text-strong)]">{selectedNews.title}</h3>
+                            </div>
+                            <button type="button" onClick={closeDetail} className="world-news-icon-button"><X className="h-4 w-4" /></button>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  <div className="p-5 rounded-2xl bg-slate-900/50 border border-white/10 backdrop-blur-sm prose prose-invert prose-sm max-w-none">
-                    <Markdown>{selectedNote.content}</Markdown>
-                  </div>
-                  {selectedNote.related_task_id ? (
-                    <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-500/15 to-green-500/10 border border-emerald-500/30 backdrop-blur-sm">
-                      <p className="text-xs text-emerald-200 flex items-center gap-2 font-semibold">
-                        <CheckCircle2 className="h-4 w-4" />
-                        已关联任务
-                      </p>
-                    </div>
-                  ) : (
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => convertNoteToTask(selectedNote)}
-                      className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-violet-500/20 to-purple-500/20 text-violet-100 border border-violet-500/30 hover:border-violet-500/50 text-sm font-bold flex items-center justify-center gap-2 shadow-lg hover:shadow-violet-500/20 transition-all backdrop-blur-sm"
-                    >
-                      <ListTodo className="h-4 w-4" />
-                      转换为任务
-                    </motion.button>
-                  )}
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="text-center py-16 px-6 rounded-3xl border border-dashed border-white/10 bg-gradient-to-br from-slate-900/30 to-slate-950/30 backdrop-blur-sm"
-              >
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-500/10 to-slate-600/10 border border-slate-500/20 w-fit mx-auto mb-4">
-                  <Info className="h-12 w-12 text-slate-500" />
-                </div>
-                <p className="text-sm text-slate-400 font-semibold">选择新闻或笔记查看详情</p>
-              </motion.div>
-            )}
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <span className="world-news-pill">{formatCompactDateTime(selectedNews.published_at)}</span>
+                            {selectedNews.tags.map((tag) => <span key={`${selectedNews.id}-${tag}`} className="world-news-chip">{tag}</span>)}
+                          </div>
+                        </div>
+                        <div className="world-news-scroll flex-1 min-h-0 overflow-y-auto px-4 py-4">
+                          <div className="world-news-detail-copy"><p>{selectedNews.content}</p></div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {selectedNews.url && <a href={selectedNews.url} target="_blank" rel="noopener noreferrer" className="world-news-button"><ExternalLink className="h-4 w-4" />查看原文</a>}
+                            <button type="button" onClick={() => createNoteFromNews(selectedNews)} className="world-news-button world-news-button-accent"><Edit3 className="h-4 w-4" />转成笔记</button>
+                            <button type="button" onClick={() => deleteNewsItem(selectedNews.id)} className="world-news-button world-news-button-danger"><Trash2 className="h-4 w-4" />删除新闻</button>
+                          </div>
+                        </div>
+                      </>
+                    ) : detailMode === 'note' && selectedNote ? (
+                      <>
+                        <div className="border-b border-white/8 px-4 py-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="world-news-kicker">笔记详情</p>
+                              <h3 className="mt-1 text-lg font-semibold leading-7 text-[color:var(--text-strong)]">{selectedNote.title}</h3>
+                            </div>
+                            <button type="button" onClick={closeDetail} className="world-news-icon-button"><X className="h-4 w-4" /></button>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <span className="world-news-pill">{selectedNote.note_type === 'idea' ? '想法' : selectedNote.note_type === 'resume_tracking' ? '简历跟踪' : '通用'}</span>
+                            <span className="world-news-pill">{formatCompactDateTime(selectedNote.updated_at)}</span>
+                            {selectedNote.tags.map((tag) => <span key={`${selectedNote.id}-${tag}`} className="world-news-chip">{tag}</span>)}
+                          </div>
+                        </div>
+                        <div className="world-news-scroll flex-1 min-h-0 overflow-y-auto px-4 py-4">
+                          {selectedNote.note_type === 'resume_tracking' && selectedNote.metadata && (
+                            <div className="world-news-section mb-4">
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div><p className="world-news-kicker">公司</p><p className="mt-1 text-sm text-[color:var(--text-strong)]">{selectedNote.metadata.company || '-'}</p></div>
+                                <div><p className="world-news-kicker">职位</p><p className="mt-1 text-sm text-[color:var(--text-strong)]">{selectedNote.metadata.position || '-'}</p></div>
+                                <div><p className="world-news-kicker">状态</p><p className="mt-1 text-sm text-[color:var(--text-strong)]">{selectedNote.metadata.status || 'pending'}</p></div>
+                                <div><p className="world-news-kicker">投递时间</p><p className="mt-1 text-sm text-[color:var(--text-strong)]">{formatCompactDateTime(selectedNote.metadata.applied_at)}</p></div>
+                              </div>
+                            </div>
+                          )}
+                          <div className="world-news-markdown rounded-[1.5rem] border border-white/8 px-4 py-4"><Markdown>{selectedNote.content}</Markdown></div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {selectedNote.related_task_id ? (
+                              <span className="world-news-pill flex items-center gap-2"><CheckCircle2 className="h-4 w-4" />已关联任务</span>
+                            ) : (
+                              <button type="button" onClick={() => convertNoteToTask(selectedNote)} className="world-news-button world-news-button-accent"><ListTodo className="h-4 w-4" />转为任务</button>
+                            )}
+                            <button type="button" onClick={() => deleteNote(selectedNote.id)} className="world-news-button world-news-button-danger"><Trash2 className="h-4 w-4" />删除笔记</button>
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
+                  </motion.aside>
+                </>
+              )}
+            </AnimatePresence>
           </div>
-        </motion.div>
+        </motion.section>
       </div>
     </div>
   );
@@ -3603,7 +3204,11 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [isBehaviorChatOpen, setIsBehaviorChatOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [theme, setTheme] = useState(() => (typeof window !== 'undefined' ? (localStorage.getItem(THEME_STORAGE_KEY) || 'night') : 'night'));
+  const [theme, setTheme] = useState<AppTheme>(() => {
+    if (typeof window === 'undefined') return 'night';
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return THEME_OPTIONS.some((option) => option.id === savedTheme) ? savedTheme as AppTheme : 'night';
+  });
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [abilityDimensions, setAbilityDimensions] = useState<string[]>([]);
@@ -4585,7 +4190,8 @@ export default function App() {
   const renderThemeIcon = (themeId: AppTheme) => {
     if (themeId === 'night') return <MoonStar className="h-4 w-4" />;
     if (themeId === 'day') return <SunMedium className="h-4 w-4" />;
-    return <Sparkles className="h-4 w-4" />;
+    if (themeId === 'stardew') return <Sparkles className="h-4 w-4" />;
+    return <Stars className="h-4 w-4" />;
   };
 
   const renderThemeSwitcher = (mode: 'compact' | 'full' = 'compact') => (
@@ -6998,5 +6604,6 @@ function TaskPoint({
     </motion.div>
   );
 }
+
 
 

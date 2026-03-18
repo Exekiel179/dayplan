@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
+import dns from 'node:dns/promises';
 import express from 'express';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TECHNICAL_RSS_SEEDS } from './technical-rss-seeds.mjs';
@@ -35,6 +37,13 @@ const TRENDRADAR_LIVE_HEADERS = {
   'Cache-Control': 'no-cache',
   'Pragma': 'no-cache',
   'Referer': 'https://newsnow.busiyi.world/',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+};
+const RSS_FETCH_HEADERS = {
+  'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.1',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
 };
 
@@ -442,6 +451,201 @@ function parseRssScoutPayload(raw) {
           .filter((feed) => feed.name && feed.url && isValidHttpUrl(feed.url))
           .slice(0, 6)
       : [],
+  };
+}
+
+function normalizeXmlText(value) {
+  return String(value || '')
+    .replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/i, '$1')
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractXmlBlocks(xml, tagName) {
+  const pattern = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'gi');
+  return Array.from(xml.matchAll(pattern)).map((match) => match[1]);
+}
+
+function extractFirstTagText(xml, tagNames) {
+  for (const tagName of tagNames) {
+    const pattern = new RegExp(`<${escapeRegex(tagName)}\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegex(tagName)}>`, 'i');
+    const match = xml.match(pattern);
+    if (!match?.[1]) continue;
+    const text = normalizeXmlText(match[1]);
+    if (text) return text;
+  }
+  return '';
+}
+
+function extractFirstTagHref(xml, tagNames) {
+  for (const tagName of tagNames) {
+    const hrefPattern = new RegExp(`<${escapeRegex(tagName)}\\b[^>]*href=["']([^"']+)["'][^>]*\\/?>`, 'i');
+    const hrefMatch = xml.match(hrefPattern);
+    if (hrefMatch?.[1]) return hrefMatch[1].trim();
+
+    const textPattern = new RegExp(`<${escapeRegex(tagName)}\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegex(tagName)}>`, 'i');
+    const textMatch = xml.match(textPattern);
+    const text = textMatch?.[1] ? normalizeXmlText(textMatch[1]) : '';
+    if (text) return text;
+  }
+  return '';
+}
+
+function extractFeedTitle(xml, fallback = '') {
+  const channelMatch = xml.match(/<channel\b[\s\S]*?<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  if (channelMatch?.[1]) {
+    const title = normalizeXmlText(channelMatch[1]);
+    if (title) return title;
+  }
+
+  const feedMatch = xml.match(/<feed\b[\s\S]*?<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  if (feedMatch?.[1]) {
+    const title = normalizeXmlText(feedMatch[1]);
+    if (title) return title;
+  }
+
+  return fallback;
+}
+
+function toIsoDate(value) {
+  const timestamp = Date.parse(String(value || '').trim());
+  if (!Number.isFinite(timestamp)) return '';
+  return new Date(timestamp).toISOString();
+}
+
+function dedupeFeedItems(items, limit) {
+  const seen = new Set();
+  const deduped = [];
+  for (const item of items) {
+    const key = `${item.url || ''}::${item.title || ''}`.toLowerCase();
+    if (!item.title || !item.url || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+    if (deduped.length >= limit) break;
+  }
+  return deduped;
+}
+
+function parseFeedItems(xml, limit = 8) {
+  const rssItems = extractXmlBlocks(xml, 'item').map((block) => ({
+    title: extractFirstTagText(block, ['title']),
+    url: extractFirstTagText(block, ['link', 'guid']),
+    summary: extractFirstTagText(block, ['description', 'content:encoded', 'content', 'summary']),
+    published_at: toIsoDate(extractFirstTagText(block, ['pubDate', 'dc:date', 'published', 'updated'])),
+    source_title: extractFirstTagText(block, ['source']),
+    tags: extractXmlBlocks(block, 'category').map((tag) => normalizeXmlText(tag)).filter(Boolean).slice(0, 6),
+  }));
+  if (rssItems.length > 0) {
+    return dedupeFeedItems(rssItems, limit);
+  }
+
+  const atomItems = extractXmlBlocks(xml, 'entry').map((block) => ({
+    title: extractFirstTagText(block, ['title']),
+    url: extractFirstTagHref(block, ['link']) || extractFirstTagText(block, ['id']),
+    summary: extractFirstTagText(block, ['summary', 'content']),
+    published_at: toIsoDate(extractFirstTagText(block, ['updated', 'published'])),
+    source_title: extractFirstTagText(block, ['source', 'author', 'name']),
+    tags: extractXmlBlocks(block, 'category')
+      .map((tag) => {
+        const termMatch = tag.match(/\bterm=["']([^"']+)["']/i);
+        if (termMatch?.[1]) return normalizeXmlText(termMatch[1]);
+        return normalizeXmlText(tag);
+      })
+      .filter(Boolean)
+      .slice(0, 6),
+  }));
+  return dedupeFeedItems(atomItems, limit);
+}
+
+function isPrivateIpv4(ip) {
+  return /^10\./.test(ip)
+    || /^127\./.test(ip)
+    || /^169\.254\./.test(ip)
+    || /^192\.168\./.test(ip)
+    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip);
+}
+
+function isPrivateIpv6(ip) {
+  const normalized = ip.toLowerCase();
+  return normalized === '::1'
+    || normalized.startsWith('fc')
+    || normalized.startsWith('fd')
+    || normalized.startsWith('fe80:');
+}
+
+function isPrivateIpAddress(ip) {
+  const family = net.isIP(ip);
+  if (family === 4) return isPrivateIpv4(ip);
+  if (family === 6) return isPrivateIpv6(ip);
+  return false;
+}
+
+async function assertSafeFeedUrl(feedUrl) {
+  const parsed = new URL(feedUrl);
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === 'localhost' || hostname === '0.0.0.0') {
+    throw new Error('订阅地址不允许指向本地或内网');
+  }
+
+  if (isPrivateIpAddress(hostname)) {
+    throw new Error('订阅地址不允许指向本地或内网');
+  }
+
+  try {
+    const resolved = await dns.lookup(hostname, { all: true, verbatim: true });
+    if (resolved.some((entry) => isPrivateIpAddress(entry.address))) {
+      throw new Error('订阅地址不允许指向本地或内网');
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('本地或内网')) {
+      throw error;
+    }
+  }
+}
+
+async function syncRssFeedPreview({ name, url, limit = 8 }) {
+  if (!isValidHttpUrl(url)) {
+    throw new Error('请输入有效的 RSS / Atom 地址');
+  }
+
+  await assertSafeFeedUrl(url);
+  const response = await fetch(url, {
+    headers: RSS_FETCH_HEADERS,
+    redirect: 'follow',
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!response.ok) {
+    throw new Error(`订阅源请求失败 (${response.status})`);
+  }
+
+  const xml = await response.text();
+  if (!xml.trim()) {
+    throw new Error('订阅源返回为空');
+  }
+
+  const items = parseFeedItems(xml, Math.max(1, Math.min(20, Number(limit) || 8)));
+  if (items.length === 0) {
+    throw new Error('没有解析到可用的订阅内容');
+  }
+
+  const feedTitle = extractFeedTitle(xml, name || 'RSS Feed');
+  return {
+    fetched_at: new Date().toISOString(),
+    feed_title: feedTitle,
+    items,
   };
 }
 
@@ -1191,6 +1395,29 @@ app.post('/api/ai/rss-scout', requireAuth, async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'AI 生成失败';
     const status = message.includes('AI_API_KEY') ? 503 : 502;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/world-news/rss/sync', requireAuth, async (req, res) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    const limit = Math.max(1, Math.min(20, Number(req.body?.limit) || 8));
+    if (!name || !url) {
+      res.status(400).json({ error: '订阅源名称和 URL 不能为空' });
+      return;
+    }
+
+    const result = await syncRssFeedPreview({ name, url, limit });
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'RSS 同步失败';
+    const status = message.includes('内网') || message.includes('有效')
+      ? 400
+      : message.includes('请求失败')
+        ? 502
+        : 500;
     res.status(status).json({ error: message });
   }
 });
