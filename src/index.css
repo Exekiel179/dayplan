@@ -296,6 +296,45 @@ body {
   box-shadow:
     0 20px 45px rgba(2, 14, 20, 0.48),
     inset 0 1px 0 rgba(148, 255, 235, 0.08);
+  border-radius: 1.5rem;
+}
+
+.task-directory-panel {
+  background: linear-gradient(160deg, var(--panel-bg-elevated) 0%, color-mix(in srgb, var(--panel-bg) 92%, transparent) 100%);
+  border-right: 1px solid var(--panel-border);
+  backdrop-filter: blur(16px);
+  box-shadow:
+    inset -1px 0 0 rgba(148, 255, 235, 0.06),
+    0 0 60px rgba(2, 14, 20, 0.3);
+}
+
+.task-directory-card {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--surface-soft) 88%, transparent), color-mix(in srgb, var(--surface-raised) 82%, transparent));
+  border: 1px solid color-mix(in srgb, var(--surface-border) 85%, transparent);
+  border-radius: 1.25rem;
+  backdrop-filter: blur(8px);
+  transition: all 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow:
+    0 4px 12px rgba(2, 14, 20, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.task-directory-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow:
+    0 12px 28px rgba(2, 14, 20, 0.25),
+    0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.task-directory-card-active {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, var(--surface-soft)), color-mix(in srgb, var(--accent) 12%, var(--surface-raised)));
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow:
+    0 8px 24px color-mix(in srgb, var(--accent) 15%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .glass-modal {
@@ -701,6 +740,48 @@ body {
 .world-news-drawer-backdrop {
   background: rgba(5, 8, 18, 0.32);
   backdrop-filter: blur(3px);
+}
+
+.world-news-modal-backdrop {
+  background: rgba(4, 8, 18, 0.75);
+  backdrop-filter: blur(8px);
+  animation: modal-backdrop-in 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.world-news-modal-panel {
+  background: linear-gradient(160deg, var(--panel-bg-elevated) 0%, color-mix(in srgb, var(--panel-bg) 94%, transparent) 100%);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 92%, transparent);
+  border-radius: 1.75rem;
+  backdrop-filter: blur(20px);
+  box-shadow:
+    0 40px 90px rgba(2, 8, 18, 0.6),
+    0 0 0 1px rgba(148, 255, 235, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  animation: modal-panel-in 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+@keyframes modal-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .world-news-detail-copy,
@@ -1939,11 +2020,103 @@ select {
   box-shadow: 0 20px 38px rgba(110, 125, 148, 0.12);
 }
 
+[data-theme="day"] .task-directory-panel {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.94), rgba(248, 252, 250, 0.92));
+  border-right-color: rgba(190, 223, 220, 0.62);
+  box-shadow:
+    inset -1px 0 0 rgba(255, 255, 255, 0.9),
+    0 0 60px rgba(107, 124, 150, 0.08);
+}
+
+[data-theme="day"] .task-directory-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(250, 253, 252, 0.88));
+  border-color: rgba(198, 210, 223, 0.58);
+  box-shadow:
+    0 4px 12px rgba(110, 125, 148, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+[data-theme="day"] .task-directory-card:hover {
+  border-color: rgba(15, 183, 167, 0.48);
+  box-shadow:
+    0 12px 28px rgba(110, 125, 148, 0.14),
+    0 0 0 1px rgba(15, 183, 167, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.98);
+}
+
+[data-theme="day"] .task-directory-card-active {
+  background: linear-gradient(135deg, rgba(15, 183, 167, 0.14), rgba(13, 148, 136, 0.1));
+  border-color: rgba(15, 183, 167, 0.52);
+  box-shadow:
+    0 8px 24px rgba(15, 183, 167, 0.12),
+    0 0 0 1px rgba(15, 183, 167, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96);
+}
+
+[data-theme="day"] .world-news-modal-backdrop {
+  background: rgba(245, 248, 247, 0.85);
+}
+
+[data-theme="day"] .world-news-modal-panel {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(250, 252, 251, 0.94));
+  border-color: rgba(191, 223, 220, 0.68);
+  box-shadow:
+    0 40px 90px rgba(107, 122, 150, 0.18),
+    0 0 0 1px rgba(255, 255, 255, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.98);
+}
+
 [data-theme="stardew"] .world-news-panel,
 [data-theme="stardew"] .world-news-card,
 [data-theme="stardew"] .ambient-dock-panel,
 [data-theme="stardew"] .ambient-dock-card {
   border-color: rgba(244, 217, 142, 0.22);
+}
+
+[data-theme="stardew"] .task-directory-panel {
+  background: linear-gradient(160deg, rgba(39, 59, 84, 0.92), rgba(78, 55, 36, 0.88));
+  border-right-color: rgba(244, 217, 142, 0.24);
+  box-shadow:
+    inset -1px 0 0 rgba(255, 240, 198, 0.08),
+    0 0 60px rgba(22, 29, 41, 0.28);
+}
+
+[data-theme="stardew"] .task-directory-card {
+  background: linear-gradient(135deg, rgba(43, 62, 87, 0.9), rgba(84, 58, 37, 0.82));
+  border-color: rgba(244, 217, 142, 0.2);
+  box-shadow:
+    0 4px 12px rgba(22, 29, 41, 0.18),
+    inset 0 1px 0 rgba(255, 241, 205, 0.08);
+}
+
+[data-theme="stardew"] .task-directory-card:hover {
+  border-color: rgba(233, 201, 106, 0.38);
+  box-shadow:
+    0 12px 28px rgba(22, 29, 41, 0.28),
+    0 0 0 1px rgba(233, 201, 106, 0.22),
+    inset 0 1px 0 rgba(255, 241, 205, 0.12);
+}
+
+[data-theme="stardew"] .task-directory-card-active {
+  background: linear-gradient(135deg, rgba(245, 198, 98, 0.22), rgba(194, 128, 58, 0.18));
+  border-color: rgba(255, 226, 148, 0.42);
+  box-shadow:
+    0 8px 24px rgba(233, 201, 106, 0.16),
+    0 0 0 1px rgba(255, 226, 148, 0.28),
+    inset 0 1px 0 rgba(255, 244, 212, 0.16);
+}
+
+[data-theme="stardew"] .world-news-modal-backdrop {
+  background: rgba(22, 38, 56, 0.82);
+}
+
+[data-theme="stardew"] .world-news-modal-panel {
+  background: linear-gradient(160deg, rgba(39, 59, 84, 0.98), rgba(78, 55, 36, 0.94));
+  border-color: rgba(244, 217, 142, 0.32);
+  box-shadow:
+    0 40px 90px rgba(18, 24, 35, 0.52),
+    0 0 0 1px rgba(255, 240, 198, 0.12),
+    inset 0 1px 0 rgba(255, 242, 204, 0.14);
 }
 
 [data-theme="stardew"] .world-news-button-accent,
@@ -1961,6 +2134,52 @@ select {
 [data-theme="starlit"] .world-news-filter-row[data-active="true"] {
   background: linear-gradient(180deg, rgba(125, 211, 252, 0.16), rgba(137, 121, 255, 0.12));
   border-color: rgba(141, 164, 255, 0.3);
+}
+
+[data-theme="starlit"] .task-directory-panel {
+  background: linear-gradient(160deg, rgba(10, 18, 38, 0.92), rgba(12, 21, 44, 0.88));
+  border-right-color: rgba(140, 162, 255, 0.16);
+  box-shadow:
+    inset -1px 0 0 rgba(255, 255, 255, 0.04),
+    0 0 60px rgba(3, 8, 22, 0.32);
+}
+
+[data-theme="starlit"] .task-directory-card {
+  background: linear-gradient(135deg, rgba(14, 22, 46, 0.88), rgba(17, 27, 56, 0.82));
+  border-color: rgba(141, 164, 255, 0.12);
+  box-shadow:
+    0 4px 12px rgba(3, 8, 22, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="starlit"] .task-directory-card:hover {
+  border-color: rgba(125, 211, 252, 0.32);
+  box-shadow:
+    0 12px 28px rgba(3, 8, 22, 0.32),
+    0 0 0 1px rgba(125, 211, 252, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="starlit"] .task-directory-card-active {
+  background: linear-gradient(135deg, rgba(125, 211, 252, 0.16), rgba(137, 121, 255, 0.12));
+  border-color: rgba(141, 164, 255, 0.32);
+  box-shadow:
+    0 8px 24px rgba(125, 211, 252, 0.14),
+    0 0 0 1px rgba(141, 164, 255, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="starlit"] .world-news-modal-backdrop {
+  background: rgba(4, 8, 21, 0.82);
+}
+
+[data-theme="starlit"] .world-news-modal-panel {
+  background: linear-gradient(160deg, rgba(10, 18, 38, 0.96), rgba(13, 22, 45, 0.94));
+  border-color: rgba(141, 164, 255, 0.22);
+  box-shadow:
+    0 40px 90px rgba(3, 8, 22, 0.58),
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 @keyframes starlit-drift {

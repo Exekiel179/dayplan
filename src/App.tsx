@@ -2179,6 +2179,27 @@ function WorldNewsView({
     setSelectedNote(null);
   };
 
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && detailVisible) {
+        closeDetail();
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [detailVisible]);
+
+  useEffect(() => {
+    if (detailVisible) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [detailVisible]);
+
   const openNewsDetail = (news: NewsItem) => {
     const nextNews = news.is_read ? newsItems : newsItems.map((item) => item.id === news.id ? { ...item, is_read: true } : item);
     if (!news.is_read) {
@@ -3101,23 +3122,22 @@ function WorldNewsView({
             <AnimatePresence>
               {detailVisible && (
                 <>
-                  <motion.button
-                    type="button"
-                    aria-label="关闭详情"
+                  <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    transition={{ duration: 0.16 }}
-                    className="world-news-drawer-backdrop absolute inset-0 z-20"
+                    transition={{ duration: 0.2 }}
+                    className="world-news-modal-backdrop fixed inset-0 z-40 flex items-center justify-center p-4"
                     onClick={closeDetail}
-                  />
-                  <motion.aside
-                    initial={{ opacity: 0, x: 24 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 24 }}
-                    transition={{ duration: 0.24, ease: 'easeOut' }}
-                    className="world-news-panel absolute inset-y-3 left-3 right-3 z-30 flex min-h-0 flex-col overflow-hidden rounded-[1.7rem] md:left-auto md:w-[30rem]"
                   >
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.92, y: 20 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.92, y: 20 }}
+                      transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
+                      className="world-news-modal-panel w-full max-w-3xl"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                     {detailMode === 'news' && selectedNews ? (
                       <>
                         <div className="border-b border-white/8 px-4 py-4">
@@ -3181,7 +3201,8 @@ function WorldNewsView({
                         </div>
                       </>
                     ) : null}
-                  </motion.aside>
+                    </motion.div>
+                  </motion.div>
                 </>
               )}
             </AnimatePresence>
@@ -5208,7 +5229,7 @@ export default function App() {
         {/* Left Collapsible Sidebar */}
         <motion.div
           animate={{ width: isSideNavOpen ? sideNavWidth : 0 }}
-          className="absolute inset-y-0 left-0 z-10 flex flex-col border-r border-white/[0.05] glass-panel lg:relative shrink-0 overflow-hidden"
+          className="task-directory-panel absolute inset-y-0 left-0 z-10 flex flex-col lg:relative shrink-0 overflow-hidden"
         >
           {/* Resize Handle */}
           <div
@@ -5249,15 +5270,10 @@ export default function App() {
                   key={task.id}
                   onClick={() => setSelectedTask(task)}
                   className={cn(
-                    "p-4 rounded-2xl border transition-all duration-300 cursor-pointer group relative overflow-hidden",
-                    selectedTask?.id === task.id
-                      ? "bg-teal-500/10 border-teal-500/50 shadow-[0_0_20px_rgba(20,184,166,0.1)]"
-                      : "bg-white/[0.02] border-white/[0.05] hover:border-white/20 hover:bg-white/[0.05]"
+                    "task-directory-card cursor-pointer group relative overflow-hidden p-4",
+                    selectedTask?.id === task.id && "task-directory-card-active"
                   )}
                 >
-                  {/* Subtle hover gradient */}
-                  <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
                   <div className="relative flex items-start justify-between gap-3">
                     <h3 className={cn(
                       "font-semibold text-sm leading-snug line-clamp-2 transition-colors",
