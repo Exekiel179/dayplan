@@ -26,6 +26,7 @@ const NEWSNOW_API_BASE = (process.env.NEWSNOW_API_BASE || 'https://newsnow.busiy
 const AI_MODEL = process.env.AI_MODEL || process.env.VITE_AI_MODEL || 'gemini-3.1-pro-preview';
 const AI_API_BASE = (process.env.AI_BASE_URL || process.env.VITE_AI_BASE_URL || 'https://api.aipaibox.com').replace(/\/$/, '');
 const AI_API_KEY = process.env.AI_API_KEY || process.env.VITE_AI_API_KEY || '';
+const AI_API_STYLE = (process.env.AI_API_STYLE || process.env.VITE_AI_API_STYLE || 'auto').trim().toLowerCase();
 const AUTH_ALLOW_REGISTRATION = (process.env.AUTH_ALLOW_REGISTRATION || 'true').toLowerCase() !== 'false';
 const SEED_USERS = parseSeedUsersFromEnv();
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24);
@@ -490,6 +491,30 @@ function parseDayPlanPayload(raw) {
   };
 }
 
+function shouldUseOpenAICompat() {
+  if (AI_API_STYLE === 'openai') return true;
+  if (AI_API_STYLE === 'gemini') return false;
+  return !/googleapis\.com|generativelanguage|\/v1beta\/models/i.test(AI_API_BASE);
+}
+
+async function parseErrorResponse(response) {
+  const fallback = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`.trim();
+  try {
+    const text = (await response.text()).trim();
+    if (!text) return fallback;
+    try {
+      const parsed = JSON.parse(text);
+      const message = parsed?.error?.message || parsed?.error || parsed?.message;
+      if (typeof message === 'string' && message.trim()) return message.trim();
+    } catch {
+      // Ignore JSON parse failure and return raw text below.
+    }
+    return text;
+  } catch {
+    return fallback;
+  }
+}
+
 function isValidHttpUrl(value) {
   try {
     const url = new URL(String(value || ''));
@@ -739,7 +764,8 @@ async function requestPlanByChatCompletions(task) {
   });
 
   if (!response.ok) {
-    throw new Error(`chat completions failed: ${response.status}`);
+    const details = await parseErrorResponse(response);
+    throw new Error(`chat completions failed: ${response.status}${details ? ` ${details}` : ''}`);
   }
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
@@ -767,7 +793,8 @@ async function requestPlanByGemini(task) {
   });
 
   if (!response.ok) {
-    throw new Error(`generateContent failed: ${response.status}`);
+    const details = await parseErrorResponse(response);
+    throw new Error(`generateContent failed: ${response.status}${details ? ` ${details}` : ''}`);
   }
   const data = await response.json();
   const content = data?.candidates?.[0]?.content?.parts
@@ -783,11 +810,10 @@ async function requestAIPlan(task) {
   if (!AI_API_KEY) {
     throw new Error('服务器未配置 AI_API_KEY');
   }
-  try {
-    return await requestPlanByChatCompletions(task);
-  } catch {
-    return requestPlanByGemini(task);
+  if (shouldUseOpenAICompat()) {
+    return requestPlanByChatCompletions(task);
   }
+  return requestPlanByGemini(task);
 }
 
 async function requestDayPlanByChatCompletions(payload) {
@@ -808,7 +834,8 @@ async function requestDayPlanByChatCompletions(payload) {
     }),
   });
   if (!response.ok) {
-    throw new Error(`chat completions failed: ${response.status}`);
+    const details = await parseErrorResponse(response);
+    throw new Error(`chat completions failed: ${response.status}${details ? ` ${details}` : ''}`);
   }
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
@@ -835,7 +862,8 @@ async function requestDayPlanByGemini(payload) {
     }),
   });
   if (!response.ok) {
-    throw new Error(`generateContent failed: ${response.status}`);
+    const details = await parseErrorResponse(response);
+    throw new Error(`generateContent failed: ${response.status}${details ? ` ${details}` : ''}`);
   }
   const data = await response.json();
   const content = data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n');
@@ -849,11 +877,10 @@ async function requestAIDayPlan(payload) {
   if (!AI_API_KEY) {
     throw new Error('服务器未配置 AI_API_KEY');
   }
-  try {
-    return await requestDayPlanByChatCompletions(payload);
-  } catch {
-    return requestDayPlanByGemini(payload);
+  if (shouldUseOpenAICompat()) {
+    return requestDayPlanByChatCompletions(payload);
   }
+  return requestDayPlanByGemini(payload);
 }
 
 function getUserTasksFile(username) {
@@ -1252,7 +1279,8 @@ async function requestRssScoutByChatCompletions(params) {
   });
 
   if (!response.ok) {
-    throw new Error(`chat completions failed: ${response.status}`);
+    const details = await parseErrorResponse(response);
+    throw new Error(`chat completions failed: ${response.status}${details ? ` ${details}` : ''}`);
   }
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
@@ -1280,7 +1308,8 @@ async function requestRssScoutByGemini(params) {
   });
 
   if (!response.ok) {
-    throw new Error(`generateContent failed: ${response.status}`);
+    const details = await parseErrorResponse(response);
+    throw new Error(`generateContent failed: ${response.status}${details ? ` ${details}` : ''}`);
   }
   const data = await response.json();
   const content = data?.candidates?.[0]?.content?.parts
@@ -1296,11 +1325,10 @@ async function requestAIRssScout(params) {
   if (!AI_API_KEY) {
     throw new Error('服务器未配置 AI_API_KEY');
   }
-  try {
-    return await requestRssScoutByChatCompletions(params);
-  } catch {
-    return requestRssScoutByGemini(params);
+  if (shouldUseOpenAICompat()) {
+    return requestRssScoutByChatCompletions(params);
   }
+  return requestRssScoutByGemini(params);
 }
 
 async function fetchTrendRadarLiveSnapshot({ limit = 60, platforms: rawPlatforms = '' } = {}) {

@@ -12,6 +12,7 @@ services:
       - PORT=3000
       - AI_API_KEY=${AI_API_KEY}
       - AI_BASE_URL=${AI_BASE_URL:-https://api.aipaibox.com}
+      - AI_API_STYLE=${AI_API_STYLE:-openai}
       - AI_MODEL=${AI_MODEL:-gemini-3.1-pro-preview}
       - AUTH_USERNAME=${AUTH_USERNAME:-admin}
       - AUTH_PASSWORD=${AUTH_PASSWORD:-admin123456}
