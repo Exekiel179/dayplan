@@ -66,12 +66,15 @@ import {
   AIDayTaskDraft,
   DailyEnergyCheckin,
   DailyRestSession,
+  DailyStateReport,
   ExternalBehaviorEvent,
   FocusReminderSettings,
   LongTermCadence,
   Task,
   TaskCollaborationLevel,
+  TaskCategoryKey,
   TaskCognitiveLoad,
+  TaskExecutionMode,
   TaskStep,
   TaskTimeline,
   UserTaskData,
@@ -128,6 +131,12 @@ const COGNITIVE_LOAD_OPTIONS: { value: TaskCognitiveLoad; label: string }[] = [
 const COLLABORATION_LEVEL_OPTIONS: { value: TaskCollaborationLevel; label: string }[] = [
   { value: 'low', label: '协作程度低' },
   { value: 'high', label: '协作程度高' },
+];
+const TASK_CATEGORY_OPTIONS: { value: TaskCategoryKey; label: string; shortLabel: string }[] = [
+  { value: 'research', label: '科研', shortLabel: '研' },
+  { value: 'development', label: '开发', shortLabel: '开' },
+  { value: 'learning', label: '学习', shortLabel: '学' },
+  { value: 'misc', label: '杂项', shortLabel: '杂' },
 ];
 
 type AmbientPresetId = 'white_noise' | 'brown_noise' | 'post_rock' | 'gaming_music';
@@ -835,6 +844,7 @@ function createDefaultWellbeingSettings(): WellbeingSettings {
   return {
     daily_checkins: {},
     daily_rest_sessions: {},
+    daily_state_reports: {},
     daily_behavior_events: {},
     daily_chat_messages: {},
   };
@@ -889,6 +899,15 @@ function normalizeCognitiveLoad(value: unknown): TaskCognitiveLoad {
 
 function normalizeCollaborationLevel(value: unknown): TaskCollaborationLevel {
   return value === 'high' ? 'high' : 'low';
+}
+
+function normalizeExecutionMode(value: unknown): TaskExecutionMode {
+  return value === 'parallel' ? 'parallel' : 'serial';
+}
+
+function normalizeTaskCategory(value: unknown): TaskCategoryKey {
+  if (value === 'research' || value === 'development' || value === 'learning') return value;
+  return 'misc';
 }
 
 function normalizeTrackingAccumulatedMs(value: unknown) {
@@ -970,6 +989,18 @@ function normalizeRecoveredEnergy(value: unknown) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return 0;
   return clamp(numeric, 0, 100);
+}
+
+function normalizeSelfRating(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 3;
+  return clamp(Math.round(numeric), 1, 5);
+}
+
+function normalizeSleepHours(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 7;
+  return clamp(Number(numeric.toFixed(1)), 0, 12);
 }
 
 function normalizeBehaviorDurationMinutes(value: unknown) {
@@ -1055,6 +1086,18 @@ function normalizeWellbeing(value: unknown): WellbeingSettings {
       return acc;
     }, {})
     : {};
+  const dailyStateReports = raw.daily_state_reports && typeof raw.daily_state_reports === 'object'
+    ? Object.entries(raw.daily_state_reports).reduce<Record<string, DailyStateReport>>((acc, [dayKey, report]) => {
+      if (!report || typeof report !== 'object') return acc;
+      const partial = report as Partial<DailyStateReport>;
+      acc[dayKey] = {
+        self_rating: normalizeSelfRating(partial.self_rating),
+        sleep_hours: normalizeSleepHours(partial.sleep_hours),
+        updated_at: Number.isFinite(Number(partial.updated_at)) ? Number(partial.updated_at) : Date.now(),
+      };
+      return acc;
+    }, {})
+    : {};
   const dailyBehaviorEvents = raw.daily_behavior_events && typeof raw.daily_behavior_events === 'object'
     ? Object.entries(raw.daily_behavior_events).reduce<Record<string, ExternalBehaviorEvent[]>>((acc, [dayKey, events]) => {
       if (!Array.isArray(events)) return acc;
@@ -1084,6 +1127,7 @@ function normalizeWellbeing(value: unknown): WellbeingSettings {
   return {
     daily_checkins: dailyCheckins,
     daily_rest_sessions: dailyRestSessions,
+    daily_state_reports: dailyStateReports,
     daily_behavior_events: dailyBehaviorEvents,
     daily_chat_messages: dailyChatMessages,
   };
@@ -1102,6 +1146,7 @@ function normalizeAIDayTaskDraft(value: unknown): AIDayTaskDraft | null {
     stress_score: clamp(Math.round(Number(raw.stress_score) || 3), 1, 5),
     cognitive_load: raw.cognitive_load === 'high' ? 'high' : 'low',
     collaboration_level: raw.collaboration_level === 'high' ? 'high' : 'low',
+    category_key: normalizeTaskCategory(raw.category_key),
     timeline: raw.timeline === 'long_term' ? 'long_term' : 'temporary',
   };
 }
@@ -1230,13 +1275,15 @@ function formatDurationFromMs(ms: number) {
 function getTaskEnergyBurnRate(task: Task, burnRateModifier = 1, concurrentTasksCount = 1) {
   let burn = 5 + (task.stress_score || 3) * 2;
   if (task.cognitive_load === 'high') burn += 6;
-  if (task.collaboration_level === 'high') burn += 3;
+  if (task.collaboration_level === 'high') burn -= 1.5;
   if (task.use_countdown_urgency && task.deadline_at) burn += 2;
 
-  // Non-linear penalty for multitasking
-  const multitaskingPenalty = 1 + Math.max(0, concurrentTasksCount - 1) * 0.8;
+  const coordinationPenalty = task.execution_mode === 'parallel'
+    ? (task.collaboration_level === 'high' ? 0.14 : 0.38)
+    : 0.8;
+  const multitaskingPenalty = 1 + Math.max(0, concurrentTasksCount - 1) * coordinationPenalty;
 
-  return Number((burn * burnRateModifier * multitaskingPenalty).toFixed(1));
+  return Number((Math.max(2.4, burn) * burnRateModifier * multitaskingPenalty).toFixed(1));
 }
 
 function getTaskLiveEnergyBurn(task: Task, now: number, burnRateModifier = 1, concurrentTasksCount = 1) {
@@ -1287,6 +1334,14 @@ function getCognitiveLoadLabel(value: TaskCognitiveLoad) {
 
 function getCollaborationLevelLabel(value: TaskCollaborationLevel) {
   return value === 'high' ? '协作高' : '协作低';
+}
+
+function getExecutionModeLabel(value: TaskExecutionMode) {
+  return value === 'parallel' ? '并行' : '串行';
+}
+
+function getTaskCategoryLabel(value: TaskCategoryKey) {
+  return TASK_CATEGORY_OPTIONS.find((option) => option.value === value)?.label || '杂项';
 }
 
 function getTaskUrgencyScore(task: Task, now: number) {
@@ -1341,7 +1396,7 @@ function buildRecommendationReason(task: Task, energyScore: number, now: number)
     reasons.push('适合在高状态时集中攻坚');
   }
   if (task.collaboration_level === 'high') {
-    reasons.push('需要沟通对齐，最好主动推进');
+    reasons.push(task.execution_mode === 'parallel' ? '这项更像等待 AI 或对话回合，可并行挂着推进' : '需要沟通对齐，最好主动推进');
   }
   if (task.timeline === 'temporary' && task.deadline_at) {
     if (task.deadline_at <= now) {
@@ -1506,6 +1561,14 @@ function buildDailyTaskMix(tasks: Task[]) {
   return result;
 }
 
+function sortTasksForLine(tasks: Task[], energyScore: number, pressureScore: number, now: number) {
+  return [...tasks].sort((a, b) => {
+    const orderDelta = (a.line_order || a.created_at) - (b.line_order || b.created_at);
+    if (Math.abs(orderDelta) > 0.001) return orderDelta;
+    return scoreTaskForMoment(b, energyScore, pressureScore, now) - scoreTaskForMoment(a, energyScore, pressureScore, now);
+  });
+}
+
 function normalizeTask(rawTask: Task): Task {
   const partial = rawTask as Partial<Task>;
   const dependencyIds = Array.isArray(partial.dependency_ids)
@@ -1556,6 +1619,9 @@ function normalizeTask(rawTask: Task): Task {
     energy_delta: normalizeEnergyDelta(partial.energy_delta),
     cognitive_load: normalizeCognitiveLoad(partial.cognitive_load),
     collaboration_level: normalizeCollaborationLevel(partial.collaboration_level),
+    execution_mode: normalizeExecutionMode(partial.execution_mode),
+    category_key: normalizeTaskCategory(partial.category_key),
+    line_order: Number.isFinite(Number(partial.line_order)) ? Number(partial.line_order) : Number(partial.created_at) || Date.now(),
     tracking_started_at: toSafeTimestamp(partial.tracking_started_at),
     tracking_accumulated_ms: normalizeTrackingAccumulatedMs(partial.tracking_accumulated_ms),
     ai_plan: typeof partial.ai_plan === 'string' ? partial.ai_plan : '',
@@ -3728,6 +3794,8 @@ export default function App() {
   const [wellbeing, setWellbeing] = useState<WellbeingSettings>(createDefaultWellbeingSettings());
   const [abilityModule, setAbilityModule] = useState<AbilityModuleSettings>(createDefaultAbilityModuleSettings());
   const [aiDayPlan, setAiDayPlan] = useState<AIDayPlanWorkspace>(createDefaultAIDayPlanWorkspace());
+  const [isAiPlannerExpanded, setIsAiPlannerExpanded] = useState(false);
+  const [isEnergyTheoryOpen, setIsEnergyTheoryOpen] = useState(false);
   const [focusReminderSettings, setFocusReminderSettings] = useState<FocusReminderSettings>(createDefaultFocusReminderSettings());
   const [rssFeeds, setRssFeeds] = useState<RSSFeed[]>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
@@ -3859,6 +3927,11 @@ export default function App() {
     recovered_energy: 0,
     updated_at: nowTs,
   };
+  const todayStateReport = wellbeing.daily_state_reports[todayKey] ?? {
+    self_rating: 3,
+    sleep_hours: 7,
+    updated_at: nowTs,
+  };
   const completedTodayTasks = tasks.filter((task) => task.last_completed_at && getDayKey(task.last_completed_at) === todayKey);
   const completionBoost = completedTodayTasks.length * 6;
   const energyDeltaBoost = completedTodayTasks.reduce((sum, task) => sum + (task.energy_delta || 0) * 8, 0);
@@ -3871,8 +3944,10 @@ export default function App() {
   const liveEnergyBurnRate = runningTasks.reduce((sum, task) => sum + getTaskEnergyBurnRate(task, behaviorBurnRateModifier, runningTasks.length), 0);
   const liveRestRecovery = getLiveRestRecovery(todayRestSession, nowTs);
   const totalRestRecovery = normalizeRecoveredEnergy(todayRestSession.recovered_energy) + liveRestRecovery;
+  const sleepRecoveryBoost = (todayStateReport.sleep_hours - 7) * 6;
+  const selfRatingBoost = (todayStateReport.self_rating - 3) * 5;
   const energyScore = clamp(
-    Math.round(todayInitialEnergy - pressureScore * 0.45 + completionBoost + energyDeltaBoost + progressBoost - liveEnergyBurn + totalRestRecovery + behaviorRecovery),
+    Math.round(todayInitialEnergy - pressureScore * 0.45 + completionBoost + energyDeltaBoost + progressBoost - liveEnergyBurn + totalRestRecovery + behaviorRecovery + sleepRecoveryBoost + selfRatingBoost),
     0,
     100
   );
@@ -3946,6 +4021,7 @@ export default function App() {
   const statusSummary = pressureScore >= 70
     ? (energyScore >= 60 ? '高压高能，适合短冲刺推进' : '高压低能，优先降载和缓冲')
     : (energyScore >= 60 ? '状态良好，可以先吃掉高价值任务' : '低压低能，适合整理和恢复');
+  const stateSignalSummary = `睡眠 ${todayStateReport.sleep_hours}h · 自评 ${todayStateReport.self_rating}/5`;
   const getAbilityModuleDisplayValue = (moduleId: string) => {
     const module = abilityModuleOptions.find((item) => item.id === moduleId);
     const baseValue = abilityModule.special_totals[moduleId] || 0;
@@ -4014,6 +4090,14 @@ export default function App() {
       simpleHomeTasks.push(task);
     }
   });
+  const homeLineTasks = sortTasksForLine(simpleHomeTasks, energyScore, pressureScore, nowTs);
+  const serialLineTasks = homeLineTasks.filter((task) => task.execution_mode !== 'parallel');
+  const parallelLineTasks = homeLineTasks.filter((task) => task.execution_mode === 'parallel');
+  const theorySummary = todayStateReport.sleep_hours >= 7.5 && todayStateReport.self_rating >= 4
+    ? '先吃主线。你现在有条件把串行任务往前压。'
+    : todayStateReport.sleep_hours < 6.5
+      ? '睡眠不足时，先把并行等待项挂起来，再处理低阻力任务。'
+      : '状态一般时，把串行任务留给高能段，并行任务塞进等待空档。';
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -4351,6 +4435,9 @@ export default function App() {
       energy_delta: 0,
       cognitive_load: 'low',
       collaboration_level: 'low',
+      execution_mode: 'serial',
+      category_key: 'misc',
+      line_order: Date.now(),
       tracking_started_at: null,
       tracking_accumulated_ms: 0,
       steps: [],
@@ -4598,6 +4685,63 @@ export default function App() {
         },
       },
     }));
+  };
+
+  const updateTodaySleepHours = (value: number) => {
+    const nextValue = normalizeSleepHours(value);
+    setWellbeing((prev) => ({
+      ...prev,
+      daily_state_reports: {
+        ...prev.daily_state_reports,
+        [todayKey]: {
+          ...(prev.daily_state_reports[todayKey] || { self_rating: 3, sleep_hours: 7 }),
+          sleep_hours: nextValue,
+          updated_at: Date.now(),
+        },
+      },
+    }));
+  };
+
+  const updateTodaySelfRating = (value: number) => {
+    const nextValue = normalizeSelfRating(value);
+    setWellbeing((prev) => ({
+      ...prev,
+      daily_state_reports: {
+        ...prev.daily_state_reports,
+        [todayKey]: {
+          ...(prev.daily_state_reports[todayKey] || { self_rating: 3, sleep_hours: 7 }),
+          self_rating: nextValue,
+          updated_at: Date.now(),
+        },
+      },
+    }));
+  };
+
+  const moveTaskInLine = (taskId: string, direction: -1 | 1, taskIds: string[]) => {
+    const orderedIds = taskIds.filter(Boolean);
+    const currentIndex = orderedIds.indexOf(taskId);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderedIds.length) return;
+    const nextIds = [...orderedIds];
+    [nextIds[currentIndex], nextIds[targetIndex]] = [nextIds[targetIndex], nextIds[currentIndex]];
+    setTasks((prev) => {
+      const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
+      return prev.map((task) => (
+        rankMap.has(task.id)
+          ? { ...task, line_order: rankMap.get(task.id) }
+          : task
+      ));
+    });
+  };
+
+  const toggleTaskExecutionMode = (task: Task) => {
+    const nextMode: TaskExecutionMode = task.execution_mode === 'parallel' ? 'serial' : 'parallel';
+    setTasks((prev) => prev.map((item) => (
+      item.id === task.id
+        ? { ...item, execution_mode: nextMode }
+        : item
+    )));
+    setSelectedTask((prev) => (prev?.id === task.id ? { ...prev, execution_mode: nextMode } : prev));
   };
 
   const submitBehaviorChat = (rawInput?: string) => {
@@ -4879,6 +5023,9 @@ export default function App() {
         energy_delta: draft.energy_delta,
         cognitive_load: draft.cognitive_load,
         collaboration_level: draft.collaboration_level,
+        execution_mode: draft.collaboration_level === 'high' ? 'parallel' : 'serial',
+        category_key: draft.category_key,
+        line_order: now + index,
         tracking_started_at: null,
         tracking_accumulated_ms: 0,
         ai_plan: '',
@@ -5116,6 +5263,12 @@ export default function App() {
             {getCollaborationLevelLabel(task.collaboration_level || 'low')}
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+            {getExecutionModeLabel(task.execution_mode || 'serial')}
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+            {getTaskCategoryLabel(task.category_key || 'misc')}
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
             {getEnergyDeltaLabel(task.energy_delta || 0)}
           </span>
           <span className={cn("rounded-full border px-2 py-1", timelineAccent.badge)}>
@@ -5202,9 +5355,15 @@ export default function App() {
     {
       label,
       emphasis = 'default',
+      canMoveUp = false,
+      canMoveDown = false,
+      taskIds = [],
     }: {
       label?: string;
       emphasis?: 'default' | 'standby';
+      canMoveUp?: boolean;
+      canMoveDown?: boolean;
+      taskIds?: string[];
     } = {}
   ) => {
     const ready = isTaskReady(task) && isLongTermDue(task, nowTs);
@@ -5234,6 +5393,12 @@ export default function App() {
                 {label}
               </span>
             ) : null}
+            <span className="task-line-label rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold text-slate-300">
+              {getExecutionModeLabel(task.execution_mode || 'serial')}
+            </span>
+            <span className="task-line-label rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold text-slate-300">
+              {getTaskCategoryLabel(task.category_key || 'misc')}
+            </span>
             <button
               type="button"
               onClick={() => setSelectedTask(task)}
@@ -5245,26 +5410,53 @@ export default function App() {
           <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-slate-400 text-safe-wrap">
             {getTaskNextActionText(task)}
           </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+            <span>{task.estimated_minutes}m</span>
+            <span>{getCollaborationLevelLabel(task.collaboration_level || 'low')}</span>
+            <span>耗能 {getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h</span>
+          </div>
         </div>
-        <div className="task-line-minutes hidden shrink-0 text-[11px] text-slate-400 sm:block">
-          {task.estimated_minutes}m
+        <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => moveTaskInLine(task.id, -1, taskIds)}
+            disabled={!canMoveUp}
+            className={cn("rounded-full border border-white/10 p-1.5 text-slate-300 transition-colors", canMoveUp ? "hover:bg-white/8 hover:text-white" : "cursor-not-allowed opacity-35")}
+          >
+            <ChevronUp className="h-3 w-3" />
+          </button>
+            <button
+              type="button"
+              onClick={() => moveTaskInLine(task.id, 1, taskIds)}
+            disabled={!canMoveDown}
+            className={cn("rounded-full border border-white/10 p-1.5 text-slate-300 transition-colors", canMoveDown ? "hover:bg-white/8 hover:text-white" : "cursor-not-allowed opacity-35")}
+          >
+            <ChevronDown className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleTaskExecutionMode(task)}
+            className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold text-slate-200 transition-colors hover:bg-white/8 hover:text-white"
+          >
+            {task.execution_mode === 'parallel' ? '转串行' : '转并行'}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleTaskTracking(task)}
+            disabled={!ready}
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+              ready
+                ? task.tracking_started_at
+                  ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                  : "border-rose-300/30 bg-rose-500/16 text-rose-100 hover:bg-rose-500/25"
+                : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
+            )}
+          >
+            {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+            {task.tracking_started_at ? formatDurationFromMs(getTrackedMs(task, nowTs)) : '开始'}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => toggleTaskTracking(task)}
-          disabled={!ready}
-          className={cn(
-            "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-            ready
-              ? task.tracking_started_at
-                ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
-                : "border-rose-300/30 bg-rose-500/16 text-rose-100 hover:bg-rose-500/25"
-              : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
-          )}
-        >
-          {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-          {task.tracking_started_at ? '暂停' : '开始'}
-        </button>
       </div>
     );
   };
@@ -5588,6 +5780,14 @@ export default function App() {
                   <span className="top-status-label">{energyTone.label}</span>
                   <strong className="top-status-value">{energyScore}</strong>
                 </div>
+                <div className="top-status-item top-status-item-date">
+                  <span className="top-status-label">睡眠</span>
+                  <strong className="top-status-value">{todayStateReport.sleep_hours}h</strong>
+                </div>
+                <div className="top-status-item top-status-item-module">
+                  <span className="top-status-label">自评</span>
+                  <strong className="top-status-value">{todayStateReport.self_rating}/5</strong>
+                </div>
                 <div className="top-status-item top-status-item-module">
                   <span className="top-status-label">{activeAbilityModule?.label || '木鱼'}</span>
                   <strong className="top-status-value">
@@ -5660,6 +5860,42 @@ export default function App() {
                         <span>{'\u4f4e\u7535\u91cf'}</span>
                         <span>{todayKey}</span>
                         <span>{'\u9ad8\u72b6\u6001'}</span>
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <label className="rounded-xl border border-white/10 bg-slate-950/55 px-3 py-3 text-[11px] text-slate-300">
+                          睡眠报告（小时）
+                          <input
+                            type="range"
+                            min={0}
+                            max={10}
+                            step={0.5}
+                            value={todayStateReport.sleep_hours}
+                            onChange={(e) => updateTodaySleepHours(Number(e.target.value))}
+                            className="mt-2 w-full accent-emerald-300"
+                          />
+                          <span className="mt-2 block text-slate-400">{todayStateReport.sleep_hours} 小时</span>
+                        </label>
+                        <div className="rounded-xl border border-white/10 bg-slate-950/55 px-3 py-3 text-[11px] text-slate-300">
+                          自我评测
+                          <div className="mt-2 grid grid-cols-5 gap-2">
+                            {[1, 2, 3, 4, 5].map((score) => (
+                              <button
+                                key={`state-${score}`}
+                                type="button"
+                                onClick={() => updateTodaySelfRating(score)}
+                                className={cn(
+                                  "rounded-lg border px-0 py-2 text-[11px] font-bold transition-colors",
+                                  todayStateReport.self_rating === score
+                                    ? "border-emerald-300/60 bg-emerald-500/25 text-white"
+                                    : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
+                                )}
+                              >
+                                {score}
+                              </button>
+                            ))}
+                          </div>
+                          <span className="mt-2 block text-slate-400">1 表示发虚，5 表示清醒能扛。</span>
+                        </div>
                       </div>
                       <div className="mt-4 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-3">
                         <div className="flex items-center justify-between gap-3">
@@ -5752,7 +5988,7 @@ export default function App() {
                           />
                         </div>
                         <p className="mt-2 text-[11px] text-current/80">
-                          {statusSummary}{'\u3002\u5df2\u5b8c\u6210'} {completedTodayTasks.length} {'\u9879\uff0c\u6062\u590d'} {(totalRestRecovery + behaviorRecovery).toFixed(1)} {'\uff0c\u5f53\u524d\u901f\u7387'} {liveEnergyBurnRate.toFixed(0)}{'\u002f\u5c0f\u65f6\u3002'}
+                          {statusSummary}{' · '}{stateSignalSummary}{'\u3002\u5df2\u5b8c\u6210'} {completedTodayTasks.length} {'\u9879\uff0c\u6062\u590d'} {(totalRestRecovery + behaviorRecovery).toFixed(1)} {'\uff0c\u5f53\u524d\u901f\u7387'} {liveEnergyBurnRate.toFixed(0)}{'\u002f\u5c0f\u65f6\u3002'}
                         </p>
                         <p className="mt-1 text-[11px] text-current/75">{latestBehaviorMessage}</p>
                         <div className="mt-3 flex items-center justify-between gap-3">
@@ -6219,7 +6455,29 @@ export default function App() {
           </AnimatePresence>
 
               <section className="glass-panel rounded-[1.6rem] p-5 sm:p-6">
-                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_22rem]">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-rose-200/70">AI 日程规划</p>
+                    <h3 className="mt-1 text-lg font-semibold text-white text-safe-wrap">AI 规划</h3>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {aiDayPlan.summary ? (
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-slate-200">
+                        主线：{aiDayPlan.core_focus || '待确认'}
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setIsAiPlannerExpanded((prev) => !prev)}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
+                    >
+                      {isAiPlannerExpanded ? '收起 AI 规划' : '展开 AI 规划'}
+                      <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isAiPlannerExpanded && "rotate-90")} />
+                    </button>
+                  </div>
+                </div>
+                {isAiPlannerExpanded && (
+                <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_22rem]">
                   <div>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -6392,18 +6650,16 @@ export default function App() {
                     </div>
                   </aside>
                 </div>
+                )}
               </section>
 
               <section className="home-stage rounded-[1.9rem] border border-white/10 bg-[linear-gradient(160deg,rgba(6,17,29,0.96),rgba(9,25,37,0.88))] p-5 shadow-[0_26px_64px_rgba(2,8,18,0.34)] sm:p-6">
                 <div className="home-stage-header">
                   <div className="max-w-3xl">
-                    <p className="home-stage-kicker text-[10px] font-bold uppercase tracking-[0.24em] text-rose-200/70">轻量首页</p>
+                    <p className="home-stage-kicker text-[10px] font-bold uppercase tracking-[0.24em] text-rose-200/70">任务线</p>
                     <h3 className="mt-2 text-[clamp(1.42rem,2.6vw,2.2rem)] font-semibold leading-tight text-white text-safe-wrap">
-                      少看一点，直接开始。
+                      今日任务
                     </h3>
-                    <p className="mt-2 max-w-[58ch] text-sm leading-6 text-slate-300 text-safe-wrap">
-                      这一版把首页做成一块专注工作台。主线在左，今日线和低能线在右，其他判断信息只在需要时出现。
-                    </p>
                   </div>
                   <div className="home-stage-stats">
                     <div className="home-stage-stat">
@@ -6411,12 +6667,12 @@ export default function App() {
                       <strong>1 件</strong>
                     </div>
                     <div className="home-stage-stat">
-                      <span>今日线</span>
-                      <strong>{simpleHomeTasks.length} 项</strong>
+                      <span>串行 / 并行</span>
+                      <strong>{serialLineTasks.length} / {parallelLineTasks.length}</strong>
                     </div>
                     <div className="home-stage-stat">
-                      <span>当前能量</span>
-                      <strong>{energyScore}</strong>
+                      <span>激励模块</span>
+                      <strong>{formatMetricValue(activeAbilityModuleScore)}</strong>
                     </div>
                   </div>
                 </div>
@@ -6463,29 +6719,55 @@ export default function App() {
                       <div className="home-focus-footer">
                         <span className="home-note-pill">{focusHeadline}</span>
                         <span className="home-note-pill">WIP {runningTasks.length}/{FOCUS_WIP_LIMIT}</span>
-                        <span className="home-note-pill">压力 {pressureScore}</span>
+                        <span className="home-note-pill">{activeAbilityModule?.label || '木鱼'} {formatMetricValue(activeAbilityModuleScore)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setIsEnergyTheoryOpen((prev) => !prev)}
+                          className="home-note-pill cursor-pointer transition-colors hover:bg-white/[0.12]"
+                        >
+                          {isEnergyTheoryOpen ? '收起精力理论' : '查看精力理论'}
+                        </button>
                       </div>
                     </div>
+                    {isEnergyTheoryOpen && (
+                      <div className="rounded-[1rem] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-6 text-slate-300">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">精力理论</p>
+                        <p className="mt-2 text-safe-wrap">{theorySummary}</p>
+                        <p className="mt-2 text-safe-wrap">睡眠报告会抬高或压低今日基线，自评决定你今天适合先啃串行任务，还是先让并行等待项跑起来。</p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="home-side-column">
                     <section className="home-stack-card">
                       <div className="home-stack-head">
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">今日线</p>
-                          <h4 className="mt-1 text-sm font-semibold text-white text-safe-wrap">保持短一点，读完就能动手</h4>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">串行主线</p>
+                          <h4 className="mt-1 text-sm font-semibold text-white text-safe-wrap">串行</h4>
                         </div>
-                        <span>{simpleHomeTasks.length} 项</span>
+                        <div className="flex items-center gap-2">
+                          <span>{serialLineTasks.length} 项</span>
+                          <button
+                            type="button"
+                            onClick={handleAddTask}
+                            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
+                          >
+                            新建任务
+                          </button>
+                        </div>
                       </div>
                       <div className="home-stack-body">
-                        {simpleHomeTasks.length === 0 ? (
+                        {serialLineTasks.length === 0 ? (
                           <div className="rounded-[1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
-                            今天还没有排出一条清爽的待办线。
+                            先放 1 到 3 个必须亲自盯住的任务，剩下都不要挤进主线。
                           </div>
                         ) : (
-                          simpleHomeTasks.map((task, index) =>
+                          serialLineTasks.map((task, index) =>
                             renderTaskLine(task, {
-                              label: index === 0 ? '先做' : '待办',
+                              label: index === 0 ? '现在' : '下一位',
+                              canMoveUp: index > 0,
+                              canMoveDown: index < serialLineTasks.length - 1,
+                              taskIds: serialLineTasks.map((item) => item.id),
                             })
                           )
                         )}
@@ -6495,21 +6777,24 @@ export default function App() {
                     <section className="home-stack-card home-stack-card-standby">
                       <div className="home-stack-head">
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-stone-200/80">低能线</p>
-                          <h4 className="mt-1 text-sm font-semibold text-white text-safe-wrap">累了就切过来，不用硬顶</h4>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-stone-200/80">并行窗口</p>
+                          <h4 className="mt-1 text-sm font-semibold text-white text-safe-wrap">并行</h4>
                         </div>
-                        <span>{lowEnergyStandby.length} 项</span>
+                        <span>{parallelLineTasks.length} 项</span>
                       </div>
                       <div className="home-stack-body">
-                        {lowEnergyStandby.length === 0 ? (
+                        {parallelLineTasks.length === 0 ? (
                           <div className="rounded-[1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
-                            还没有低能备选。补 2 到 3 个 10 分钟以内的小动作会更轻松。
+                            把高协作任务切到并行，这样等 AI 跑回复时你还能继续推进别的事。
                           </div>
                         ) : (
-                          lowEnergyStandby.slice(0, 3).map((task) =>
+                          parallelLineTasks.map((task, index) =>
                             renderTaskLine(task, {
-                              label: '低能',
+                              label: index === 0 ? '挂起中' : '并行',
                               emphasis: 'standby',
+                              canMoveUp: index > 0,
+                              canMoveDown: index < parallelLineTasks.length - 1,
+                              taskIds: parallelLineTasks.map((item) => item.id),
                             })
                           )
                         )}
@@ -6519,7 +6804,7 @@ export default function App() {
                     <div className="home-ambient-note">
                       <span className="home-ambient-dot" />
                       <p className="text-safe-wrap">
-                        {isExecutionSparse ? '先从清单里挑一个最小动作，把页面从“看”切回“做”。' : focusHeadline}
+                        {isExecutionSparse ? '先新建一个最小动作，然后直接开始计时。' : `睡眠 ${todayStateReport.sleep_hours}h · 自评 ${todayStateReport.self_rating}/5 · 当前速率 ${liveEnergyBurnRate.toFixed(1)}/小时`}
                       </p>
                     </div>
                   </div>
@@ -6740,10 +7025,7 @@ export default function App() {
                 <div className="home-map-summary">
                   <div className="home-map-copy">
                     <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">四象限地图</p>
-                    <h3 className="mt-1 text-base font-semibold text-white text-safe-wrap">把判断留在第二层，需要时再展开</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-400 text-safe-wrap">
-                      当你想重新判断任务轻重缓急，或者需要给新任务落点时，再打开这一层。
-                    </p>
+                    <h3 className="mt-1 text-base font-semibold text-white text-safe-wrap">四象限</h3>
                   </div>
                   <div className="home-map-actions">
                     <span className="home-map-pill">仅在校准时出现</span>
@@ -7475,6 +7757,54 @@ export default function App() {
                         高协作任务会被建议集中到同一段沟通时间里处理。
                       </p>
                     </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+                    <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-slate-200">执行方式</h4>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {(['serial', 'parallel'] as TaskExecutionMode[]).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setSelectedTask({ ...selectedTask, execution_mode: mode })}
+                          className={cn(
+                            "rounded-xl border px-3 py-2 text-xs font-bold transition-all",
+                            (selectedTask.execution_mode || 'serial') === mode
+                              ? "border-white/50 bg-white/18 text-white"
+                              : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
+                          )}
+                        >
+                          {mode === 'serial' ? '串行推进' : '并行挂起'}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[11px] leading-5 text-slate-400">
+                      串行表示这件事会独占注意力；并行更适合等待 AI、回复或外部反馈时穿插推进。
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+                    <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-slate-200">任务类别</h4>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {TASK_CATEGORY_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setSelectedTask({ ...selectedTask, category_key: option.value })}
+                          className={cn(
+                            "rounded-xl border px-3 py-2 text-xs font-bold transition-all",
+                            (selectedTask.category_key || 'misc') === option.value
+                              ? "border-white/50 bg-white/18 text-white"
+                              : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[11px] leading-5 text-slate-400">
+                      用类别把任务分回你的真实工作结构：科研、开发、学习、杂项。
+                    </p>
                   </div>
 
                   {selectedTask.timeline === 'long_term' && (

@@ -93,6 +93,7 @@ const DAY_PLAN_SYSTEM_PROMPT = `你是一位擅长把自然语言整理成当日
       "stress_score": 3,
       "cognitive_load": "low 或 high",
       "collaboration_level": "low 或 high",
+      "category_key": "research 或 development 或 learning 或 misc",
       "timeline": "temporary 或 long_term"
     }
   ]
@@ -484,6 +485,7 @@ function parseDayPlanPayload(raw) {
             stress_score: Math.max(1, Math.min(5, Math.round(Number(item.stress_score) || 3))),
             cognitive_load: item.cognitive_load === 'high' ? 'high' : 'low',
             collaboration_level: item.collaboration_level === 'high' ? 'high' : 'low',
+            category_key: ['research', 'development', 'learning'].includes(item.category_key) ? item.category_key : 'misc',
             timeline: item.timeline === 'long_term' ? 'long_term' : 'temporary',
           }))
           .filter((item) => item.title)
@@ -924,6 +926,7 @@ function normalizeTaskPayload(payload) {
       wellbeing: {
         daily_checkins: {},
         daily_rest_sessions: {},
+        daily_state_reports: {},
       },
       ability_module: normalizeAbilityModule(null),
       ai_day_plan: {
@@ -994,10 +997,33 @@ function normalizeTaskPayload(payload) {
                     ])
                 )
               : {},
+            daily_state_reports: payload.wellbeing.daily_state_reports && typeof payload.wellbeing.daily_state_reports === 'object'
+              ? Object.fromEntries(
+                  Object.entries(payload.wellbeing.daily_state_reports)
+                    .filter(([key, value]) =>
+                      typeof key === 'string'
+                      && value
+                      && typeof value === 'object'
+                    )
+                    .map(([key, value]) => [
+                      key,
+                      {
+                        self_rating: Number.isFinite(Number(value.self_rating))
+                          ? Math.max(1, Math.min(5, Math.round(Number(value.self_rating))))
+                          : 3,
+                        sleep_hours: Number.isFinite(Number(value.sleep_hours))
+                          ? Math.max(0, Math.min(12, Number(Number(value.sleep_hours).toFixed(1))))
+                          : 7,
+                        updated_at: Number.isFinite(Number(value.updated_at)) ? Number(value.updated_at) : Date.now(),
+                      },
+                    ])
+                )
+              : {},
           }
         : {
             daily_checkins: {},
             daily_rest_sessions: {},
+            daily_state_reports: {},
           },
       ability_module: normalizeAbilityModule(payload.ability_module),
       ai_day_plan: payload.ai_day_plan && typeof payload.ai_day_plan === 'object'
@@ -1045,10 +1071,11 @@ function normalizeTaskPayload(payload) {
   return {
     tasks: [],
     ability_dimensions: [],
-    wellbeing: {
-      daily_checkins: {},
-      daily_rest_sessions: {},
-    },
+      wellbeing: {
+        daily_checkins: {},
+        daily_rest_sessions: {},
+        daily_state_reports: {},
+      },
     ability_module: normalizeAbilityModule(null),
     ai_day_plan: {
       input: '',

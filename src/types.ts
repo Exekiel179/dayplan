@@ -8,6 +8,8 @@ export type TaskTimeline = 'temporary' | 'long_term';
 export type LongTermCadence = 'daily' | 'weekly' | 'interval';
 export type TaskCognitiveLoad = 'low' | 'high';
 export type TaskCollaborationLevel = 'low' | 'high';
+export type TaskExecutionMode = 'serial' | 'parallel';
+export type TaskCategoryKey = 'research' | 'development' | 'learning' | 'misc';
 
 export interface Task {
   id: string;
@@ -33,6 +35,9 @@ export interface Task {
   energy_delta?: number;
   cognitive_load?: TaskCognitiveLoad;
   collaboration_level?: TaskCollaborationLevel;
+  execution_mode?: TaskExecutionMode;
+  category_key?: TaskCategoryKey;
+  line_order?: number;
   tracking_started_at?: number | null;
   tracking_accumulated_ms?: number;
   ai_plan?: string;
@@ -49,6 +54,12 @@ export interface DailyRestSession {
   is_resting: boolean;
   started_at: number | null;
   recovered_energy: number;
+  updated_at: number;
+}
+
+export interface DailyStateReport {
+  self_rating: number;
+  sleep_hours: number;
   updated_at: number;
 }
 
@@ -76,6 +87,7 @@ export interface WellbeingChatMessage {
 export interface WellbeingSettings {
   daily_checkins: Record<string, DailyEnergyCheckin>;
   daily_rest_sessions: Record<string, DailyRestSession>;
+  daily_state_reports: Record<string, DailyStateReport>;
   daily_behavior_events: Record<string, ExternalBehaviorEvent[]>;
   daily_chat_messages: Record<string, WellbeingChatMessage[]>;
 }
@@ -95,6 +107,7 @@ export interface AIDayTaskDraft {
   stress_score: number;
   cognitive_load: TaskCognitiveLoad;
   collaboration_level: TaskCollaborationLevel;
+  category_key: TaskCategoryKey;
   timeline: TaskTimeline;
 }
 
