@@ -34,6 +34,8 @@ import {
   MessageSquare,
   Send,
   Globe,
+  Bell,
+  BellRing,
   Rss,
   BookOpen,
   Tag,
@@ -60,9 +62,12 @@ import {
   AuthResult,
   SessionValidationResult,
   AbilityModuleSettings,
+  AIDayPlanWorkspace,
+  AIDayTaskDraft,
   DailyEnergyCheckin,
   DailyRestSession,
   ExternalBehaviorEvent,
+  FocusReminderSettings,
   LongTermCadence,
   Task,
   TaskCollaborationLevel,
@@ -78,6 +83,12 @@ import {
 } from './types';
 
 type AppTheme = 'night' | 'day' | 'stardew' | 'starlit';
+type TaskSizeBucket = 'big' | 'medium' | 'small';
+type CalendarSubscriptionInfo = {
+  token: string;
+  url: string;
+  appleUrl: string;
+};
 
 const THEME_OPTIONS: { id: AppTheme; label: string; shortLabel: string }[] = [
   { id: 'night', label: '夜间霓光', shortLabel: '夜' },
@@ -96,6 +107,13 @@ const AMBIENT_AUDIO_STORAGE_KEY = 'dayplan_ambient_audio';
 const DEFAULT_INITIAL_ENERGY = 72;
 const REST_RECOVERY_PER_HOUR = 6;
 const MOTIVATION_SETTLE_INTERVAL_MS = 5000;
+const FOCUS_WIP_LIMIT = 2;
+const DEFAULT_FOCUS_REMINDER_INTERVAL = 35;
+const DAILY_MIX_LIMITS: Record<TaskSizeBucket, number> = {
+  big: 1,
+  medium: 3,
+  small: 5,
+};
 const ENERGY_DELTA_OPTIONS = [
   { value: -2, label: '很耗能' },
   { value: -1, label: '偏耗能' },
@@ -793,6 +811,26 @@ function createDefaultAbilityModuleSettings(): AbilityModuleSettings {
   };
 }
 
+function createDefaultAIDayPlanWorkspace(): AIDayPlanWorkspace {
+  return {
+    input: '',
+    summary: '',
+    core_focus: '',
+    schedule_markdown: '',
+    tasks: [],
+    updated_at: 0,
+  };
+}
+
+function createDefaultFocusReminderSettings(): FocusReminderSettings {
+  return {
+    enabled: false,
+    desktop_notifications: false,
+    interval_minutes: DEFAULT_FOCUS_REMINDER_INTERVAL,
+    last_notified_at: null,
+  };
+}
+
 function createDefaultWellbeingSettings(): WellbeingSettings {
   return {
     daily_checkins: {},
@@ -1051,6 +1089,53 @@ function normalizeWellbeing(value: unknown): WellbeingSettings {
   };
 }
 
+function normalizeAIDayTaskDraft(value: unknown): AIDayTaskDraft | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<AIDayTaskDraft>;
+  const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+  if (!title) return null;
+  return {
+    title,
+    description: typeof raw.description === 'string' ? raw.description.trim() : '',
+    estimated_minutes: clamp(Math.round(Number(raw.estimated_minutes) || 30), 10, 180),
+    energy_delta: clamp(Math.round(Number(raw.energy_delta) || 0), -2, 2),
+    stress_score: clamp(Math.round(Number(raw.stress_score) || 3), 1, 5),
+    cognitive_load: raw.cognitive_load === 'high' ? 'high' : 'low',
+    collaboration_level: raw.collaboration_level === 'high' ? 'high' : 'low',
+    timeline: raw.timeline === 'long_term' ? 'long_term' : 'temporary',
+  };
+}
+
+function normalizeAIDayPlanWorkspace(value: unknown): AIDayPlanWorkspace {
+  if (!value || typeof value !== 'object') {
+    return createDefaultAIDayPlanWorkspace();
+  }
+  const raw = value as Partial<AIDayPlanWorkspace>;
+  return {
+    input: typeof raw.input === 'string' ? raw.input : '',
+    summary: typeof raw.summary === 'string' ? raw.summary : '',
+    core_focus: typeof raw.core_focus === 'string' ? raw.core_focus : '',
+    schedule_markdown: typeof raw.schedule_markdown === 'string' ? raw.schedule_markdown : '',
+    tasks: Array.isArray(raw.tasks)
+      ? raw.tasks.map((task) => normalizeAIDayTaskDraft(task)).filter((task): task is AIDayTaskDraft => Boolean(task))
+      : [],
+    updated_at: Number.isFinite(Number(raw.updated_at)) ? Number(raw.updated_at) : 0,
+  };
+}
+
+function normalizeFocusReminderSettings(value: unknown): FocusReminderSettings {
+  if (!value || typeof value !== 'object') {
+    return createDefaultFocusReminderSettings();
+  }
+  const raw = value as Partial<FocusReminderSettings>;
+  return {
+    enabled: Boolean(raw.enabled),
+    desktop_notifications: Boolean(raw.desktop_notifications),
+    interval_minutes: clamp(Math.round(Number(raw.interval_minutes) || DEFAULT_FOCUS_REMINDER_INTERVAL), 10, 180),
+    last_notified_at: toSafeTimestamp(raw.last_notified_at),
+  };
+}
+
 function getDayKey(ts: number) {
   const date = new Date(ts);
   const year = date.getFullYear();
@@ -1179,17 +1264,17 @@ function stopTrackingTaskState(task: Task, now: number, liveBurnDeduction: numbe
 }
 
 function getPressureTone(score: number) {
-  if (score >= 80) return { label: '过载', card: 'border-rose-400/30 bg-rose-500/12 text-rose-100', bar: 'from-rose-500 to-orange-400' };
-  if (score >= 60) return { label: '偏高', card: 'border-amber-400/30 bg-amber-500/12 text-amber-100', bar: 'from-amber-400 to-orange-300' };
-  if (score >= 35) return { label: '可控', card: 'border-teal-400/30 bg-teal-500/12 text-teal-100', bar: 'from-teal-400 to-emerald-300' };
-  return { label: '轻松', card: 'border-sky-400/30 bg-sky-500/12 text-sky-100', bar: 'from-sky-400 to-cyan-300' };
+  if (score >= 80) return { label: '过载', card: 'border-rose-400/30 bg-rose-500/12 text-rose-100', bar: 'from-rose-500 to-pink-300' };
+  if (score >= 60) return { label: '偏高', card: 'border-stone-300/25 bg-stone-500/12 text-stone-100', bar: 'from-stone-300 to-zinc-100' };
+  if (score >= 35) return { label: '可控', card: 'border-slate-300/25 bg-slate-500/12 text-slate-100', bar: 'from-slate-300 to-blue-100' };
+  return { label: '轻松', card: 'border-indigo-300/20 bg-indigo-500/10 text-indigo-100', bar: 'from-indigo-300 to-slate-100' };
 }
 
 function getEnergyTone(score: number) {
-  if (score <= 30) return { label: '偏低', card: 'border-rose-400/30 bg-rose-500/12 text-rose-100', bar: 'from-rose-500 to-fuchsia-400' };
-  if (score <= 55) return { label: '一般', card: 'border-amber-400/30 bg-amber-500/12 text-amber-100', bar: 'from-amber-400 to-yellow-300' };
-  if (score <= 75) return { label: '稳定', card: 'border-teal-400/30 bg-teal-500/12 text-teal-100', bar: 'from-teal-400 to-emerald-300' };
-  return { label: '充足', card: 'border-emerald-400/30 bg-emerald-500/12 text-emerald-100', bar: 'from-emerald-400 to-lime-300' };
+  if (score <= 30) return { label: '偏低', card: 'border-rose-400/30 bg-rose-500/12 text-rose-100', bar: 'from-rose-500 to-pink-300' };
+  if (score <= 55) return { label: '一般', card: 'border-stone-300/25 bg-stone-500/12 text-stone-100', bar: 'from-stone-300 to-zinc-100' };
+  if (score <= 75) return { label: '稳定', card: 'border-slate-300/25 bg-slate-500/12 text-slate-100', bar: 'from-slate-300 to-blue-100' };
+  return { label: '充足', card: 'border-indigo-300/20 bg-indigo-500/10 text-indigo-100', bar: 'from-indigo-300 to-slate-100' };
 }
 
 function getEnergyDeltaLabel(value: number) {
@@ -1363,6 +1448,64 @@ function buildWellbeingSuggestions({
   return suggestions.slice(0, 4);
 }
 
+function getTaskNextActionText(task: Task) {
+  const nextStep = task.steps.find((step) => !step.completed && step.text.trim());
+  if (nextStep) return nextStep.text.trim();
+  if (task.description.trim()) return task.description.trim();
+  return task.timeline === 'long_term'
+    ? '补一个下周期能直接开始的动作。'
+    : '补一个今天能直接开始的动作。';
+}
+
+function getTaskSizeBucket(task: Task): TaskSizeBucket {
+  const estimatedMinutes = Math.max(0, task.estimated_minutes || 0);
+  const stressScore = task.stress_score || 3;
+
+  if (
+    estimatedMinutes >= 90
+    || (estimatedMinutes >= 60 && task.cognitive_load === 'high')
+    || stressScore >= 5
+  ) {
+    return 'big';
+  }
+
+  if (
+    estimatedMinutes >= 35
+    || task.cognitive_load === 'high'
+    || task.collaboration_level === 'high'
+    || stressScore >= 4
+  ) {
+    return 'medium';
+  }
+
+  return 'small';
+}
+
+function buildDailyTaskMix(tasks: Task[]) {
+  const result: Record<TaskSizeBucket, Task[]> & { overflow: Task[] } = {
+    big: [],
+    medium: [],
+    small: [],
+    overflow: [],
+  };
+
+  tasks.forEach((task) => {
+    const bucket = getTaskSizeBucket(task);
+    if (result[bucket].length < DAILY_MIX_LIMITS[bucket]) {
+      result[bucket].push(task);
+    } else {
+      result.overflow.push(task);
+    }
+  });
+
+  if (result.big.length === 0 && result.medium.length > 0) {
+    const promoted = result.medium.shift();
+    if (promoted) result.big.push(promoted);
+  }
+
+  return result;
+}
+
 function normalizeTask(rawTask: Task): Task {
   const partial = rawTask as Partial<Task>;
   const dependencyIds = Array.isArray(partial.dependency_ids)
@@ -1439,6 +1582,12 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
       ability_dimensions: collectAbilityDimensions(tasks),
       wellbeing: createDefaultWellbeingSettings(),
       ability_module: createDefaultAbilityModuleSettings(),
+      ai_day_plan: createDefaultAIDayPlanWorkspace(),
+      focus_reminders: createDefaultFocusReminderSettings(),
+      calendar_subscription_token: '',
+      rss_feeds: [],
+      news_items: [],
+      idea_notes: [],
     };
   }
   if (payload && typeof payload === 'object') {
@@ -1458,6 +1607,12 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
       ability_dimensions: [...merged],
       wellbeing: normalizeWellbeing(raw.wellbeing),
       ability_module: normalizeAbilityModule(raw.ability_module),
+      ai_day_plan: normalizeAIDayPlanWorkspace(raw.ai_day_plan),
+      focus_reminders: normalizeFocusReminderSettings(raw.focus_reminders),
+      calendar_subscription_token: typeof raw.calendar_subscription_token === 'string' ? raw.calendar_subscription_token : '',
+      rss_feeds: Array.isArray(raw.rss_feeds) ? raw.rss_feeds : [],
+      news_items: Array.isArray(raw.news_items) ? raw.news_items : [],
+      idea_notes: Array.isArray(raw.idea_notes) ? raw.idea_notes : [],
     };
   }
   return {
@@ -1465,6 +1620,12 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
     ability_dimensions: [],
     wellbeing: createDefaultWellbeingSettings(),
     ability_module: createDefaultAbilityModuleSettings(),
+    ai_day_plan: createDefaultAIDayPlanWorkspace(),
+    focus_reminders: createDefaultFocusReminderSettings(),
+    calendar_subscription_token: '',
+    rss_feeds: [],
+    news_items: [],
+    idea_notes: [],
   };
 }
 
@@ -1544,6 +1705,56 @@ function getTimelineAccent(timeline: TaskTimeline) {
     };
 }
 
+type TaskQuadrantZone = 'quick' | 'focus' | 'release' | 'build';
+
+const TASK_QUADRANT_ZONE_META: Record<TaskQuadrantZone, {
+  badge: string;
+  label: string;
+  hint: string;
+  tint: string;
+  strong: string;
+}> = {
+  quick: {
+    badge: '快清',
+    label: '快清区',
+    hint: '紧急但不重要',
+    tint: 'rgba(224, 166, 81, 0.24)',
+    strong: '#de9c3d',
+  },
+  focus: {
+    badge: '主战',
+    label: '主战区',
+    hint: '重要且紧急',
+    tint: 'rgba(224, 96, 122, 0.24)',
+    strong: '#e35d77',
+  },
+  release: {
+    badge: '回收',
+    label: '回收区',
+    hint: '不急也不重要',
+    tint: 'rgba(133, 147, 171, 0.2)',
+    strong: '#91a1b8',
+  },
+  build: {
+    badge: '积累',
+    label: '积累区',
+    hint: '重要但不紧急',
+    tint: 'rgba(95, 170, 125, 0.22)',
+    strong: '#4fa876',
+  },
+};
+
+function getTaskQuadrantZone(task: Task, now: number): TaskQuadrantZone {
+  const renderY = getTaskRenderY(task, now);
+  const isImportant = task.x >= 50;
+  const isUrgent = renderY < 50;
+
+  if (isImportant && isUrgent) return 'focus';
+  if (isImportant) return 'build';
+  if (isUrgent) return 'quick';
+  return 'release';
+}
+
 function getDimensionColor(task: Task) {
   const importance = task.x;
   const urgency = 100 - task.y;
@@ -1609,6 +1820,71 @@ async function requestAIPlan(task: Task, token: string) {
     plan: typeof payload?.plan === 'string' ? payload.plan : '',
     steps,
   };
+}
+
+async function requestAIDayPlan(
+  payload: {
+    input: string;
+    energy: number;
+    existingTasks: Array<Pick<Task, 'title' | 'estimated_minutes' | 'status'>>;
+  },
+  token: string
+) {
+  const response = await fetch('/api/ai/day-plan', {
+    method: 'POST',
+    headers: withAuthHeaders(token, {
+      'Content-Type': 'application/json',
+    }),
+    body: JSON.stringify(payload),
+  });
+
+  const rawPayload = await response.json().catch(() => ({} as { error?: string } & Partial<AIDayPlanWorkspace>));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
+  }
+
+  return normalizeAIDayPlanWorkspace(rawPayload);
+}
+
+async function fetchCalendarSubscription(token: string) {
+  const response = await fetch('/api/calendar/subscription-token', {
+    cache: 'no-store',
+    headers: withAuthHeaders(token),
+  });
+  const payload = await response.json().catch(() => ({} as { error?: string; token?: string; url?: string; apple_url?: string }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(payload?.error || `订阅链接获取失败 (${response.status})`);
+  }
+  return {
+    token: typeof payload.token === 'string' ? payload.token : '',
+    url: typeof payload.url === 'string' ? payload.url : '',
+    appleUrl: typeof payload.apple_url === 'string' ? payload.apple_url : '',
+  } satisfies CalendarSubscriptionInfo;
+}
+
+async function resetCalendarSubscription(token: string) {
+  const response = await fetch('/api/calendar/subscription-token/reset', {
+    method: 'POST',
+    headers: withAuthHeaders(token),
+  });
+  const payload = await response.json().catch(() => ({} as { error?: string; token?: string; url?: string; apple_url?: string }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(payload?.error || `订阅链接重置失败 (${response.status})`);
+  }
+  return {
+    token: typeof payload.token === 'string' ? payload.token : '',
+    url: typeof payload.url === 'string' ? payload.url : '',
+    appleUrl: typeof payload.apple_url === 'string' ? payload.apple_url : '',
+  } satisfies CalendarSubscriptionInfo;
 }
 
 async function requestAIRssScout(
@@ -1801,6 +2077,110 @@ function summarizePreviewText(text: string, maxLength = 140) {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function extractMeaningfulKeywords(text: string) {
+  return Array.from(
+    new Set(
+      String(text || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .map((item) => item.trim())
+        .filter((item) => item.length >= 2)
+    )
+  );
+}
+
+function scoreNewsRelevance(news: NewsItem, focusText: string, tasks: Task[]) {
+  const focusKeywords = extractMeaningfulKeywords(focusText);
+  const taskKeywords = tasks.flatMap((task) => extractMeaningfulKeywords(`${task.title} ${task.description}`)).slice(0, 80);
+  const allKeywords = new Set([...focusKeywords, ...taskKeywords]);
+  const haystack = `${news.title} ${news.content} ${news.tags.join(' ')}`.toLowerCase();
+
+  let score = 0;
+  allKeywords.forEach((keyword) => {
+    if (haystack.includes(keyword)) score += focusKeywords.includes(keyword) ? 3 : 1;
+  });
+  if (news.is_important) score += 2;
+  if (!news.is_read) score += 1;
+  return score;
+}
+
+function explainNewsRelevance(score: number, focusText: string) {
+  if (score >= 6) return `这条消息和当前主线“${focusText}”相关，值得现在判断要不要转成动作。`;
+  if (score >= 3) return '这条消息可能会影响后续安排，但不一定需要现在打断手头工作。';
+  return '这条消息和今天主线关系较弱，先收起来就好。';
+}
+
+function escapeIcsText(value: string) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;');
+}
+
+function formatIcsDate(date: Date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mi = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}T${hh}${mi}${ss}`;
+}
+
+function roundToNextHalfHour(baseTs: number) {
+  const date = new Date(baseTs);
+  const minutes = date.getMinutes();
+  const rounded = minutes <= 30 ? 30 : 60;
+  date.setMinutes(rounded, 0, 0);
+  if (rounded === 60) {
+    date.setHours(date.getHours() + 1, 0, 0, 0);
+  }
+  return date;
+}
+
+function buildDayPlanCalendarIcs(coreFocusTitle: string, items: Array<{ title: string; description: string; minutes: number }>) {
+  const dtStamp = formatIcsDate(new Date());
+  let cursor = roundToNextHalfHour(Date.now());
+  const events = items.map((item, index) => {
+    const start = new Date(cursor);
+    const end = new Date(start.getTime() + Math.max(10, item.minutes) * 60000);
+    cursor = end;
+    return [
+      'BEGIN:VEVENT',
+      `UID:planday-${Date.now()}-${index}@local`,
+      `DTSTAMP:${dtStamp}`,
+      `DTSTART:${formatIcsDate(start)}`,
+      `DTEND:${formatIcsDate(end)}`,
+      `SUMMARY:${escapeIcsText(item.title)}`,
+      `DESCRIPTION:${escapeIcsText(item.description || `今日主线：${coreFocusTitle}`)}`,
+      'END:VEVENT',
+    ].join('\r\n');
+  });
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Planday//Daily Focus//CN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    ...events,
+    'END:VCALENDAR',
+  ].join('\r\n');
+}
+
+function downloadIcsFile(filename: string, content: string) {
+  if (typeof window === 'undefined') return;
+  const blob = new Blob([content], { type: 'text/calendar;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.URL.revokeObjectURL(url);
 }
 
 async function loginByPassword(username: string, password: string): Promise<AuthResult> {
@@ -2106,6 +2486,7 @@ function WorldNewsView({
   setIdeaNotes,
   tasks,
   setTasks,
+  coreFocusTitle,
 }: {
   rssFeeds: RSSFeed[];
   setRssFeeds: React.Dispatch<React.SetStateAction<RSSFeed[]>>;
@@ -2119,6 +2500,7 @@ function WorldNewsView({
   setIdeaNotes: React.Dispatch<React.SetStateAction<IdeaNote[]>>;
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
+  coreFocusTitle: string;
 }) {
   const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
   const [selectedNote, setSelectedNote] = useState<IdeaNote | null>(null);
@@ -2171,6 +2553,20 @@ function WorldNewsView({
     .filter((note) => noteFilter === 'all' ? true : note.note_type === noteFilter)
     .sort((a, b) => b.updated_at - a.updated_at);
   const sortedNews = [...newsItems].sort((a, b) => b.published_at - a.published_at);
+  const triagedNews = sortedNews
+    .map((news) => {
+      const relevanceScore = scoreNewsRelevance(news, coreFocusTitle, tasks);
+      const bucket = relevanceScore >= 6 ? 'focus' : relevanceScore >= 3 ? 'later' : 'ignore';
+      return {
+        news,
+        relevanceScore,
+        bucket,
+        reason: explainNewsRelevance(relevanceScore, coreFocusTitle),
+      };
+    });
+  const focusNews = triagedNews.filter((item) => item.bucket === 'focus');
+  const laterNews = triagedNews.filter((item) => item.bucket === 'later');
+  const ignoreNews = triagedNews.filter((item) => item.bucket === 'ignore');
   const detailVisible = Boolean(detailMode === 'news' ? selectedNews : detailMode === 'note' ? selectedNote : null);
 
   const closeDetail = () => {
@@ -2514,6 +2910,43 @@ function WorldNewsView({
     setSelectedNote(newNote);
     setDetailMode('note');
     setWorkspaceMessage('已从新闻生成笔记。');
+  };
+
+  const createTaskFromNews = (news: NewsItem) => {
+    const timestamp = Date.now();
+    const relevanceScore = scoreNewsRelevance(news, coreFocusTitle, tasks);
+    const newTask = normalizeTask({
+      id: `task-news-${timestamp}`,
+      title: news.title,
+      description: `${news.content}${news.url ? `\n\n来源：${news.url}` : ''}`,
+      x: relevanceScore >= 6 ? 74 : 56,
+      y: relevanceScore >= 6 ? 24 : 46,
+      status: 'pending',
+      timeline: 'temporary',
+      dependency_ids: [],
+      estimated_minutes: relevanceScore >= 6 ? 45 : 25,
+      actual_minutes: 0,
+      deadline_at: null,
+      use_countdown_urgency: false,
+      long_term_cadence: 'daily',
+      long_term_interval_days: 3,
+      last_completed_at: null,
+      next_due_at: null,
+      archived_at: null,
+      completion_count: 0,
+      ability_gains: {},
+      stress_score: relevanceScore >= 6 ? 4 : 2,
+      energy_delta: -1,
+      cognitive_load: relevanceScore >= 6 ? 'high' : 'low',
+      collaboration_level: 'low',
+      tracking_started_at: null,
+      tracking_accumulated_ms: 0,
+      ai_plan: '',
+      steps: [],
+      created_at: timestamp,
+    } satisfies Partial<Task>);
+    setTasks((prev) => [newTask, ...prev]);
+    setWorkspaceMessage(`已把消息转成任务：${newTask.title}`);
   };
 
   const resetNoteComposer = () => {
@@ -2942,6 +3375,26 @@ function WorldNewsView({
                   {mainView === 'notes' && <span className="world-news-pill">{filteredNotes.length} 条已显示</span>}
                 </div>
 
+                {mainView === 'news' && (
+                  <div className="grid gap-3 xl:grid-cols-3">
+                    <div className="rounded-[1.25rem] border border-rose-300/20 bg-rose-500/10 p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-rose-100/75">和主线相关</p>
+                      <p className="mt-2 text-lg font-semibold text-white">{focusNews.length} 条</p>
+                      <p className="mt-2 text-[11px] leading-5 text-rose-100/80 text-safe-wrap">优先处理和“{coreFocusTitle}”相关的消息。</p>
+                    </div>
+                    <div className="rounded-[1.25rem] border border-slate-300/20 bg-slate-500/10 p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-200/75">晚点再看</p>
+                      <p className="mt-2 text-lg font-semibold text-white">{laterNews.length} 条</p>
+                      <p className="mt-2 text-[11px] leading-5 text-slate-300/85">可能相关，但不值得现在打断主线。</p>
+                    </div>
+                    <div className="rounded-[1.25rem] border border-zinc-300/20 bg-zinc-500/10 p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-200/75">可忽略</p>
+                      <p className="mt-2 text-lg font-semibold text-white">{ignoreNews.length} 条</p>
+                      <p className="mt-2 text-[11px] leading-5 text-zinc-300/85">先不让这些信息抢走注意力。</p>
+                    </div>
+                  </div>
+                )}
+
                 {workspaceMessage && <div className="world-news-inline-message">{workspaceMessage}</div>}
               </div>
             </div>
@@ -2956,8 +3409,34 @@ function WorldNewsView({
                     </div>
                   ) : (
                     <div className="world-news-scroll h-full overflow-y-auto pr-1">
+                      <div className="mb-4 grid gap-3 lg:grid-cols-3">
+                        {[
+                          { title: '当前值得看', items: focusNews, tone: 'border-rose-300/20 bg-rose-500/10 text-rose-100' },
+                          { title: '稍后处理', items: laterNews, tone: 'border-slate-300/20 bg-slate-500/10 text-slate-100' },
+                          { title: '先忽略', items: ignoreNews, tone: 'border-zinc-300/20 bg-zinc-500/10 text-zinc-100' },
+                        ].map((section) => (
+                          <div key={section.title} className={cn("rounded-[1.2rem] border p-4", section.tone)}>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.18em]">{section.title}</p>
+                            <div className="mt-3 grid gap-2">
+                              {section.items.length === 0 ? (
+                                <p className="text-[11px] leading-5 opacity-80">当前没有这一类消息。</p>
+                              ) : section.items.slice(0, 2).map(({ news, reason }) => (
+                                <button
+                                  key={`triage-${section.title}-${news.id}`}
+                                  type="button"
+                                  onClick={() => openNewsDetail(news)}
+                                  className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition-colors hover:bg-white/[0.08]"
+                                >
+                                  <p className="text-sm font-semibold text-white line-clamp-2">{news.title}</p>
+                                  <p className="mt-1 text-[11px] leading-5 text-current/75 line-clamp-2">{reason}</p>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                       <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-                        {sortedNews.map((news) => (
+                        {triagedNews.map(({ news, reason, bucket }) => (
                           <motion.article
                             key={news.id}
                             layout
@@ -2971,15 +3450,27 @@ function WorldNewsView({
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap gap-2">
                                   <span className="world-news-pill">{formatCompactDateTime(news.published_at)}</span>
+                                  <span className="world-news-pill">{bucket === 'focus' ? '和主线相关' : bucket === 'later' ? '晚点再看' : '先忽略'}</span>
                                   {news.is_important && <span className="world-news-pill">重点</span>}
                                   {news.note_ids.length > 0 && <span className="world-news-pill">{news.note_ids.length} 条关联笔记</span>}
                                 </div>
                                 <h3 className="mt-3 text-sm font-semibold leading-6 text-[color:var(--text-strong)] line-clamp-2">{news.title}</h3>
                                 <p className="mt-2 text-[12px] leading-6 text-[color:var(--text-secondary)] line-clamp-3">{news.content}</p>
+                                <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)] line-clamp-2">{reason}</p>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   {news.tags.slice(0, 4).map((tag) => (
                                     <span key={`${news.id}-${tag}`} className="world-news-chip">{tag}</span>
                                   ))}
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <button type="button" onClick={(event) => { event.stopPropagation(); createTaskFromNews(news); }} className="world-news-button world-news-button-accent">
+                                    <ListTodo className="h-4 w-4" />
+                                    转任务
+                                  </button>
+                                  <button type="button" onClick={(event) => { event.stopPropagation(); createNoteFromNews(news); }} className="world-news-button">
+                                    <Edit3 className="h-4 w-4" />
+                                    转笔记
+                                  </button>
                                 </div>
                               </div>
                               <div className="flex shrink-0 flex-col gap-2 opacity-85 transition-opacity group-hover:opacity-100">
@@ -3157,6 +3648,7 @@ function WorldNewsView({
                           <div className="world-news-detail-copy"><p>{selectedNews.content}</p></div>
                           <div className="mt-4 flex flex-wrap gap-2">
                             {selectedNews.url && <a href={selectedNews.url} target="_blank" rel="noopener noreferrer" className="world-news-button"><ExternalLink className="h-4 w-4" />查看原文</a>}
+                            <button type="button" onClick={() => createTaskFromNews(selectedNews)} className="world-news-button world-news-button-accent"><ListTodo className="h-4 w-4" />转成任务</button>
                             <button type="button" onClick={() => createNoteFromNews(selectedNews)} className="world-news-button world-news-button-accent"><Edit3 className="h-4 w-4" />转成笔记</button>
                             <button type="button" onClick={() => deleteNewsItem(selectedNews.id)} className="world-news-button world-news-button-danger"><Trash2 className="h-4 w-4" />删除新闻</button>
                           </div>
@@ -3235,6 +3727,8 @@ export default function App() {
   const [abilityDimensions, setAbilityDimensions] = useState<string[]>([]);
   const [wellbeing, setWellbeing] = useState<WellbeingSettings>(createDefaultWellbeingSettings());
   const [abilityModule, setAbilityModule] = useState<AbilityModuleSettings>(createDefaultAbilityModuleSettings());
+  const [aiDayPlan, setAiDayPlan] = useState<AIDayPlanWorkspace>(createDefaultAIDayPlanWorkspace());
+  const [focusReminderSettings, setFocusReminderSettings] = useState<FocusReminderSettings>(createDefaultFocusReminderSettings());
   const [rssFeeds, setRssFeeds] = useState<RSSFeed[]>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [ideaNotes, setIdeaNotes] = useState<IdeaNote[]>([]);
@@ -3244,20 +3738,23 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [isGeneratingDayPlan, setIsGeneratingDayPlan] = useState(false);
   const [isPlacementMode, setIsPlacementMode] = useState(false);
-  const [isSideNavOpen, setIsSideNavOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true));
-  const [isSuggestionOpen, setIsSuggestionOpen] = useState(true);
-  const [isTopBoardCollapsed, setIsTopBoardCollapsed] = useState(false);
+  const [isSuggestionOpen, setIsSuggestionOpen] = useState(false);
+  const [isTopBoardCollapsed, setIsTopBoardCollapsed] = useState(true);
   const [isMotivationPanelOpen, setIsMotivationPanelOpen] = useState(false);
-  const [topTaskPanelView, setTopTaskPanelView] = useState<'execution' | 'directory'>('execution');
-  const [sideNavWidth, setSideNavWidth] = useState(320);
-  const [isResizing, setIsResizing] = useState(false);
+  const [isMatrixExpanded, setIsMatrixExpanded] = useState(false);
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
   const [aiError, setAiError] = useState('');
+  const [dayPlanError, setDayPlanError] = useState('');
+  const [calendarSubscription, setCalendarSubscription] = useState<CalendarSubscriptionInfo | null>(null);
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
   const [storageError, setStorageError] = useState('');
   const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
   const [nowTs, setNowTs] = useState(Date.now());
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
+    typeof window !== 'undefined' && 'Notification' in window ? window.Notification.permission : 'unsupported'
+  );
 
   const quadrantRef = useRef<HTMLDivElement>(null);
   const hasHydratedRef = useRef(false);
@@ -3271,6 +3768,14 @@ export default function App() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotificationPermission('unsupported');
+      return;
+    }
+    setNotificationPermission(window.Notification.permission);
+  }, []);
+
   const clearAuth = () => {
     setAuthToken('');
     setAuthUser('');
@@ -3280,12 +3785,15 @@ export default function App() {
     setAbilityDimensions([]);
     setWellbeing(createDefaultWellbeingSettings());
     setAbilityModule(createDefaultAbilityModuleSettings());
+    setAiDayPlan(createDefaultAIDayPlanWorkspace());
+    setFocusReminderSettings(createDefaultFocusReminderSettings());
     setSelectedTask(null);
     setIsLoadingTasks(false);
     setStorageError('');
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(AUTH_TOKEN_KEY);
-    }
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+      }
+    setCalendarSubscription(null);
   };
 
   const activeTasks = tasks.filter((task) => task.status === 'pending');
@@ -3314,8 +3822,6 @@ export default function App() {
     const urgB = 100 - getTaskRenderY(b, nowTs);
     return (impB * urgB) - (impA * urgA);
   });
-  const topDirectoryTasks = sortedTasks.slice(0, 6);
-
   const executableTasks = activeTasks.filter((task) => isTaskReady(task) && isLongTermDue(task, nowTs));
   const blockedTasks = activeTasks.filter((task) => !isTaskReady(task) || !isLongTermDue(task, nowTs));
 
@@ -3458,6 +3964,134 @@ export default function App() {
     { id: 'special:caishen', label: '财神激励', disabled: false },
   ] as const;
   const isExecutionSparse = runningTasks.length === 0 && executableTasks.length === 0;
+  const runningTaskIds = new Set(runningTasks.map((task) => task.id));
+  const rankedReadyTasks = [...executableTasks].sort(
+    (a, b) => scoreTaskForMoment(b, energyScore, pressureScore, nowTs) - scoreTaskForMoment(a, energyScore, pressureScore, nowTs)
+  );
+  const dailyMix = buildDailyTaskMix(rankedReadyTasks.filter((task) => !runningTaskIds.has(task.id)));
+  const dailyMixTasks = [...dailyMix.big, ...dailyMix.medium, ...dailyMix.small];
+  const dailyMixTaskIds = new Set(dailyMixTasks.map((task) => task.id));
+  const lowEnergyStandby = rankedReadyTasks
+    .filter((task) => !runningTaskIds.has(task.id) && !dailyMixTaskIds.has(task.id) && task.cognitive_load === 'low' && task.collaboration_level === 'low')
+    .slice(0, 4);
+  const lowEnergyTaskIds = new Set(lowEnergyStandby.map((task) => task.id));
+  const blockedQueue = blockedTasks
+    .filter((task) => !runningTaskIds.has(task.id) && !dailyMixTaskIds.has(task.id) && !lowEnergyTaskIds.has(task.id))
+    .sort((a, b) => getTaskUrgencyScore(b, nowTs) - getTaskUrgencyScore(a, nowTs))
+    .slice(0, 4);
+  const blockedTaskIds = new Set(blockedQueue.map((task) => task.id));
+  const laterReadyQueue = rankedReadyTasks
+    .filter((task) => !runningTaskIds.has(task.id) && !dailyMixTaskIds.has(task.id) && !lowEnergyTaskIds.has(task.id) && !blockedTaskIds.has(task.id))
+    .slice(0, 4);
+  const focusDeck = [...runningTasks]
+    .sort((a, b) => (b.tracking_started_at || 0) - (a.tracking_started_at || 0))
+    .slice(0, FOCUS_WIP_LIMIT);
+  if (focusDeck.length < FOCUS_WIP_LIMIT) {
+    rankedReadyTasks
+      .filter((task) => !focusDeck.some((item) => item.id === task.id))
+      .slice(0, FOCUS_WIP_LIMIT - focusDeck.length)
+      .forEach((task) => focusDeck.push(task));
+  }
+  const recommendedPrimaryTask = focusDeck[0] || rankedReadyTasks[0] || lowEnergyStandby[0] || blockedQueue[0] || null;
+  const focusHeadline = runningTasks.length > 0
+    ? '先把已经开始的任务收束到 1 到 2 项'
+    : energyScore >= 65
+      ? '当前适合先吃掉一个高价值任务'
+      : '现在先从低阻力任务起手，把节奏带起来';
+  const currentCoreFocusTitle = aiDayPlan.core_focus || recommendedPrimaryTask?.title || '先确定今天最重要的一件事';
+  const currentCoreFocusDetail = recommendedPrimaryTask
+    ? getTaskNextActionText(recommendedPrimaryTask)
+    : (aiDayPlan.summary || focusHeadline);
+  const focusFillCount = Math.max(0, FOCUS_WIP_LIMIT - runningTasks.length);
+  const simpleHomeTasks: Task[] = [];
+  [
+    ...(recommendedPrimaryTask ? [recommendedPrimaryTask] : []),
+    ...focusDeck,
+    ...dailyMixTasks,
+    ...lowEnergyStandby,
+  ].forEach((task) => {
+    if (!simpleHomeTasks.some((item) => item.id === task.id) && simpleHomeTasks.length < 5) {
+      simpleHomeTasks.push(task);
+    }
+  });
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.title = currentCoreFocusTitle
+      ? `当前主线：${currentCoreFocusTitle} · Planday`
+      : 'Planday';
+  }, [currentCoreFocusTitle]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!focusReminderSettings.enabled || !focusReminderSettings.desktop_notifications) return;
+    if (!currentCoreFocusTitle || notificationPermission !== 'granted') return;
+
+    const intervalMs = Math.max(10, focusReminderSettings.interval_minutes) * 60 * 1000;
+    const tick = () => {
+      const last = focusReminderSettings.last_notified_at || 0;
+      if (Date.now() - last < intervalMs) return;
+      const body = currentCoreFocusDetail || '回到当前这件最重要的工作。';
+      const shown = showFocusNotification(currentCoreFocusTitle, body);
+      if (!shown) return;
+      setFocusReminderSettings((prev) => ({
+        ...prev,
+        last_notified_at: Date.now(),
+      }));
+    };
+
+    const timer = window.setInterval(tick, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [
+    currentCoreFocusDetail,
+    currentCoreFocusTitle,
+    focusReminderSettings.desktop_notifications,
+    focusReminderSettings.enabled,
+    focusReminderSettings.interval_minutes,
+    focusReminderSettings.last_notified_at,
+    notificationPermission,
+  ]);
+  const energyWindows = [
+    {
+      label: '现在',
+      detail: energyScore >= 70
+        ? '高能窗口，优先重任务或深度推进。'
+        : energyScore <= 40
+          ? '低能窗口，优先低认知和低协作。'
+          : '稳定窗口，适合把今天的主任务往前推。',
+    },
+    {
+      label: '下一轮',
+      detail: pressureScore >= 70
+        ? '给自己留 10 到 15 分钟缓冲，避免被截止时间拖着跑。'
+        : '处理一轮中等体量的推进项，把积压感压下去。',
+    },
+    {
+      label: '收尾',
+      detail: completedTodayTasks.length >= 3
+        ? '今天进度已起量，收尾时更适合复盘和整理。'
+        : '晚上只收尾，不再打开新的高耗脑任务。',
+    },
+  ];
+
+  const getTaskBlockingLabel = (task: Task) => {
+    if (!isTaskReady(task)) {
+      const waitingTitles = task.dependency_ids
+        .map((id) => taskById.get(id)?.title || '未命名任务')
+        .slice(0, 2);
+      return `等待前置：${waitingTitles.join('、') || `${task.dependency_ids.length} 项依赖`}`;
+    }
+
+    if (task.timeline === 'long_term' && task.next_due_at && task.next_due_at > nowTs) {
+      return `下个周期：${formatDateTime(task.next_due_at)}`;
+    }
+
+    if (task.timeline === 'temporary' && task.deadline_at) {
+      return `截止：${formatDateTime(task.deadline_at)}`;
+    }
+
+    return '还没排进今天的承诺池。';
+  };
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -3511,33 +4145,6 @@ export default function App() {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, [isPlacementMode]);
 
-  // Drag to resize sidebar
-  useEffect(() => {
-    if (!isResizing) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = Math.min(Math.max(e.clientX, 240), 600);
-      setSideNavWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, [isResizing]);
-
   // Validate auth session
   useEffect(() => {
     let canceled = false;
@@ -3570,6 +4177,26 @@ export default function App() {
   }, [authToken]);
 
   useEffect(() => {
+    let canceled = false;
+    if (isAuthChecking || !authToken) return;
+    fetchCalendarSubscription(authToken)
+      .then((info) => {
+        if (canceled) return;
+        setCalendarSubscription(info);
+      })
+      .catch((e) => {
+        if (canceled) return;
+        if (e instanceof Error && e.message === 'UNAUTHORIZED') {
+          clearAuth();
+          setLoginError('登录已过期，请重新登录。');
+        }
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [authToken, isAuthChecking]);
+
+  useEffect(() => {
     if (!isAdmin && currentView === 'admin') {
       setCurrentView('tasks');
     }
@@ -3591,6 +4218,8 @@ export default function App() {
         setAbilityDimensions(loadedData.ability_dimensions);
         setWellbeing(loadedData.wellbeing);
         setAbilityModule(loadedData.ability_module);
+        setAiDayPlan(loadedData.ai_day_plan || createDefaultAIDayPlanWorkspace());
+        setFocusReminderSettings(loadedData.focus_reminders || createDefaultFocusReminderSettings());
         setRssFeeds(loadedData.rss_feeds || []);
         setNewsItems(loadedData.news_items || []);
         setIdeaNotes(loadedData.idea_notes || []);
@@ -3631,6 +4260,8 @@ export default function App() {
         ability_dimensions: abilityDimensions,
         wellbeing,
         ability_module: abilityModule,
+        ai_day_plan: aiDayPlan,
+        focus_reminders: focusReminderSettings,
         rss_feeds: rssFeeds,
         news_items: newsItems,
         idea_notes: ideaNotes,
@@ -3648,7 +4279,7 @@ export default function App() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [tasks, abilityDimensions, wellbeing, abilityModule, rssFeeds, newsItems, ideaNotes, isLoadingTasks, authToken]);
+  }, [tasks, abilityDimensions, wellbeing, abilityModule, aiDayPlan, focusReminderSettings, rssFeeds, newsItems, ideaNotes, isLoadingTasks, authToken]);
 
   useEffect(() => {
     if (abilityModule.tracked_ms_baseline <= totalTrackedMsAllTasks) return;
@@ -4150,6 +4781,192 @@ export default function App() {
     }
   };
 
+  const requestDesktopNotificationPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotificationPermission('unsupported');
+      return 'unsupported' as const;
+    }
+    const permission = await window.Notification.requestPermission();
+    setNotificationPermission(permission);
+    return permission;
+  };
+
+  const showFocusNotification = (title: string, body: string) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return false;
+    if (window.Notification.permission !== 'granted') return false;
+    const notification = new window.Notification(`当前核心工作：${title}`, {
+      body,
+      tag: 'planday-core-focus',
+      requireInteraction: true,
+    });
+    notification.onclick = () => {
+      notification.close();
+      window.focus();
+      if (typeof document !== 'undefined') {
+        document.title = `当前主线：${title} · Planday`;
+      }
+    };
+    return true;
+  };
+
+  const generateAIDayPlan = async () => {
+    const input = aiDayPlan.input.trim();
+    if (!input) {
+      setDayPlanError('先用自然语言描述一下今天想做什么、有哪些约束。');
+      return;
+    }
+    setDayPlanError('');
+    setIsGeneratingDayPlan(true);
+    try {
+      const result = await requestAIDayPlan({
+        input,
+        energy: energyScore,
+        existingTasks: activeTasks.slice(0, 10).map((task) => ({
+          title: task.title,
+          estimated_minutes: task.estimated_minutes,
+          status: task.status,
+        })),
+      }, authToken);
+      setAiDayPlan({
+        ...result,
+        input,
+        updated_at: Date.now(),
+      });
+    } catch (err) {
+      console.error('AI day planning failed', err);
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        clearAuth();
+        setLoginError('登录已过期，请重新登录。');
+        return;
+      }
+      setDayPlanError(err instanceof Error ? err.message : 'AI 生成今日安排失败，请稍后重试。');
+    } finally {
+      setIsGeneratingDayPlan(false);
+    }
+  };
+
+  const applyAIDayPlanToTasks = () => {
+    if (aiDayPlan.tasks.length === 0) {
+      setDayPlanError('先生成一版今日安排，再一键写入任务。');
+      return;
+    }
+    const now = Date.now();
+    const createdTasks = aiDayPlan.tasks.map((draft, index) => {
+      const baseX = draft.cognitive_load === 'high' ? 72 : 58;
+      const urgencyOffset = draft.timeline === 'temporary' ? draft.stress_score * 11 : 18;
+      const y = clamp(96 - urgencyOffset - index * 7, 8, 92);
+      return normalizeTask({
+        id: createLocalId('ai-task'),
+        title: draft.title,
+        description: draft.description,
+        x: clamp(baseX + (draft.collaboration_level === 'high' ? 10 : 0), 10, 95),
+        y,
+        status: 'pending',
+        timeline: draft.timeline,
+        dependency_ids: [],
+        estimated_minutes: draft.estimated_minutes,
+        actual_minutes: 0,
+        deadline_at: null,
+        use_countdown_urgency: false,
+        long_term_cadence: 'daily',
+        long_term_interval_days: 3,
+        last_completed_at: null,
+        next_due_at: draft.timeline === 'long_term' ? now : null,
+        archived_at: null,
+        completion_count: 0,
+        ability_gains: {},
+        stress_score: draft.stress_score,
+        energy_delta: draft.energy_delta,
+        cognitive_load: draft.cognitive_load,
+        collaboration_level: draft.collaboration_level,
+        tracking_started_at: null,
+        tracking_accumulated_ms: 0,
+        ai_plan: '',
+        steps: [],
+        created_at: now + index,
+      } satisfies Partial<Task>);
+    });
+    setTasks((prev) => [...createdTasks, ...prev]);
+    if (createdTasks[0]) {
+      setSelectedTask(createdTasks[0]);
+    }
+  };
+
+  const exportCurrentPlanToCalendar = () => {
+    const exportItems = (aiDayPlan.tasks.length > 0
+      ? aiDayPlan.tasks.map((task) => ({
+          title: task.title,
+          description: task.description || aiDayPlan.summary || currentCoreFocusDetail,
+          minutes: task.estimated_minutes,
+        }))
+      : simpleHomeTasks.slice(0, 5).map((task) => ({
+          title: task.title || '未命名任务',
+          description: getTaskNextActionText(task),
+          minutes: task.estimated_minutes || 30,
+        })))
+      .slice(0, 8);
+
+    if (exportItems.length === 0) {
+      setDayPlanError('先生成今日安排，或者至少保留几项待办，再导出到日历。');
+      return;
+    }
+
+    const ics = buildDayPlanCalendarIcs(currentCoreFocusTitle, exportItems);
+    downloadIcsFile(`planday-${todayKey}.ics`, ics);
+  };
+
+  const copyCalendarSubscriptionUrl = async () => {
+    if (!calendarSubscription?.url) {
+      setDayPlanError('订阅链接还没准备好，稍等片刻再试。');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(calendarSubscription.url);
+      setDayPlanError('已复制订阅链接，可以粘贴到 Google Calendar。');
+    } catch {
+      setDayPlanError('复制失败，请手动复制下方链接。');
+    }
+  };
+
+  const handleResetCalendarSubscription = async () => {
+    try {
+      const next = await resetCalendarSubscription(authToken);
+      setCalendarSubscription(next);
+      setDayPlanError('订阅链接已重置，旧链接将失效。');
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        clearAuth();
+        setLoginError('登录已过期，请重新登录。');
+        return;
+      }
+      setDayPlanError(err instanceof Error ? err.message : '订阅链接重置失败。');
+    }
+  };
+
+  const testDesktopNotification = async () => {
+    if (notificationPermission !== 'granted') {
+      const permission = await requestDesktopNotificationPermission();
+      if (permission !== 'granted') {
+        setDayPlanError('浏览器还没有允许通知，先在浏览器权限里打开通知。');
+        return;
+      }
+    }
+    const shown = showFocusNotification(
+      currentCoreFocusTitle,
+      currentCoreFocusDetail || '这是测试弹窗，点击后会尝试把窗口拉回前台。'
+    );
+    if (!shown) {
+      setDayPlanError('当前环境不支持桌面弹窗。');
+      return;
+    }
+    setFocusReminderSettings((prev) => ({
+      ...prev,
+      desktop_notifications: true,
+      last_notified_at: Date.now(),
+    }));
+    setDayPlanError('测试弹窗已发送。');
+  };
+
   const updateTaskPosition = (id: string, x: number, y: number) => {
     setTasks(prev => prev.map((task) => {
       if (task.id !== id) return task;
@@ -4232,6 +5049,225 @@ export default function App() {
       ))}
     </div>
   );
+
+  const renderTaskCard = (
+    task: Task,
+    {
+      laneLabel,
+      note,
+      tone = 'today',
+    }: {
+      laneLabel?: string;
+      note?: string;
+      tone?: 'focus' | 'today' | 'standby' | 'blocked';
+    } = {}
+  ) => {
+    const ready = isTaskReady(task) && isLongTermDue(task, nowTs);
+    const timelineAccent = getTimelineAccent(task.timeline);
+    const nodeColor = getDimensionColor(task);
+    const progress = Math.round(getTaskProgress(task) * 100);
+    const firstLine = note || (ready ? buildRecommendationReason(task, energyScore, nowTs) : getTaskBlockingLabel(task));
+    const toneClasses = {
+      focus: 'border-rose-400/28 bg-rose-500/[0.08] shadow-[0_18px_44px_rgba(34,20,24,0.18)]',
+      today: 'border-cyan-300/18 bg-slate-950/52',
+      standby: 'border-stone-300/22 bg-stone-500/[0.08]',
+      blocked: 'border-amber-400/22 bg-amber-500/[0.09]',
+    } as const;
+
+    return (
+      <article
+        key={task.id}
+        className={cn(
+          "rounded-[1.1rem] border px-4 py-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/25",
+          toneClasses[tone],
+          task.tracking_started_at && "ring-1 ring-cyan-400/30"
+        )}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {laneLabel && (
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400 text-safe-wrap">{laneLabel}</p>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelectedTask(task)}
+              className="mt-1 text-left text-[1rem] font-semibold leading-6 text-white transition-colors hover:text-rose-200 text-safe-wrap"
+            >
+              {task.title || '未命名任务'}
+            </button>
+            <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-300 text-safe-wrap">{getTaskNextActionText(task)}</p>
+          </div>
+          <div className="mt-1 shrink-0">
+            <div
+              className="h-3 w-3 rounded-full shadow-[0_0_16px_currentColor]"
+              style={{ color: nodeColor, backgroundColor: nodeColor }}
+            />
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+            估 {task.estimated_minutes}m
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+            {getCognitiveLoadLabel(task.cognitive_load || 'low')}
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+            {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+            {getEnergyDeltaLabel(task.energy_delta || 0)}
+          </span>
+          <span className={cn("rounded-full border px-2 py-1", timelineAccent.badge)}>
+            {task.timeline === 'long_term' ? '长期' : '临时'}
+          </span>
+        </div>
+
+        <p className="mt-3 text-[11px] leading-5 text-slate-400 text-safe-wrap">{firstLine}</p>
+
+        {(task.timeline === 'temporary' && task.deadline_at) || (task.timeline === 'long_term' && task.next_due_at) ? (
+          <div
+            className={cn(
+              "mt-3 rounded-2xl border px-3 py-2 text-[11px] font-semibold",
+              task.timeline === 'temporary'
+                ? (task.deadline_at || 0) <= nowTs
+                  ? 'border-rose-400/40 bg-rose-500/18 text-rose-100'
+                  : 'border-amber-400/35 bg-amber-500/18 text-amber-100'
+                : isLongTermDue(task, nowTs)
+                  ? 'border-indigo-400/35 bg-indigo-500/18 text-indigo-100'
+                  : 'border-slate-400/35 bg-slate-500/18 text-slate-100'
+            )}
+          >
+            {task.timeline === 'temporary'
+              ? `${getCountdownText(task.deadline_at || nowTs, nowTs)} · 截止 ${formatDateTime(task.deadline_at)}`
+              : (task.next_due_at && isLongTermDue(task, nowTs))
+                ? '当前周期可执行'
+                : `下个周期 ${formatDateTime(task.next_due_at)}`}
+          </div>
+        ) : null}
+
+        <div className="mt-4 flex items-center gap-3">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${progress}%`,
+                background: `linear-gradient(90deg, ${nodeColor}, color-mix(in srgb, ${nodeColor} 72%, white))`,
+              }}
+            />
+          </div>
+          <span className="text-[10px] font-bold text-slate-400">
+            {task.steps.length > 0 ? `${task.steps.filter((step) => step.completed).length}/${task.steps.length}` : '待拆解'}
+          </span>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <div className="text-[11px] text-slate-400">
+            {task.tracking_started_at
+              ? `计时中 ${formatDurationFromMs(getTrackedMs(task, nowTs))}`
+              : `实际 ${getDisplayedActualMinutes(task, nowTs)}m`}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedTask(task)}
+              className="rounded-full border border-white/12 px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/8 hover:text-white"
+            >
+              查看
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleTaskTracking(task)}
+              disabled={!ready}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                ready
+                  ? task.tracking_started_at
+                    ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                    : "border-rose-300/30 bg-rose-500/16 text-rose-100 hover:bg-rose-500/25"
+                  : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
+              )}
+            >
+              {task.tracking_started_at ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              {task.tracking_started_at ? '暂停' : '开始'}
+            </button>
+          </div>
+        </div>
+      </article>
+    );
+  };
+
+  const renderTaskLine = (
+    task: Task,
+    {
+      label,
+      emphasis = 'default',
+    }: {
+      label?: string;
+      emphasis?: 'default' | 'standby';
+    } = {}
+  ) => {
+    const ready = isTaskReady(task) && isLongTermDue(task, nowTs);
+    const toneClasses = emphasis === 'standby'
+      ? 'border-stone-300/20 bg-stone-500/[0.06]'
+      : 'border-white/10 bg-white/[0.03]';
+
+    return (
+      <div
+        key={`line-${task.id}`}
+        className={cn(
+          "task-line-shell flex items-center gap-3 rounded-[1rem] border px-3 py-3 transition-colors hover:border-white/20",
+          toneClasses,
+          emphasis === 'standby' && "task-line-shell-standby"
+        )}
+      >
+        <div className="task-line-dot-wrap shrink-0">
+          <div
+            className="h-2.5 w-2.5 rounded-full shadow-[0_0_10px_currentColor]"
+            style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            {label ? (
+              <span className="task-line-label rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold text-slate-300">
+                {label}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setSelectedTask(task)}
+              className="line-clamp-2 text-left text-sm font-semibold leading-5 text-white transition-colors hover:text-rose-200 text-safe-wrap"
+            >
+              {task.title || '未命名任务'}
+            </button>
+          </div>
+          <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-slate-400 text-safe-wrap">
+            {getTaskNextActionText(task)}
+          </p>
+        </div>
+        <div className="task-line-minutes hidden shrink-0 text-[11px] text-slate-400 sm:block">
+          {task.estimated_minutes}m
+        </div>
+        <button
+          type="button"
+          onClick={() => toggleTaskTracking(task)}
+          disabled={!ready}
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+            ready
+              ? task.tracking_started_at
+                ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                : "border-rose-300/30 bg-rose-500/16 text-rose-100 hover:bg-rose-500/25"
+              : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
+          )}
+        >
+          {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+          {task.tracking_started_at ? '暂停' : '开始'}
+        </button>
+      </div>
+    );
+  };
 
   const renderMotivationScene = () => {
     if (activeMotivationMode === 'special:mokugyo') {
@@ -4374,29 +5410,29 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell relative isolate min-h-screen w-screen flex flex-col text-slate-100 font-sans selection:bg-teal-500/30">
+    <div className="app-shell relative isolate min-h-screen w-screen flex flex-col text-slate-100 font-sans selection:bg-rose-500/30">
 
       {/* Header */}
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/[0.08] glass-panel px-4 sm:px-6">
-        <div className="brand-shell flex items-center gap-3 rounded-2xl px-3 py-2 shadow-[0_10px_30px_rgba(2,6,23,0.45)]">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-600 shadow-lg shadow-teal-500/20 ring-1 ring-white/20">
+      <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b border-white/[0.08] glass-panel px-4 py-3 sm:h-16 sm:flex-nowrap sm:justify-between sm:px-6 sm:py-0">
+        <div className="brand-shell brand-shell-planner flex min-w-0 items-center gap-3 rounded-2xl px-3 py-2 shadow-[0_10px_30px_rgba(2,6,23,0.45)]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500 shadow-lg shadow-rose-500/20 ring-1 ring-white/20">
             <LayoutGrid className="text-white w-5 h-5 stroke-[2.5]" />
           </div>
-          <div className="leading-none">
-            <h1 className="text-lg font-bold tracking-tight text-teal-100 sm:text-xl">
+          <div className="min-w-0 leading-none">
+            <h1 className="text-base font-bold tracking-tight text-zinc-100 sm:text-xl text-safe-wrap">
               Task Axis Planner
             </h1>
-            <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-teal-100/80">Importance x Urgency</p>
+            <p className="mt-1 hidden text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400 sm:block">Importance x Urgency</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
           <button
             onClick={() => setCurrentView('tasks')}
             className={cn(
-              "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all",
+              "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all sm:px-4",
               currentView === 'tasks'
-                ? "bg-teal-500/20 text-teal-100 border border-teal-500/30"
+                ? "bg-rose-500/20 text-rose-50 border border-rose-400/30"
                 : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
             )}
           >
@@ -4406,9 +5442,9 @@ export default function App() {
           <button
             onClick={() => setCurrentView('world_news')}
             className={cn(
-              "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all",
+              "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all sm:px-4",
               currentView === 'world_news'
-                ? "bg-teal-500/20 text-teal-100 border border-teal-500/30"
+                ? "bg-rose-500/20 text-rose-50 border border-rose-400/30"
                 : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
             )}
           >
@@ -4419,10 +5455,10 @@ export default function App() {
             <button
               onClick={() => setCurrentView('admin')}
               className={cn(
-                "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all",
+                "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all sm:px-4",
                 currentView === 'admin'
-                  ? "bg-amber-500/20 text-amber-50 border border-amber-400/30"
-                  : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
+                ? "bg-zinc-500/20 text-zinc-100 border border-zinc-400/30"
+                : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
               )}
             >
               <Briefcase className="h-4 w-4" />
@@ -4431,12 +5467,14 @@ export default function App() {
           )}
         </div>
 
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap sm:gap-4">
           <span className="hidden text-xs font-semibold text-slate-300 sm:block">
             {isAdmin ? '管理员' : '用户'}：{authUser || loginUsername}
           </span>
           <BackgroundAudioDock />
-          {renderThemeSwitcher('compact')}
+          <div className="order-last flex w-full min-w-0 justify-end sm:order-none sm:w-auto">
+            {renderThemeSwitcher('compact')}
+          </div>
           <button
             onClick={clearAuth}
             className="rounded-xl border border-white/15 bg-white/5 p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
@@ -4448,9 +5486,9 @@ export default function App() {
             onClick={() => setIsTaskListOpen(true)}
             className="relative rounded-xl p-2.5 transition-all hover:bg-white/5 active:scale-95 group border border-transparent hover:border-white/10"
           >
-            <ListTodo className="h-5 w-5 text-slate-300 group-hover:text-teal-400 transition-colors" />
+            <ListTodo className="h-5 w-5 text-slate-300 group-hover:text-rose-300 transition-colors" />
             {(activeTasks.length + archivedTasks.length) > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-teal-500 text-[9px] font-bold text-white shadow-[0_0_10px_rgba(20,184,166,0.5)]">
+              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white shadow-[0_0_10px_rgba(244,114,182,0.35)]">
                 {activeTasks.length + archivedTasks.length}
               </span>
             )}
@@ -4465,7 +5503,7 @@ export default function App() {
                 : "bg-white/10 text-white hover:bg-white/20 active:scale-95 border border-white/10"
             )}
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-teal-500/10 to-teal-500/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-300" />
+            <div className="absolute inset-0 bg-gradient-to-r from-rose-500/0 via-rose-500/10 to-sky-400/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-300" />
             <Plus className="h-4 w-4 hidden sm:block transition-transform group-hover:rotate-90" />
             <span>新建任务</span>
           </button>
@@ -4482,24 +5520,18 @@ export default function App() {
       )}
 
       {currentView !== 'admin' && (
-        <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-6 sm:px-6">
-          <div className="rounded-lg border border-teal-400/30 bg-teal-500/10 px-3 py-2 text-teal-100">
+        <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-4 sm:px-6">
+          <div className="rounded-lg border border-rose-400/25 bg-rose-500/8 px-3 py-2 text-rose-100 text-safe-wrap">
             可执行任务: <span className="font-bold">{executableTasks.length}</span>
           </div>
-          <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-100">
-            阻塞任务: <span className="font-bold">{blockedTasks.length}</span>
-          </div>
-          <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-emerald-100">
-            预估用时: <span className="font-bold">{totalEstimatedMinutes}m</span>
-          </div>
-          <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-violet-100">
-            实际用时: <span className="font-bold">{totalActualMinutes}m</span>
-          </div>
-          <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-cyan-100">
+          <div className="rounded-lg border border-slate-300/20 bg-slate-500/8 px-3 py-2 text-slate-100 text-safe-wrap">
             正在做: <span className="font-bold">{runningTasks.length}</span>
           </div>
-          <div className="rounded-lg border border-slate-300/30 bg-slate-500/10 px-3 py-2 text-slate-100">
-            已归档: <span className="font-bold">{archivedTasks.length}</span>
+          <div className={cn("rounded-lg border px-3 py-2 text-safe-wrap", energyTone.card)}>
+            当前精力: <span className="font-bold">{energyScore}</span>
+          </div>
+          <div className="rounded-lg border border-zinc-300/20 bg-zinc-500/8 px-3 py-2 text-zinc-200 text-safe-wrap">
+            阻塞任务: <span className="font-bold">{blockedTasks.length}</span>
           </div>
         </div>
       )}
@@ -4539,17 +5571,36 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               className="px-4 pb-3 pt-2 sm:px-6"
             >
-              <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3">
-                <span className="rounded-xl border border-white/10 bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-slate-300">{todayKey}</span>
-                <span className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-100">起始精力 {todayInitialEnergy}</span>
-                <span className={cn("rounded-xl border px-2.5 py-1 text-[11px] font-semibold", pressureTone.card)}>{pressureTone.label} {pressureScore}</span>
-                <span className={cn("rounded-xl border px-2.5 py-1 text-[11px] font-semibold", energyTone.card)}>{energyTone.label} {energyScore}</span>
-                <span className="rounded-xl border border-violet-300/25 bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-100">
-                  {activeAbilityModule?.label || '木鱼'} {formatMetricValue(activeAbilityModuleScore)} {activeAbilityModule?.unit || 'OA'}
-                </span>
-                <span className="rounded-xl border border-cyan-300/25 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-100">
-                  {todayRestSession.is_resting ? '休息模式中' : `${runningTasks.length} 个任务计时中`}
-                </span>
+              <div className="top-status-strip">
+                <div className="top-status-item top-status-item-date">
+                  <span className="top-status-label">今天</span>
+                  <strong className="top-status-value">{todayKey}</strong>
+                </div>
+                <div className="top-status-item top-status-item-start">
+                  <span className="top-status-label">起始精力</span>
+                  <strong className="top-status-value">{todayInitialEnergy}</strong>
+                </div>
+                <div className="top-status-item top-status-item-pressure">
+                  <span className="top-status-label">{pressureTone.label}</span>
+                  <strong className="top-status-value">{pressureScore}</strong>
+                </div>
+                <div className="top-status-item top-status-item-energy">
+                  <span className="top-status-label">{energyTone.label}</span>
+                  <strong className="top-status-value">{energyScore}</strong>
+                </div>
+                <div className="top-status-item top-status-item-module">
+                  <span className="top-status-label">{activeAbilityModule?.label || '木鱼'}</span>
+                  <strong className="top-status-value">
+                    {formatMetricValue(activeAbilityModuleScore)}
+                    <span className="top-status-unit">{activeAbilityModule?.unit || 'OA'}</span>
+                  </strong>
+                </div>
+                <div className="top-status-item top-status-item-timer">
+                  <span className="top-status-label">当前状态</span>
+                  <strong className="top-status-value top-status-value-compact">
+                    {todayRestSession.is_resting ? '休息模式中' : `${runningTasks.length} 个任务计时中`}
+                  </strong>
+                </div>
               </div>
             </motion.div>
           ) : (
@@ -4730,44 +5781,17 @@ export default function App() {
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
-                        {topTaskPanelView === 'execution' ? '\u6267\u884c\u4e2d' : '\u4efb\u52a1\u76ee\u5f55'}
-                      </p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">执行中</p>
                       <h3 className="mt-1 flex items-center gap-2 text-lg font-bold text-white">
-                        {topTaskPanelView === 'execution' ? <Activity className="h-4 w-4 text-cyan-300" /> : <ListTodo className="h-4 w-4 text-cyan-300" />}
-                        {topTaskPanelView === 'execution' ? '\u5f53\u524d\u8ba1\u65f6\u4e0e\u6267\u884c\u5217\u8868' : '\u4efb\u52a1\u76ee\u5f55\u9884\u89c8'}
+                        <Activity className="h-4 w-4 text-cyan-300" />
+                        当前计时与执行列表
                       </h3>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="inline-flex rounded-xl border border-white/10 bg-slate-900/70 p-1">
-                        <button
-                          type="button"
-                          onClick={() => setTopTaskPanelView('execution')}
-                          className={cn(
-                            "rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
-                            topTaskPanelView === 'execution' ? 'bg-cyan-500/20 text-cyan-100' : 'text-slate-300 hover:bg-white/5'
-                          )}
-                        >
-                          {'\u6267\u884c\u5217\u8868'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setTopTaskPanelView('directory')}
-                          className={cn(
-                            "rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
-                            topTaskPanelView === 'directory' ? 'bg-cyan-500/20 text-cyan-100' : 'text-slate-300 hover:bg-white/5'
-                          )}
-                        >
-                          {'\u4efb\u52a1\u76ee\u5f55'}
-                        </button>
-                      </div>
-                      <span className="rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-sm font-bold text-cyan-100">
-                        {topTaskPanelView === 'execution' ? (todayRestSession.is_resting ? '\u4f11\u606f\u4e2d' : `${runningTasks.length} \u6b63\u5728\u505a`) : `${sortedTasks.length} \u9879\u4efb\u52a1`}
-                      </span>
-                    </div>
+                    <span className="rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-sm font-bold text-cyan-100">
+                      {todayRestSession.is_resting ? '\u4f11\u606f\u4e2d' : `${runningTasks.length} \u6b63\u5728\u505a`}
+                    </span>
                   </div>
 
-                  {topTaskPanelView === 'execution' ? (
                     <div className="mt-4 grid gap-3 xl:grid-cols-[0.88fr_1.12fr] xl:items-stretch">
                       <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-3 flex min-h-0 flex-col">
                         <div className="mb-2 flex items-center justify-between">
@@ -4851,62 +5875,6 @@ export default function App() {
                         )}
                       </div>
                     </div>
-                  ) : (
-                    <div className="mt-4 grid gap-3">
-                      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2">
-                        <div className="text-[11px] text-slate-300">{'\u8fd9\u91cc\u5c55\u793a\u4efb\u52a1\u76ee\u5f55\u9884\u89c8\uff0c\u5b8c\u6574\u7f16\u8f91\u4ecd\u5728\u53f3\u4e0a\u89d2\u4efb\u52a1\u6e05\u5355\u91cc\u3002'}</div>
-                        <button
-                          type="button"
-                          onClick={() => setIsTaskListOpen(true)}
-                          className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-slate-200 transition-colors hover:bg-white/10"
-                        >
-                          {'\u6253\u5f00\u4efb\u52a1\u6e05\u5355'}
-                        </button>
-                      </div>
-                      {topDirectoryTasks.length === 0 ? (
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-6 text-center text-[11px] text-slate-400">
-                          {'\u5f53\u524d\u6ca1\u6709\u4efb\u52a1\uff0c\u5148\u65b0\u5efa\u4e00\u4e2a\u4efb\u52a1\u3002'}
-                        </div>
-                      ) : (
-                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                          {topDirectoryTasks.map((task) => (
-                            <button
-                              key={`top-directory-${task.id}`}
-                              type="button"
-                              onClick={() => setSelectedTask(task)}
-                              className="rounded-2xl border border-white/10 bg-slate-950/55 px-3 py-3 text-left transition-colors hover:bg-slate-900"
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="truncate text-[11px] font-semibold text-white">{task.title || '\u672a\u547d\u540d\u4efb\u52a1'}</div>
-                                  <div className="mt-1 text-[10px] text-slate-400">
-                                    {'\u9884\u4f30'} {task.estimated_minutes}m / {'\u5b9e\u9645'} {getDisplayedActualMinutes(task, nowTs)}m
-                                  </div>
-                                </div>
-                                <span
-                                  className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
-                                  style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
-                                />
-                              </div>
-                              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
-                                <span className={cn("rounded-md border px-1.5 py-0.5", getTimelineAccent(task.timeline).badge)}>
-                                  {task.timeline === 'long_term' ? '\u957f\u671f' : '\u4e34\u65f6'}
-                                </span>
-                                <span className="rounded-md border border-rose-400/25 bg-rose-500/10 px-1.5 py-0.5 text-rose-100">
-                                  {'\u538b\u529b'} {(task.stress_score || 3)}/5
-                                </span>
-                                {task.tracking_started_at && (
-                                  <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
-                                    {'\u8ba1\u65f6\u4e2d'}
-                                  </span>
-                                )}
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
 
               </div>
@@ -5226,197 +6194,579 @@ export default function App() {
       </AnimatePresence>
 
       <main className="relative flex flex-1 overflow-hidden">
-        {/* Left Collapsible Sidebar */}
-        <motion.div
-          animate={{ width: isSideNavOpen ? sideNavWidth : 0 }}
-          className="task-directory-panel absolute inset-y-0 left-0 z-10 flex flex-col lg:relative shrink-0 overflow-hidden"
-        >
-          {/* Resize Handle */}
-          <div
-            onMouseDown={(e) => {
-              e.preventDefault();
-              setIsResizing(true);
-            }}
-            className={cn(
-              "absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/20 transition-colors z-20 group",
-              isResizing ? "bg-teal-500/40" : ""
-            )}
-          >
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 bg-white/20 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
-
-          <div className="p-6 border-b border-white/[0.05] flex items-center justify-between shrink-0">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2">
-              <ListTodo className="w-4 h-4 opacity-70" />
-              任务目录
-            </h2>
-            <button
-              onClick={() => setIsSideNavOpen(false)}
-              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-white"
-            >
-              <ChevronRight className="w-4 h-4 rotate-180" />
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-            {sortedTasks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-60">
-                <ListTodo className="w-8 h-8 mb-3 opacity-20" />
-                <p className="text-xs font-medium uppercase tracking-widest">暂无进行中的任务</p>
-              </div>
-            ) : (
-              sortedTasks.map(task => (
-                <div
-                  key={task.id}
-                  onClick={() => setSelectedTask(task)}
-                  className={cn(
-                    "task-directory-card cursor-pointer group relative overflow-hidden p-4",
-                    selectedTask?.id === task.id && "task-directory-card-active"
-                  )}
-                >
-                  <div className="relative flex items-start justify-between gap-3">
-                    <h3 className={cn(
-                      "font-semibold text-sm leading-snug line-clamp-2 transition-colors",
-                      selectedTask?.id === task.id ? "text-teal-50" : "text-slate-200 group-hover:text-white"
-                    )}>
-                      {task.title || '未命名任务'}
-                    </h3>
-                    <div
-                      className="h-2.5 w-2.5 rounded-full shrink-0 shadow-[0_0_10px_currentColor]"
-                      style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
-                    />
-                  </div>
-                  <div className="relative mt-4 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 h-1 bg-white/10 rounded-full overflow-hidden">
-                        <div
-                          className={cn(
-                            "h-full rounded-full transition-all duration-500 ease-out shadow-[0_0_10px_currentColor]",
-                            selectedTask?.id === task.id ? "bg-teal-400 text-teal-400" : "bg-slate-400 text-slate-400"
-                          )}
-                          style={{ width: `${task.steps.length > 0 ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100 : 0}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] font-bold text-slate-400">
-                        {task.steps.filter(s => s.completed).length}/{task.steps.length}
-                      </span>
-                    </div>
-                    <span className={cn(
-                      "rounded-md border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide",
-                      getTimelineAccent(task.timeline).badge
-                    )}>
-                      {task.timeline === 'long_term' ? '长期' : '临时'}
-                    </span>
-                  </div>
-                  <div className="relative mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>预估 {task.estimated_minutes}m / 实际 {getDisplayedActualMinutes(task, nowTs)}m</span>
-                    <div className="flex items-center gap-2">
-                      {task.dependency_ids.length > 0 && <span>依赖 {task.dependency_ids.length}</span>}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleTaskTracking(task);
-                        }}
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold transition-colors",
-                          task.tracking_started_at
-                            ? "border-cyan-300/40 bg-cyan-500/20 text-cyan-100"
-                            : "border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
-                        )}
-                      >
-                        {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                        {task.tracking_started_at ? '暂停' : '开始'}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="relative mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
-                    <span className="rounded-md border border-rose-400/25 bg-rose-500/10 px-1.5 py-0.5 text-rose-100">
-                      压力 {(task.stress_score || 3)}/5
-                    </span>
-                    <span className="rounded-md border border-emerald-400/25 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-100">
-                      精力 {getEnergyDeltaLabel(task.energy_delta || 0)}
-                    </span>
-                    <span className="rounded-md border border-sky-400/25 bg-sky-500/10 px-1.5 py-0.5 text-sky-100">
-                      {getCognitiveLoadLabel(task.cognitive_load || 'low')}
-                    </span>
-                    <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-1.5 py-0.5 text-violet-100">
-                      {getCollaborationLevelLabel(task.collaboration_level || 'low')}
-                    </span>
-                    {task.tracking_started_at && (
-                      <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
-                        计时中 {formatDurationFromMs(getTrackedMs(task, nowTs))}
-                      </span>
-                    )}
-                  </div>
-                  {task.timeline === 'temporary' && task.deadline_at && (
-                    <div className={cn(
-                      "relative mt-2 rounded-lg border px-2 py-1 text-[10px] font-semibold",
-                      task.deadline_at <= nowTs
-                        ? "border-rose-400/40 bg-rose-500/20 text-rose-100"
-                        : "border-amber-400/35 bg-amber-500/20 text-amber-100"
-                    )}>
-                      <Clock3 className="mr-1 inline h-3 w-3" />
-                      {getCountdownText(task.deadline_at, nowTs)}
-                    </div>
-                  )}
-                  {task.timeline === 'long_term' && task.next_due_at && (
-                    <div className={cn(
-                      "relative mt-2 rounded-lg border px-2 py-1 text-[10px] font-semibold",
-                      task.next_due_at <= nowTs
-                        ? "border-teal-400/40 bg-teal-500/20 text-teal-100"
-                        : "border-slate-400/40 bg-slate-500/20 text-slate-100"
-                    )}>
-                      {task.next_due_at <= nowTs ? '当前周期可执行' : `下次周期：${formatDateTime(task.next_due_at)}`}
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </motion.div>
-
-        {/* Sidebar Toggle Button (when closed) */}
-        {!isSideNavOpen && (
-          <button
-            onClick={() => setIsSideNavOpen(true)}
-            className="absolute left-4 top-4 z-20 rounded-xl border border-white/10 glass-panel p-2 shadow-2xl transition-all hover:bg-white/10 group"
-          >
-            <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-white" />
-          </button>
-        )}
-
-        <div className="relative flex flex-1 flex-col overflow-hidden">
-          {/* Placement Mode Banner */}
+        <div className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
+          <div className="mx-auto grid max-w-[1120px] gap-5 pt-4">
+            <div className="grid gap-5">
           <AnimatePresence>
             {isPlacementMode && (
               <motion.div
-                initial={{ y: -50, opacity: 0, scale: 0.9 }}
+                initial={{ y: -32, opacity: 0, scale: 0.96 }}
                 animate={{ y: 0, opacity: 1, scale: 1 }}
-                exit={{ y: -50, opacity: 0, scale: 0.9 }}
-                className="absolute left-1/2 top-4 z-30 flex w-[calc(100%-1.5rem)] max-w-xl -translate-x-1/2 items-center gap-3 rounded-2xl bg-teal-900/65 px-4 py-3 text-teal-100 border border-teal-400/40 shadow-[0_0_30px_rgba(20,184,166,0.2)] sm:px-6"
+                exit={{ y: -32, opacity: 0, scale: 0.96 }}
+                className="sticky top-4 z-30 flex items-center gap-3 rounded-2xl border border-teal-400/35 bg-teal-900/78 px-4 py-3 text-teal-100 shadow-[0_18px_40px_rgba(7,24,31,0.28)] sm:px-5"
               >
                 <MousePointer2 className="h-5 w-5 animate-bounce shrink-0 text-teal-300" />
-                <span className="text-sm font-semibold sm:text-base">请在坐标区点击一个位置来放置任务</span>
+                <span className="text-sm font-semibold sm:text-base">请在下方四象限地图点击一个位置来放置任务</span>
                 <button
+                  type="button"
                   onClick={() => setIsPlacementMode(false)}
-                  className="ml-auto rounded-full p-1.5 hover:bg-white/10 transition-colors"
+                  className="ml-auto rounded-full p-1.5 transition-colors hover:bg-white/10"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="h-4 w-4" />
                 </button>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* The Axis Stage */}
-          <div
-            ref={quadrantRef}
-            onClick={handleQuadrantClick}
-            className={cn(
-              "flex-1 relative quadrant-grid transition-all duration-500",
-              isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
-            )}
-          >
+              <section className="glass-panel rounded-[1.6rem] p-5 sm:p-6">
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_22rem]">
+                  <div>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-rose-200/70">AI 日程规划</p>
+                        <h3 className="mt-2 text-[clamp(1.22rem,2.3vw,1.8rem)] font-semibold leading-tight text-white text-safe-wrap">
+                          用自然语言把今天排出来。
+                        </h3>
+                        <p className="mt-2 max-w-[60ch] text-sm leading-6 text-slate-300 text-safe-wrap">
+                          直接说你今天要做什么、几点有会、现在精力怎么样，AI 会收敛成一条主线和一组可执行待办。
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">当前核心工作</p>
+                        <p className="mt-2 font-semibold text-white text-safe-wrap">{currentCoreFocusTitle}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-400 text-safe-wrap">{currentCoreFocusDetail}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3">
+                      <textarea
+                        value={aiDayPlan.input}
+                        onChange={(e) => setAiDayPlan((prev) => ({ ...prev, input: e.target.value }))}
+                        placeholder="例如：今天 10 点开组会，下午要交一版首页设计，我现在精力一般，希望别排太满，还得留 30 分钟回消息。"
+                        className="min-h-[120px] w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-white outline-none transition-colors placeholder:text-slate-500 focus:border-rose-300/35"
+                      />
+                      <div className="flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={generateAIDayPlan}
+                          disabled={isGeneratingDayPlan}
+                          className="inline-flex items-center gap-2 rounded-xl border border-rose-300/30 bg-rose-500/14 px-4 py-2.5 text-sm font-semibold text-rose-100 transition-colors hover:bg-rose-500/22 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isGeneratingDayPlan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                          {isGeneratingDayPlan ? '正在整理今天' : 'AI 生成今天安排'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={applyAIDayPlanToTasks}
+                          className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]"
+                        >
+                          <Save className="h-4 w-4" />
+                          一键写入任务
+                        </button>
+                        <button
+                          type="button"
+                          onClick={exportCurrentPlanToCalendar}
+                          className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]"
+                        >
+                          <Clock3 className="h-4 w-4" />
+                          导出到日历
+                        </button>
+                      </div>
+                      {dayPlanError && (
+                        <div className="rounded-xl border border-rose-300/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                          {dayPlanError}
+                        </div>
+                      )}
+                      {aiDayPlan.summary && (
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
+                            <span className="rounded-full border border-rose-300/25 bg-rose-500/12 px-3 py-1 text-rose-100">主线：{aiDayPlan.core_focus || '待确认'}</span>
+                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-slate-200">AI 已整理 {aiDayPlan.tasks.length} 项</span>
+                          </div>
+                          <p className="mt-3 text-sm leading-6 text-slate-300 text-safe-wrap">{aiDayPlan.summary}</p>
+                          {aiDayPlan.schedule_markdown && (
+                            <div className="mt-4 rounded-xl border border-white/8 bg-black/10 p-4">
+                              <Markdown>{aiDayPlan.schedule_markdown}</Markdown>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <aside className="grid gap-3">
+                    <div className="rounded-[1.2rem] border border-white/10 bg-white/[0.03] p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">核心提醒</p>
+                          <h4 className="mt-2 text-base font-semibold text-white">让电脑持续提醒你现在最该做什么</h4>
+                        </div>
+                        {focusReminderSettings.enabled ? <BellRing className="h-5 w-5 text-rose-200" /> : <Bell className="h-5 w-5 text-slate-400" />}
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-slate-300 text-safe-wrap">
+                        当前会围绕“{currentCoreFocusTitle}”发提醒。打开桌面通知后，页面会按节奏弹出提示。
+                      </p>
+                      <div className="mt-4 grid gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setFocusReminderSettings((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                          className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
+                        >
+                          <span>启用提醒</span>
+                          <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-semibold", focusReminderSettings.enabled ? "bg-rose-500/18 text-rose-100" : "bg-white/[0.04] text-slate-400")}>
+                            {focusReminderSettings.enabled ? '已开启' : '已关闭'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const checked = !focusReminderSettings.desktop_notifications;
+                            if (checked && notificationPermission !== 'granted') {
+                              const permission = await requestDesktopNotificationPermission();
+                              if (permission !== 'granted') return;
+                            }
+                            setFocusReminderSettings((prev) => ({ ...prev, desktop_notifications: checked }));
+                          }}
+                          className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
+                        >
+                          <span>桌面弹窗</span>
+                          <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-semibold", focusReminderSettings.desktop_notifications ? "bg-rose-500/18 text-rose-100" : "bg-white/[0.04] text-slate-400")}>
+                            {notificationPermission === 'unsupported'
+                              ? '不支持'
+                              : focusReminderSettings.desktop_notifications
+                                ? '已开启'
+                                : notificationPermission === 'denied'
+                                  ? '已拒绝'
+                                  : '未开启'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={testDesktopNotification}
+                          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-sm font-semibold text-slate-100 transition-colors hover:bg-white/[0.05]"
+                        >
+                          <BellRing className="h-4 w-4" />
+                          立即测试弹窗
+                        </button>
+                        <label className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3 text-sm text-slate-200">
+                          <span>提醒间隔</span>
+                          <input
+                            type="range"
+                            min={10}
+                            max={90}
+                            step={5}
+                            value={focusReminderSettings.interval_minutes}
+                            onChange={(e) => setFocusReminderSettings((prev) => ({ ...prev, interval_minutes: Number(e.target.value) }))}
+                            className="w-full accent-rose-400"
+                          />
+                          <span className="text-xs text-slate-400">每 {focusReminderSettings.interval_minutes} 分钟提醒一次</span>
+                        </label>
+                        <div className="rounded-xl border border-dashed border-white/10 px-3 py-3 text-xs leading-5 text-slate-400">
+                          手机先用日历最省事：导出 `.ics` 后，Google Calendar 用“导入”，Apple Calendar 直接打开即可添加。后面再补 Web Push。
+                        </div>
+                        <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3 text-xs leading-5 text-slate-300">
+                          <p className="font-semibold text-slate-100">订阅链接</p>
+                          {calendarSubscription?.url ? (
+                            <>
+                              <p className="mt-2 break-all text-slate-400">{calendarSubscription.url}</p>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button type="button" onClick={copyCalendarSubscriptionUrl} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]">
+                                  <Link2 className="h-3.5 w-3.5" />
+                                  复制订阅链接
+                                </button>
+                                <a href={calendarSubscription.appleUrl} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]">
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                  Apple 日历打开
+                                </a>
+                                <button type="button" onClick={handleResetCalendarSubscription} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]">
+                                  <RefreshCw className="h-3.5 w-3.5" />
+                                  重置链接
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <p className="mt-2 text-slate-400">正在生成订阅地址…</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </aside>
+                </div>
+              </section>
+
+              <section className="home-stage rounded-[1.9rem] border border-white/10 bg-[linear-gradient(160deg,rgba(6,17,29,0.96),rgba(9,25,37,0.88))] p-5 shadow-[0_26px_64px_rgba(2,8,18,0.34)] sm:p-6">
+                <div className="home-stage-header">
+                  <div className="max-w-3xl">
+                    <p className="home-stage-kicker text-[10px] font-bold uppercase tracking-[0.24em] text-rose-200/70">轻量首页</p>
+                    <h3 className="mt-2 text-[clamp(1.42rem,2.6vw,2.2rem)] font-semibold leading-tight text-white text-safe-wrap">
+                      少看一点，直接开始。
+                    </h3>
+                    <p className="mt-2 max-w-[58ch] text-sm leading-6 text-slate-300 text-safe-wrap">
+                      这一版把首页做成一块专注工作台。主线在左，今日线和低能线在右，其他判断信息只在需要时出现。
+                    </p>
+                  </div>
+                  <div className="home-stage-stats">
+                    <div className="home-stage-stat">
+                      <span>主线</span>
+                      <strong>1 件</strong>
+                    </div>
+                    <div className="home-stage-stat">
+                      <span>今日线</span>
+                      <strong>{simpleHomeTasks.length} 项</strong>
+                    </div>
+                    <div className="home-stage-stat">
+                      <span>当前能量</span>
+                      <strong>{energyScore}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="home-stage-body">
+                  <div className="home-focus-column">
+                    <div className="home-focus-banner">
+                      <span>主线轨道</span>
+                      <span>{recommendedPrimaryTask?.tracking_started_at ? '正在推进' : '先开这一件'}</span>
+                    </div>
+                    <div className="home-focus-shell">
+                      <div className="home-focus-meta">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-100/75">现在先做</p>
+                          <h4 className="mt-1 text-[1.05rem] font-semibold leading-6 text-white text-safe-wrap">
+                            {recommendedPrimaryTask ? '把这一件推进到一个完整段落' : '先给今天留一个最小动作'}
+                          </h4>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsTaskListOpen(true)}
+                          className="home-open-list rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
+                        >
+                          打开清单
+                        </button>
+                      </div>
+
+                      <div className="home-focus-card-wrap">
+                        {recommendedPrimaryTask ? (
+                          renderTaskCard(recommendedPrimaryTask, {
+                            laneLabel: recommendedPrimaryTask.tracking_started_at ? '正在推进' : '主任务',
+                            note: recommendedPrimaryTask.tracking_started_at
+                              ? '先把当前这段做完，再决定要不要切换。'
+                              : '只盯这一件，别让首页把你拉去做别的。',
+                            tone: 'focus',
+                          })
+                        ) : (
+                          <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
+                            当前没有可直接开工的任务。先新建一个最小动作，或者把阻塞项解除。
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="home-focus-footer">
+                        <span className="home-note-pill">{focusHeadline}</span>
+                        <span className="home-note-pill">WIP {runningTasks.length}/{FOCUS_WIP_LIMIT}</span>
+                        <span className="home-note-pill">压力 {pressureScore}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="home-side-column">
+                    <section className="home-stack-card">
+                      <div className="home-stack-head">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">今日线</p>
+                          <h4 className="mt-1 text-sm font-semibold text-white text-safe-wrap">保持短一点，读完就能动手</h4>
+                        </div>
+                        <span>{simpleHomeTasks.length} 项</span>
+                      </div>
+                      <div className="home-stack-body">
+                        {simpleHomeTasks.length === 0 ? (
+                          <div className="rounded-[1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
+                            今天还没有排出一条清爽的待办线。
+                          </div>
+                        ) : (
+                          simpleHomeTasks.map((task, index) =>
+                            renderTaskLine(task, {
+                              label: index === 0 ? '先做' : '待办',
+                            })
+                          )
+                        )}
+                      </div>
+                    </section>
+
+                    <section className="home-stack-card home-stack-card-standby">
+                      <div className="home-stack-head">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-stone-200/80">低能线</p>
+                          <h4 className="mt-1 text-sm font-semibold text-white text-safe-wrap">累了就切过来，不用硬顶</h4>
+                        </div>
+                        <span>{lowEnergyStandby.length} 项</span>
+                      </div>
+                      <div className="home-stack-body">
+                        {lowEnergyStandby.length === 0 ? (
+                          <div className="rounded-[1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
+                            还没有低能备选。补 2 到 3 个 10 分钟以内的小动作会更轻松。
+                          </div>
+                        ) : (
+                          lowEnergyStandby.slice(0, 3).map((task) =>
+                            renderTaskLine(task, {
+                              label: '低能',
+                              emphasis: 'standby',
+                            })
+                          )
+                        )}
+                      </div>
+                    </section>
+
+                    <div className="home-ambient-note">
+                      <span className="home-ambient-dot" />
+                      <p className="text-safe-wrap">
+                        {isExecutionSparse ? '先从清单里挑一个最小动作，把页面从“看”切回“做”。' : focusHeadline}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="hidden">
+                <div className="rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,18,31,0.94),rgba(8,19,31,0.86))] p-5 shadow-[0_20px_52px_rgba(2,8,18,0.28)]">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-cyan-200/75">聚焦卡组</p>
+                      <h3 className="mt-1 text-lg font-semibold text-white">同时只盯 1 到 2 项</h3>
+                    </div>
+                    <span className="rounded-full border border-cyan-300/25 bg-cyan-500/12 px-3 py-1 text-[11px] font-semibold text-cyan-100">
+                      正在做 {runningTasks.length}
+                    </span>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {focusDeck.length === 0 ? (
+                      <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
+                        还没有进入聚焦卡组的任务。先从今日承诺池里挑一个开始计时。
+                      </div>
+                    ) : (
+                      focusDeck.map((task, index) =>
+                        renderTaskCard(task, {
+                          laneLabel: task.tracking_started_at ? '正在做' : index === 0 ? '下一位' : '候补位',
+                          note: task.tracking_started_at
+                            ? '先让它跑完一个完整段落，再决定是否暂停。'
+                            : index === 0
+                              ? '下一次切换时优先接这个，不再额外开新坑。'
+                              : '只有当前面任务收束后再把它推上来。',
+                          tone: 'focus',
+                        })
+                      )
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(9,19,29,0.94),rgba(8,16,24,0.9))] p-5 shadow-[0_20px_52px_rgba(2,8,18,0.26)]">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-emerald-200/75">低能备选</p>
+                      <h3 className="mt-1 text-lg font-semibold text-white">精力掉下去时也能推进</h3>
+                    </div>
+                    <span className="rounded-full border border-emerald-300/25 bg-emerald-500/12 px-3 py-1 text-[11px] font-semibold text-emerald-100">
+                      备用 {lowEnergyStandby.length}
+                    </span>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {lowEnergyStandby.length === 0 ? (
+                      <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
+                        当前没有低认知、低协作的任务。可以补两三个 10 到 20 分钟的小动作备用。
+                      </div>
+                    ) : (
+                      lowEnergyStandby.map((task) =>
+                        renderTaskCard(task, {
+                          laneLabel: '低能也能推',
+                          note: '脑子发钝时先清这个，维持推进感，不要硬顶重活。',
+                          tone: 'standby',
+                        })
+                      )
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="hidden">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-sky-200/75">今日承诺池</p>
+                    <h3 className="mt-1 text-lg font-semibold text-white">按 1-3-5 收敛，代办一眼可读</h3>
+                    <p className="mt-1 text-sm text-slate-300">
+                      1 个重任务，3 个中任务，5 个轻任务。超出的先留在稍后处理区，不再全塞进今天。
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+                    <span className="rounded-full border border-rose-300/25 bg-rose-500/12 px-3 py-1 text-rose-100">
+                      重任务 {dailyMix.big.length}/1
+                    </span>
+                    <span className="rounded-full border border-amber-300/25 bg-amber-500/12 px-3 py-1 text-amber-100">
+                      中任务 {dailyMix.medium.length}/3
+                    </span>
+                    <span className="rounded-full border border-sky-300/25 bg-sky-500/12 px-3 py-1 text-sky-100">
+                      轻任务 {dailyMix.small.length}/5
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-slate-200">
+                      溢出 {dailyMix.overflow.length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 xl:grid-cols-3">
+                  <div className="grid gap-3 rounded-[1.35rem] border border-rose-300/18 bg-rose-500/[0.07] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-100/80">1 个重任务</p>
+                        <h4 className="mt-1 text-sm font-semibold text-white">只留一个真正要啃的</h4>
+                      </div>
+                      <span className="text-[11px] font-semibold text-rose-100">{dailyMix.big.length}/1</span>
+                    </div>
+                    {dailyMix.big.length === 0 ? (
+                      <div className="rounded-[1.05rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
+                        还没选出今天最重要的一件事。把一个高价值任务拖进来。
+                      </div>
+                    ) : (
+                      dailyMix.big.map((task) =>
+                        renderTaskCard(task, {
+                          laneLabel: '重任务',
+                          tone: 'today',
+                        })
+                      )
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 rounded-[1.35rem] border border-amber-300/18 bg-amber-500/[0.07] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-100/80">3 个中任务</p>
+                        <h4 className="mt-1 text-sm font-semibold text-white">推进主线，但别挤满</h4>
+                      </div>
+                      <span className="text-[11px] font-semibold text-amber-100">{dailyMix.medium.length}/3</span>
+                    </div>
+                    {dailyMix.medium.length === 0 ? (
+                      <div className="rounded-[1.05rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
+                        这里留给能推动进度但不需要满血状态的任务。
+                      </div>
+                    ) : (
+                      dailyMix.medium.map((task) =>
+                        renderTaskCard(task, {
+                          laneLabel: '中任务',
+                          tone: 'today',
+                        })
+                      )
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 rounded-[1.35rem] border border-sky-300/18 bg-sky-500/[0.07] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-sky-100/80">5 个轻任务</p>
+                        <h4 className="mt-1 text-sm font-semibold text-white">填缝用的小动作</h4>
+                      </div>
+                      <span className="text-[11px] font-semibold text-sky-100">{dailyMix.small.length}/5</span>
+                    </div>
+                    {dailyMix.small.length === 0 ? (
+                      <div className="rounded-[1.05rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
+                        可以补几个 10 到 20 分钟的轻任务，专门拿来切换节奏。
+                      </div>
+                    ) : (
+                      dailyMix.small.map((task) =>
+                        renderTaskCard(task, {
+                          laneLabel: '轻任务',
+                          tone: 'today',
+                        })
+                      )
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="hidden">
+                <div className="rounded-[1.7rem] border border-white/10 bg-[linear-gradient(180deg,rgba(9,18,28,0.94),rgba(7,14,23,0.9))] p-5 shadow-[0_18px_44px_rgba(2,8,18,0.26)]">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">稍后处理</p>
+                      <h3 className="mt-1 text-lg font-semibold text-white">能做，但今天先不承诺</h3>
+                    </div>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-slate-200">
+                      稍后 {laterReadyQueue.length}
+                    </span>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {laterReadyQueue.length === 0 ? (
+                      <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
+                        没有额外的可执行任务，今天的承诺池已经比较干净。
+                      </div>
+                    ) : (
+                      laterReadyQueue.map((task) =>
+                        renderTaskCard(task, {
+                          laneLabel: '稍后再做',
+                          note: '它并不紧急，先别把今天的盘子撑大。',
+                          tone: 'today',
+                        })
+                      )
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-[1.7rem] border border-white/10 bg-[linear-gradient(180deg,rgba(20,16,10,0.94),rgba(17,13,8,0.9))] p-5 shadow-[0_18px_44px_rgba(2,8,18,0.26)]">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-100/75">阻塞队列</p>
+                      <h3 className="mt-1 text-lg font-semibold text-white">先看卡住点，不在脑子里挂着</h3>
+                    </div>
+                    <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-100">
+                      阻塞 {blockedQueue.length}
+                    </span>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {blockedQueue.length === 0 ? (
+                      <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
+                        当前没有明显阻塞项，执行面已经比较顺畅。
+                      </div>
+                    ) : (
+                      blockedQueue.map((task) =>
+                        renderTaskCard(task, {
+                          laneLabel: '阻塞中',
+                          note: getTaskBlockingLabel(task),
+                          tone: 'blocked',
+                        })
+                      )
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="home-map-panel rounded-[1.55rem] border border-white/10 p-4 shadow-[0_18px_44px_rgba(2,8,18,0.24)]">
+                <div className="home-map-summary">
+                  <div className="home-map-copy">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">四象限地图</p>
+                    <h3 className="mt-1 text-base font-semibold text-white text-safe-wrap">把判断留在第二层，需要时再展开</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-400 text-safe-wrap">
+                      当你想重新判断任务轻重缓急，或者需要给新任务落点时，再打开这一层。
+                    </p>
+                  </div>
+                  <div className="home-map-actions">
+                    <span className="home-map-pill">仅在校准时出现</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsMatrixExpanded((prev) => !prev)}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
+                    >
+                      {isMatrixExpanded ? '收起地图' : '展开地图'}
+                      <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isMatrixExpanded && "rotate-90")} />
+                    </button>
+                  </div>
+                </div>
+
+                {isMatrixExpanded ? (
+                <div
+                  ref={quadrantRef}
+                  onClick={handleQuadrantClick}
+                  className={cn(
+                    "quadrant-board relative quadrant-grid mt-4 h-[23rem] overflow-hidden rounded-[1.55rem] border border-white/10 shadow-[0_24px_54px_rgba(2,6,23,0.24)] transition-all duration-500 sm:h-[28rem]",
+                    isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
+                  )}
+                >
             <div className="pointer-events-none absolute inset-0 z-0 quadrant-tints">
               <div className="quadrant-tint quadrant-tint-nw" />
               <div className="quadrant-tint quadrant-tint-ne" />
@@ -5424,12 +6774,29 @@ export default function App() {
               <div className="quadrant-tint quadrant-tint-se" />
             </div>
             <div className="pointer-events-none absolute inset-0 z-[2]">
-              <div className="absolute left-1/2 top-0 h-full w-px bg-teal-200/35" />
-              <div className="absolute left-0 top-1/2 h-px w-full bg-teal-200/35" />
-              <span className="axis-label absolute left-2 top-2 rounded-md px-2 py-1 text-[10px] font-semibold text-teal-100">紧急度: 高</span>
-              <span className="axis-label absolute left-2 bottom-12 rounded-md px-2 py-1 text-[10px] font-semibold text-teal-100">紧急度: 低</span>
-              <span className="axis-label absolute left-12 bottom-2 rounded-md px-2 py-1 text-[10px] font-semibold text-teal-100">重要性: 低</span>
-              <span className="axis-label absolute right-2 bottom-2 rounded-md px-2 py-1 text-[10px] font-semibold text-teal-100">重要性: 高</span>
+              <div className="quadrant-axis-line quadrant-axis-line-vertical absolute left-1/2 top-0 h-full w-px" />
+              <div className="quadrant-axis-line quadrant-axis-line-horizontal absolute left-0 top-1/2 h-px w-full" />
+              <span className="axis-label absolute left-3 top-3 rounded-md px-2 py-1 text-[10px] font-semibold">紧急度: 高</span>
+              <span className="axis-label absolute left-3 bottom-14 rounded-md px-2 py-1 text-[10px] font-semibold">紧急度: 低</span>
+              <span className="axis-label absolute left-14 bottom-3 rounded-md px-2 py-1 text-[10px] font-semibold">重要性: 低</span>
+              <span className="axis-label absolute right-3 bottom-3 rounded-md px-2 py-1 text-[10px] font-semibold">重要性: 高</span>
+
+              <div className="quadrant-caption quadrant-caption-nw" data-zone="quick">
+                <strong>快清区</strong>
+                <span>紧急但不重要</span>
+              </div>
+              <div className="quadrant-caption quadrant-caption-ne" data-zone="focus">
+                <strong>主战区</strong>
+                <span>重要且紧急</span>
+              </div>
+              <div className="quadrant-caption quadrant-caption-sw" data-zone="release">
+                <strong>回收区</strong>
+                <span>不急也不重要</span>
+              </div>
+              <div className="quadrant-caption quadrant-caption-se" data-zone="build">
+                <strong>积累区</strong>
+                <span>重要但不紧急</span>
+              </div>
             </div>
             <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
               <defs>
@@ -5463,7 +6830,6 @@ export default function App() {
               )}
             </svg>
 
-            {/* Ghost Point */}
             {isPlacementMode && mousePos && (
               <div
                 className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
@@ -5485,17 +6851,131 @@ export default function App() {
               />
             ))}
 
-            {activeTasks.length === 0 && archivedTasks.length === 0 && !isPlacementMode && (
-              <div className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center p-5 sm:p-8">
-                <button
-                  type="button"
-                  onClick={handleAddTask}
-                  className="pointer-events-auto rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
-                >
-                  新建第一个任务
-                </button>
-              </div>
-            )}
+                  {activeTasks.length === 0 && archivedTasks.length === 0 && !isPlacementMode && (
+                    <div className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center p-5 sm:p-8">
+                      <div className="quadrant-empty max-w-md text-center">
+                        <p className="quadrant-empty-kicker">矩阵已清空</p>
+                        <h3 className="quadrant-empty-title">先把第一个任务放进四象限，再决定今天的路线</h3>
+                        <p className="quadrant-empty-copy">
+                          点一下坐标区就能落点。越靠右越重要，越靠上越紧急。
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleAddTask}
+                          className="pointer-events-auto mt-4 rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
+                        >
+                          新建第一个任务
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                ) : (
+                  <div className="home-map-mini-grid">
+                    <div className="home-map-mini-cell">
+                      <strong>主战区</strong>
+                      <span>重要又紧急</span>
+                    </div>
+                    <div className="home-map-mini-cell">
+                      <strong>积累区</strong>
+                      <span>重要但不急</span>
+                    </div>
+                    <div className="home-map-mini-cell">
+                      <strong>快清区</strong>
+                      <span>赶紧处理掉</span>
+                    </div>
+                    <div className="home-map-mini-cell">
+                      <strong>回收区</strong>
+                      <span>能删就删</span>
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <aside className="hidden">
+              <section className="rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,16,28,0.95),rgba(8,19,31,0.9))] p-5 shadow-[0_24px_54px_rgba(2,8,18,0.32)]">
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">精力驾驶舱</p>
+                <h3 className="mt-1 text-lg font-semibold text-white">先看状态，再决定下一步怎么推进</h3>
+
+                <div className={cn("mt-4 rounded-[1.25rem] border px-4 py-4", energyTone.card)}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-current/70">当前精力</p>
+                      <h4 className="mt-1 text-base font-semibold text-white">{energyTone.label}</h4>
+                    </div>
+                    <span className="text-2xl font-black text-white">{energyScore}</span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/25">
+                    <div className={cn("h-full rounded-full bg-gradient-to-r", energyTone.bar)} style={{ width: `${energyScore}%` }} />
+                  </div>
+                  <p className="mt-3 text-[11px] leading-5 text-current/80">
+                    已完成 {completedTodayTasks.length} 项，累计恢复 {(totalRestRecovery + behaviorRecovery).toFixed(1)}，当前速率 {liveEnergyBurnRate.toFixed(0)}/小时。
+                  </p>
+                </div>
+
+                <div className={cn("mt-3 rounded-[1.25rem] border px-4 py-4", pressureTone.card)}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-current/70">时间压力</p>
+                      <h4 className="mt-1 text-base font-semibold text-white">{pressureTone.label}</h4>
+                    </div>
+                    <span className="text-2xl font-black text-white">{pressureScore}</span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/25">
+                    <div className={cn("h-full rounded-full bg-gradient-to-r", pressureTone.bar)} style={{ width: `${pressureScore}%` }} />
+                  </div>
+                  <p className="mt-3 text-[11px] leading-5 text-current/80">
+                    待处理 {dueTodayTasks.length} 项，预计 {dueTodayEstimatedMinutes} 分钟，已超时 {overdueTodayTasks.length} 项。
+                  </p>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {wellbeingSuggestions.slice(0, 4).map((suggestion, index) => (
+                    <div
+                      key={`wellbeing-side-${todayKey}-${index}`}
+                      className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] leading-5 text-slate-200"
+                    >
+                      {suggestion}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,17,27,0.95),rgba(8,16,24,0.88))] p-5 shadow-[0_22px_52px_rgba(2,8,18,0.28)]">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-violet-200/75">推进感</p>
+                    <h3 className="mt-1 text-lg font-semibold text-white">{activeAbilityModule?.label || '专注反馈'}</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsMotivationPanelOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-xl border border-violet-300/25 bg-violet-500/12 px-3 py-1.5 text-[11px] font-semibold text-violet-100 transition-colors hover:bg-violet-500/20"
+                  >
+                    设置
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="mt-4 overflow-hidden rounded-[1.3rem] border border-white/10 bg-slate-950/35">
+                  {renderMotivationScene()}
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">任务总量</div>
+                    <div className="mt-1 text-sm font-semibold text-white">{activeTasks.length} 项待办</div>
+                    <p className="mt-1 text-[11px] text-slate-400">估时 {totalEstimatedMinutes} 分钟，实际 {totalActualMinutes} 分钟。</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">今日结构</div>
+                    <div className="mt-1 text-sm font-semibold text-white">
+                      承诺 {dailyMixTaskIds.size} / 低能 {lowEnergyTaskIds.size}
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400">剩下的任务全部退到稍后或阻塞区，不再挤进眼前。</p>
+                  </div>
+                </div>
+              </section>
+            </aside>
           </div>
         </div>
       </main>
@@ -6468,6 +7948,7 @@ export default function App() {
           setIdeaNotes={setIdeaNotes}
           tasks={tasks}
           setTasks={setTasks}
+          coreFocusTitle={currentCoreFocusTitle}
         />
       ) : (
         <AdminResetView
@@ -6534,8 +8015,24 @@ function TaskPoint({
     ? (task.steps.filter(s => s.completed).length / task.steps.length) * 100
     : 0;
   const renderY = getTaskRenderY(task, nowTs);
+  const quadrantZone = getTaskQuadrantZone(task, nowTs);
+  const quadrantMeta = TASK_QUADRANT_ZONE_META[quadrantZone];
   const urgency = Math.round(100 - renderY);
   const importance = Math.round(task.x);
+  const isBottomHalf = renderY >= 58;
+  const isLeftEdge = task.x <= 18;
+  const isRightEdge = task.x >= 82;
+  const labelPositionClass = isBottomHalf
+    ? (isLeftEdge
+      ? "bottom-full left-0 mb-2"
+      : isRightEdge
+        ? "bottom-full right-0 mb-2"
+        : "bottom-full left-1/2 -translate-x-1/2 mb-2")
+    : (isLeftEdge
+      ? "top-full left-0 mt-2"
+      : isRightEdge
+        ? "top-full right-0 mt-2"
+        : "top-full left-1/2 -translate-x-1/2 mt-2");
 
   return (
     <motion.div
@@ -6565,6 +8062,11 @@ function TaskPoint({
             "task-point-shell w-8 h-8 rounded-2xl flex items-center justify-center overflow-hidden relative transition-all duration-300 border shadow-[0_4px_20px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_20px_rgba(20,184,166,0.3)]",
             timelineAccent.ring
           )}
+          data-zone={quadrantZone}
+          style={{
+            ['--task-point-zone' as string]: quadrantMeta.tint,
+            ['--task-point-zone-strong' as string]: quadrantMeta.strong,
+          } as React.CSSProperties}
         >
           <div
             className="absolute bottom-0 left-0 right-0 transition-all duration-700"
@@ -6591,10 +8093,18 @@ function TaskPoint({
         </div>
 
         {/* Always-visible label */}
-        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 whitespace-nowrap pointer-events-none">
-          <div className="task-point-label rounded-xl border px-2 py-1 shadow-xl">
+        <div className={cn("absolute pointer-events-none", labelPositionClass)}>
+          <div
+            className="task-point-label rounded-xl border px-2 py-1 shadow-xl"
+            data-zone={quadrantZone}
+            style={{
+              ['--task-point-zone' as string]: quadrantMeta.tint,
+              ['--task-point-zone-strong' as string]: quadrantMeta.strong,
+            } as React.CSSProperties}
+          >
             <div className="flex items-center gap-1.5">
-              <span className="max-w-[140px] truncate text-[11px] font-semibold task-point-title">{task.title || '未命名'}</span>
+              <span className="task-point-title line-clamp-2 text-[11px] font-semibold leading-4">{task.title || '未命名'}</span>
+              <span className="task-point-zone-badge">{quadrantMeta.badge}</span>
               <span className={cn("rounded border px-1 py-0 text-[9px] font-bold", timelineAccent.badge)}>
                 {task.timeline === 'long_term' ? '长' : '临'}
               </span>

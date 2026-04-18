@@ -87,6 +87,33 @@ export interface AbilityModuleSettings {
   updated_at: number;
 }
 
+export interface AIDayTaskDraft {
+  title: string;
+  description: string;
+  estimated_minutes: number;
+  energy_delta: number;
+  stress_score: number;
+  cognitive_load: TaskCognitiveLoad;
+  collaboration_level: TaskCollaborationLevel;
+  timeline: TaskTimeline;
+}
+
+export interface AIDayPlanWorkspace {
+  input: string;
+  summary: string;
+  core_focus: string;
+  schedule_markdown: string;
+  tasks: AIDayTaskDraft[];
+  updated_at: number;
+}
+
+export interface FocusReminderSettings {
+  enabled: boolean;
+  desktop_notifications: boolean;
+  interval_minutes: number;
+  last_notified_at: number | null;
+}
+
 // RSS 订阅源
 export interface RSSFeed {
   id: string;
@@ -139,6 +166,9 @@ export interface UserTaskData {
   ability_dimensions: string[];
   wellbeing: WellbeingSettings;
   ability_module: AbilityModuleSettings;
+  ai_day_plan?: AIDayPlanWorkspace;
+  focus_reminders?: FocusReminderSettings;
+  calendar_subscription_token?: string;
   rss_feeds?: RSSFeed[];
   news_items?: NewsItem[];
   idea_notes?: IdeaNote[];

@@ -77,6 +77,33 @@ const RSS_SCOUT_SYSTEM_PROMPT = `你是一位资深 RSS 订阅策展助手。请
 3. 优先选择长期稳定、更新频率合理、信息质量高的源。
 4. 如果 URL 把握不足，就不要编造。
 5. summary 和 reason 使用中文。`;
+const DAY_PLAN_SYSTEM_PROMPT = `你是一位擅长把自然语言整理成当日行动安排的执行教练。请严格返回 JSON，不要有任何额外文字。
+返回结构:
+{
+  "summary": "一句中文总结今天的安排策略",
+  "core_focus": "今天最核心的一件事",
+  "schedule_markdown": "Markdown 形式的今日安排",
+  "tasks": [
+    {
+      "title": "任务名称",
+      "description": "任务说明",
+      "estimated_minutes": 45,
+      "energy_delta": -1,
+      "stress_score": 3,
+      "cognitive_load": "low 或 high",
+      "collaboration_level": "low 或 high",
+      "timeline": "temporary 或 long_term"
+    }
+  ]
+}
+要求:
+1. tasks 返回 3 到 7 条，按执行顺序排列。
+2. core_focus 必须明确，只能有一件主线工作。
+3. estimated_minutes 为 10 到 180 的整数。
+4. energy_delta 只能是 -2 到 2 的整数。
+5. stress_score 只能是 1 到 5 的整数。
+6. schedule_markdown 使用中文，包含“主线”“顺手做”“低能时做”三个小标题。
+7. 如果用户提到会议、出门、回复消息、健身、休息，也要纳入当天安排。`;
 const DEFAULT_TRENDRADAR_PLATFORMS = [
   { id: 'toutiao', name: '今日头条' },
   { id: 'baidu', name: '百度热搜' },
@@ -323,6 +350,25 @@ function buildPrompt(task) {
 请按要求返回。`;
 }
 
+function buildDayPlanPrompt({ input, energy, existingTasks }) {
+  const existingSummary = Array.isArray(existingTasks) && existingTasks.length > 0
+    ? existingTasks
+        .slice(0, 8)
+        .map((task, index) => `${index + 1}. ${task.title || '未命名任务'}｜${task.estimated_minutes || 60} 分钟｜${task.status || 'pending'}`)
+        .join('\n')
+    : '当前还没有已有任务。';
+  return `请把下面这段自然语言整理成今天的执行计划。
+用户输入：
+${input}
+
+当前精力：${Number.isFinite(Number(energy)) ? Number(energy) : 60}
+
+现有任务参考：
+${existingSummary}
+
+请优先让计划简单、可执行、不过载。`;
+}
+
 function parseQuotedOrBareValue(raw) {
   const text = String(raw || '').trim();
   if (!text) return '';
@@ -415,6 +461,31 @@ function parsePlanPayload(raw) {
     plan: typeof parsed.plan === 'string' ? parsed.plan : '',
     steps: Array.isArray(parsed.steps)
       ? parsed.steps.filter((s) => typeof s === 'string' && s.trim().length > 0)
+      : [],
+  };
+}
+
+function parseDayPlanPayload(raw) {
+  const jsonText = extractJsonText(raw);
+  const parsed = JSON.parse(jsonText);
+  return {
+    summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
+    core_focus: typeof parsed.core_focus === 'string' ? parsed.core_focus.trim() : '',
+    schedule_markdown: typeof parsed.schedule_markdown === 'string' ? parsed.schedule_markdown.trim() : '',
+    tasks: Array.isArray(parsed.tasks)
+      ? parsed.tasks
+          .filter((item) => item && typeof item === 'object')
+          .map((item) => ({
+            title: typeof item.title === 'string' ? item.title.trim() : '',
+            description: typeof item.description === 'string' ? item.description.trim() : '',
+            estimated_minutes: Math.max(10, Math.min(180, Number(item.estimated_minutes) || 30)),
+            energy_delta: Math.max(-2, Math.min(2, Math.round(Number(item.energy_delta) || 0))),
+            stress_score: Math.max(1, Math.min(5, Math.round(Number(item.stress_score) || 3))),
+            cognitive_load: item.cognitive_load === 'high' ? 'high' : 'low',
+            collaboration_level: item.collaboration_level === 'high' ? 'high' : 'low',
+            timeline: item.timeline === 'long_term' ? 'long_term' : 'temporary',
+          }))
+          .filter((item) => item.title)
       : [],
   };
 }
@@ -719,6 +790,72 @@ async function requestAIPlan(task) {
   }
 }
 
+async function requestDayPlanByChatCompletions(payload) {
+  const response = await fetch(`${AI_API_BASE}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      temperature: 0.35,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: DAY_PLAN_SYSTEM_PROMPT },
+        { role: 'user', content: buildDayPlanPrompt(payload) },
+      ],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`chat completions failed: ${response.status}`);
+  }
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('chat completions returned empty content');
+  }
+  return parseDayPlanPayload(content);
+}
+
+async function requestDayPlanByGemini(payload) {
+  const response = await fetch(`${AI_API_BASE}/v1beta/models/${AI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+      'x-goog-api-key': AI_API_KEY,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `${DAY_PLAN_SYSTEM_PROMPT}\n\n${buildDayPlanPrompt(payload)}` }] }],
+      generationConfig: {
+        temperature: 0.35,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`generateContent failed: ${response.status}`);
+  }
+  const data = await response.json();
+  const content = data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n');
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('generateContent returned empty content');
+  }
+  return parseDayPlanPayload(content);
+}
+
+async function requestAIDayPlan(payload) {
+  if (!AI_API_KEY) {
+    throw new Error('服务器未配置 AI_API_KEY');
+  }
+  try {
+    return await requestDayPlanByChatCompletions(payload);
+  } catch {
+    return requestDayPlanByGemini(payload);
+  }
+}
+
 function getUserTasksFile(username) {
   const safeUser = encodeURIComponent(normalizeUsername(username));
   return path.join(dataDir, 'users', safeUser, 'tasks.json');
@@ -762,6 +899,21 @@ function normalizeTaskPayload(payload) {
         daily_rest_sessions: {},
       },
       ability_module: normalizeAbilityModule(null),
+      ai_day_plan: {
+        input: '',
+        summary: '',
+        core_focus: '',
+        schedule_markdown: '',
+        tasks: [],
+        updated_at: 0,
+      },
+      focus_reminders: {
+        enabled: false,
+        desktop_notifications: false,
+        interval_minutes: 35,
+        last_notified_at: null,
+      },
+      calendar_subscription_token: '',
       rss_feeds: [],
       news_items: [],
       idea_notes: [],
@@ -821,6 +973,43 @@ function normalizeTaskPayload(payload) {
             daily_rest_sessions: {},
           },
       ability_module: normalizeAbilityModule(payload.ability_module),
+      ai_day_plan: payload.ai_day_plan && typeof payload.ai_day_plan === 'object'
+        ? {
+            input: typeof payload.ai_day_plan.input === 'string' ? payload.ai_day_plan.input : '',
+            summary: typeof payload.ai_day_plan.summary === 'string' ? payload.ai_day_plan.summary : '',
+            core_focus: typeof payload.ai_day_plan.core_focus === 'string' ? payload.ai_day_plan.core_focus : '',
+            schedule_markdown: typeof payload.ai_day_plan.schedule_markdown === 'string' ? payload.ai_day_plan.schedule_markdown : '',
+            tasks: Array.isArray(payload.ai_day_plan.tasks) ? payload.ai_day_plan.tasks : [],
+            updated_at: Number.isFinite(Number(payload.ai_day_plan.updated_at)) ? Number(payload.ai_day_plan.updated_at) : 0,
+          }
+        : {
+            input: '',
+            summary: '',
+            core_focus: '',
+            schedule_markdown: '',
+            tasks: [],
+            updated_at: 0,
+          },
+      focus_reminders: payload.focus_reminders && typeof payload.focus_reminders === 'object'
+        ? {
+            enabled: Boolean(payload.focus_reminders.enabled),
+            desktop_notifications: Boolean(payload.focus_reminders.desktop_notifications),
+            interval_minutes: Number.isFinite(Number(payload.focus_reminders.interval_minutes))
+              ? Math.max(10, Math.min(180, Math.round(Number(payload.focus_reminders.interval_minutes))))
+              : 35,
+            last_notified_at: Number.isFinite(Number(payload.focus_reminders.last_notified_at))
+              ? Number(payload.focus_reminders.last_notified_at)
+              : null,
+          }
+        : {
+            enabled: false,
+            desktop_notifications: false,
+            interval_minutes: 35,
+            last_notified_at: null,
+          },
+      calendar_subscription_token: typeof payload.calendar_subscription_token === 'string'
+        ? payload.calendar_subscription_token
+        : '',
       rss_feeds: Array.isArray(payload.rss_feeds) ? payload.rss_feeds : [],
       news_items: Array.isArray(payload.news_items) ? payload.news_items : [],
       idea_notes: Array.isArray(payload.idea_notes) ? payload.idea_notes : [],
@@ -834,6 +1023,21 @@ function normalizeTaskPayload(payload) {
       daily_rest_sessions: {},
     },
     ability_module: normalizeAbilityModule(null),
+    ai_day_plan: {
+      input: '',
+      summary: '',
+      core_focus: '',
+      schedule_markdown: '',
+      tasks: [],
+      updated_at: 0,
+    },
+    focus_reminders: {
+      enabled: false,
+      desktop_notifications: false,
+      interval_minutes: 35,
+      last_notified_at: null,
+    },
+    calendar_subscription_token: '',
     rss_feeds: [],
     news_items: [],
     idea_notes: [],
@@ -867,6 +1071,156 @@ async function writeTasks(username, payload) {
   const userTasksFile = getUserTasksFile(username);
   await fs.promises.mkdir(path.dirname(userTasksFile), { recursive: true });
   await fs.promises.writeFile(userTasksFile, JSON.stringify(normalizeTaskPayload(payload), null, 2), 'utf-8');
+}
+
+function createCalendarSubscriptionToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+async function ensureCalendarSubscription(username) {
+  const payload = await readTasks(username);
+  if (payload.calendar_subscription_token) {
+    return payload;
+  }
+  const nextPayload = {
+    ...payload,
+    calendar_subscription_token: createCalendarSubscriptionToken(),
+  };
+  await writeTasks(username, nextPayload);
+  return nextPayload;
+}
+
+function buildAbsoluteBaseUrl(req) {
+  const proto = req.headers['x-forwarded-proto']
+    ? String(req.headers['x-forwarded-proto']).split(',')[0].trim()
+    : req.protocol;
+  const host = req.headers['x-forwarded-host']
+    ? String(req.headers['x-forwarded-host']).split(',')[0].trim()
+    : req.get('host');
+  return `${proto}://${host}`;
+}
+
+function buildCalendarSubscriptionUrls(req, token) {
+  const baseUrl = buildAbsoluteBaseUrl(req);
+  const url = `${baseUrl}/api/calendar/focus.ics?token=${encodeURIComponent(token)}`;
+  return {
+    token,
+    url,
+    apple_url: url.replace(/^https?:\/\//i, 'webcal://'),
+  };
+}
+
+async function findUserByCalendarSubscriptionToken(token) {
+  const normalizedToken = String(token || '').trim();
+  if (!normalizedToken) return null;
+
+  const usersRoot = path.join(dataDir, 'users');
+  try {
+    const dirs = await fs.promises.readdir(usersRoot, { withFileTypes: true });
+    for (const entry of dirs) {
+      if (!entry.isDirectory()) continue;
+      const username = decodeURIComponent(entry.name);
+      const payload = await readTasks(username);
+      if (payload.calendar_subscription_token === normalizedToken) {
+        return { username, payload };
+      }
+    }
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+  return null;
+}
+
+function escapeIcsText(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;');
+}
+
+function formatIcsUtcDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(date.getUTCDate()).padStart(2, '0');
+  const hh = String(date.getUTCHours()).padStart(2, '0');
+  const mi = String(date.getUTCMinutes()).padStart(2, '0');
+  const ss = String(date.getUTCSeconds()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}T${hh}${mi}${ss}Z`;
+}
+
+function roundToNextHalfHourDate(baseTs) {
+  const date = new Date(baseTs);
+  const minutes = date.getMinutes();
+  if (minutes === 0 || minutes === 30) {
+    date.setSeconds(0, 0);
+    return date;
+  }
+  if (minutes < 30) {
+    date.setMinutes(30, 0, 0);
+    return date;
+  }
+  date.setHours(date.getHours() + 1, 0, 0, 0);
+  return date;
+}
+
+function buildCalendarPlanItems(payload) {
+  if (payload.ai_day_plan && Array.isArray(payload.ai_day_plan.tasks) && payload.ai_day_plan.tasks.length > 0) {
+    return payload.ai_day_plan.tasks.slice(0, 8).map((task) => ({
+      uid: `ai-${task.title}`,
+      title: task.title || '未命名任务',
+      description: task.description || payload.ai_day_plan.summary || payload.ai_day_plan.core_focus || 'Planday AI 日计划',
+      minutes: Math.max(10, Math.min(180, Number(task.estimated_minutes) || 30)),
+    }));
+  }
+
+  return (Array.isArray(payload.tasks) ? payload.tasks : [])
+    .filter((task) => task && task.status === 'pending')
+    .sort((a, b) => Number(b.x || 0) - Number(a.x || 0))
+    .slice(0, 8)
+    .map((task) => ({
+      uid: `task-${task.id}`,
+      title: task.title || '未命名任务',
+      description: task.description || 'Planday 当前待办',
+      minutes: Math.max(10, Math.min(180, Number(task.estimated_minutes) || 30)),
+    }));
+}
+
+function buildCalendarIcsFromPayload(payload, username) {
+  const dtStamp = formatIcsUtcDate(new Date());
+  let cursor = roundToNextHalfHourDate(Date.now());
+  const items = buildCalendarPlanItems(payload);
+  const coreFocus = payload.ai_day_plan?.core_focus || items[0]?.title || '今日主线';
+
+  const events = items.map((item, index) => {
+    const start = new Date(cursor);
+    const end = new Date(start.getTime() + item.minutes * 60000);
+    cursor = end;
+    return [
+      'BEGIN:VEVENT',
+      `UID:${escapeIcsText(`${username}-${item.uid}-${index}@planday`)}`,
+      `DTSTAMP:${dtStamp}`,
+      `DTSTART:${formatIcsUtcDate(start)}`,
+      `DTEND:${formatIcsUtcDate(end)}`,
+      `SUMMARY:${escapeIcsText(item.title)}`,
+      `DESCRIPTION:${escapeIcsText(`${item.description}\n\n当前主线：${coreFocus}`)}`,
+      'END:VEVENT',
+    ].join('\r\n');
+  });
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Planday//Focus Calendar//CN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'X-WR-CALNAME:Planday Focus',
+    'X-WR-CALDESC:今日主线与任务时间块',
+    ...events,
+    'END:VCALENDAR',
+  ].join('\r\n');
 }
 
 function revokeSessionsForUsername(username, exceptToken = '') {
@@ -1381,6 +1735,29 @@ app.post('/api/ai/plan', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/ai/day-plan', requireAuth, async (req, res) => {
+  try {
+    const input = typeof req.body?.input === 'string' ? req.body.input.trim() : '';
+    const energy = Number(req.body?.energy);
+    const existingTasks = Array.isArray(req.body?.existingTasks) ? req.body.existingTasks : [];
+    if (!input) {
+      res.status(400).json({ error: '自然语言输入不能为空' });
+      return;
+    }
+
+    const result = await requestAIDayPlan({
+      input,
+      energy: Number.isFinite(energy) ? energy : 60,
+      existingTasks,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'AI 生成失败';
+    const status = message.includes('AI_API_KEY') ? 503 : 502;
+    res.status(status).json({ error: message });
+  }
+});
+
 app.post('/api/ai/rss-scout', requireAuth, async (req, res) => {
   try {
     const topic = typeof req.body?.topic === 'string' ? req.body.topic.trim() : '';
@@ -1396,6 +1773,52 @@ app.post('/api/ai/rss-scout', requireAuth, async (req, res) => {
     const message = error instanceof Error ? error.message : 'AI 生成失败';
     const status = message.includes('AI_API_KEY') ? 503 : 502;
     res.status(status).json({ error: message });
+  }
+});
+
+app.get('/api/calendar/subscription-token', requireAuth, async (req, res) => {
+  try {
+    const payload = await ensureCalendarSubscription(req.authUser);
+    res.status(200).json(buildCalendarSubscriptionUrls(req, payload.calendar_subscription_token));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : '订阅链接获取失败' });
+  }
+});
+
+app.post('/api/calendar/subscription-token/reset', requireAuth, async (req, res) => {
+  try {
+    const payload = await readTasks(req.authUser);
+    const nextPayload = {
+      ...payload,
+      calendar_subscription_token: createCalendarSubscriptionToken(),
+    };
+    await writeTasks(req.authUser, nextPayload);
+    res.status(200).json(buildCalendarSubscriptionUrls(req, nextPayload.calendar_subscription_token));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : '订阅链接重置失败' });
+  }
+});
+
+app.get('/api/calendar/focus.ics', async (req, res) => {
+  try {
+    const token = typeof req.query?.token === 'string' ? req.query.token.trim() : '';
+    if (!token) {
+      res.status(400).type('text/plain').send('missing token');
+      return;
+    }
+    const matched = await findUserByCalendarSubscriptionToken(token);
+    if (!matched) {
+      res.status(404).type('text/plain').send('calendar subscription not found');
+      return;
+    }
+
+    const ics = buildCalendarIcsFromPayload(matched.payload, matched.username);
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="planday-focus.ics"');
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).send(ics);
+  } catch (error) {
+    res.status(500).type('text/plain').send(error instanceof Error ? error.message : 'calendar feed failed');
   }
 });
 
