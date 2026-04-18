@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { DLive2dOptions, DModel, DTips, wlLive2d } from 'wl-live2d';
 import {
   Plus,
   X,
@@ -11,6 +12,7 @@ import {
   GripVertical,
   Sparkles,
   ChevronRight,
+  ChevronLeft,
   SunMedium,
   MoonStar,
   ListTodo,
@@ -21,6 +23,7 @@ import {
   MousePointer2,
   Info,
   LogOut,
+  Settings2,
   Clock3,
   Link2,
   Gauge,
@@ -28,6 +31,7 @@ import {
   Coffee,
   TrendingUp,
   RefreshCw,
+  CalendarDays,
   Play,
   Pause,
   Activity,
@@ -57,6 +61,7 @@ import {
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import PointerParticles from './PointerParticles';
 import {
   AdminPasswordResetResult,
   AuthResult,
@@ -70,6 +75,7 @@ import {
   ExternalBehaviorEvent,
   FocusReminderSettings,
   LongTermCadence,
+  NewsPreferences,
   Task,
   TaskCollaborationLevel,
   TaskCategoryKey,
@@ -83,6 +89,7 @@ import {
   RSSFeed,
   NewsItem,
   IdeaNote,
+  SavedLink,
 } from './types';
 
 type AppTheme = 'night' | 'day' | 'stardew' | 'starlit';
@@ -95,10 +102,13 @@ type CalendarSubscriptionInfo = {
 
 const THEME_OPTIONS: { id: AppTheme; label: string; shortLabel: string }[] = [
   { id: 'night', label: '夜间霓光', shortLabel: '夜' },
-  { id: 'day', label: '白昼莫兰迪', shortLabel: '昼' },
+  { id: 'day', label: '白昼专注', shortLabel: '昼' },
   { id: 'stardew', label: '星露谷', shortLabel: '谷' },
   { id: 'starlit', label: '静谧星空', shortLabel: '星' },
 ];
+
+const LIVE2D_YISELIN_MODEL_PATH =
+  'https://fastly.jsdelivr.net/gh/Eikanya/Live2d-model/%E5%B4%A9%E5%9D%8F%E5%AD%A6%E5%9B%AD2/yiselin/model.json';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -107,11 +117,13 @@ function cn(...inputs: ClassValue[]) {
 const AUTH_TOKEN_KEY = 'dayplan_auth_token';
 const THEME_STORAGE_KEY = 'dayplan_theme';
 const AMBIENT_AUDIO_STORAGE_KEY = 'dayplan_ambient_audio';
+const PRIMARY_TASK_STORAGE_KEY = 'dayplan_primary_task_id';
 const DEFAULT_INITIAL_ENERGY = 72;
 const REST_RECOVERY_PER_HOUR = 6;
 const MOTIVATION_SETTLE_INTERVAL_MS = 5000;
 const FOCUS_WIP_LIMIT = 2;
 const DEFAULT_FOCUS_REMINDER_INTERVAL = 35;
+const AI_FOCUS_CHECKIN_INTERVAL_MS = 60 * 60 * 1000;
 const DAILY_MIX_LIMITS: Record<TaskSizeBucket, number> = {
   big: 1,
   medium: 3,
@@ -159,7 +171,7 @@ const AMBIENT_PRESETS: AmbientPreset[] = [
   {
     id: 'white_noise',
     label: '白噪音',
-    blurb: '均匀铺底，适合屏蔽环境杂音。',
+    blurb: '重新生成的柔和宽频底噪，少一点刺耳高频。',
     accent: 'border-sky-400/30 bg-sky-500/10 text-sky-100',
     qqUrl: 'https://y.qq.com/n/ryqq/search?w=%E7%99%BD%E5%99%AA%E9%9F%B3%20%E6%AD%8C%E5%8D%95',
     appleUrl: 'https://music.apple.com/us/search?term=white%20noise%20playlist',
@@ -196,37 +208,76 @@ function midiToFrequency(midi: number) {
 
 function createNoiseController(context: AudioContext, mode: 'white' | 'brown'): AmbientController {
   const output = context.createGain();
-  output.gain.value = 0.22;
+  output.gain.value = mode === 'white' ? 0.18 : 0.2;
   output.connect(context.destination);
 
-  const filter = context.createBiquadFilter();
-  filter.type = mode === 'white' ? 'highpass' : 'lowpass';
-  filter.frequency.value = mode === 'white' ? 180 : 650;
-  filter.Q.value = 0.2;
-  filter.connect(output);
+  const highpass = context.createBiquadFilter();
+  highpass.type = 'highpass';
+  highpass.frequency.value = mode === 'white' ? 120 : 38;
+  highpass.Q.value = 0.7;
 
-  const frameCount = context.sampleRate * 2;
-  const buffer = context.createBuffer(1, frameCount, context.sampleRate);
-  const data = buffer.getChannelData(0);
+  const lowpass = context.createBiquadFilter();
+  lowpass.type = 'lowpass';
+  lowpass.frequency.value = mode === 'white' ? 4200 : 780;
+  lowpass.Q.value = 0.8;
 
-  if (mode === 'white') {
-    for (let index = 0; index < frameCount; index += 1) {
-      data[index] = (Math.random() * 2 - 1) * 0.35;
-    }
-  } else {
-    let lastOut = 0;
-    for (let index = 0; index < frameCount; index += 1) {
-      const white = Math.random() * 2 - 1;
-      lastOut = (lastOut + (0.02 * white)) / 1.02;
-      data[index] = lastOut * 4.8;
+  const tone = context.createBiquadFilter();
+  tone.type = mode === 'white' ? 'peaking' : 'lowshelf';
+  tone.frequency.value = mode === 'white' ? 1400 : 160;
+  tone.Q.value = 0.9;
+  tone.gain.value = mode === 'white' ? -4 : 3;
+
+  const compressor = context.createDynamicsCompressor();
+  compressor.threshold.value = -30;
+  compressor.knee.value = 10;
+  compressor.ratio.value = 4;
+  compressor.attack.value = 0.02;
+  compressor.release.value = 0.28;
+
+  const modGain = context.createGain();
+  modGain.gain.value = mode === 'white' ? 0.025 : 0.018;
+
+  const modOsc = context.createOscillator();
+  modOsc.type = 'sine';
+  modOsc.frequency.value = mode === 'white' ? 0.11 : 0.07;
+  modOsc.connect(modGain);
+  modGain.connect(output.gain);
+
+  highpass.connect(lowpass);
+  lowpass.connect(tone);
+  tone.connect(compressor);
+  compressor.connect(output);
+
+  const frameCount = context.sampleRate * 5;
+  const buffer = context.createBuffer(2, frameCount, context.sampleRate);
+
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    const data = buffer.getChannelData(channel);
+    if (mode === 'white') {
+      let smooth = 0;
+      for (let index = 0; index < frameCount; index += 1) {
+        const white = Math.random() * 2 - 1;
+        smooth = smooth * 0.86 + white * 0.14;
+        data[index] = (white * 0.45 + smooth * 0.55) * 0.42;
+      }
+    } else {
+      let brown = 0;
+      let smooth = 0;
+      for (let index = 0; index < frameCount; index += 1) {
+        const white = Math.random() * 2 - 1;
+        brown = (brown + white * 0.018) / 1.015;
+        smooth = smooth * 0.92 + brown * 0.08;
+        data[index] = smooth * 3.4;
+      }
     }
   }
 
   const source = context.createBufferSource();
   source.buffer = buffer;
   source.loop = true;
-  source.connect(filter);
+  source.connect(highpass);
   source.start();
+  modOsc.start();
 
   let stopped = false;
   return {
@@ -234,13 +285,19 @@ function createNoiseController(context: AudioContext, mode: 'white' | 'brown'): 
       if (stopped) return;
       stopped = true;
       source.stop();
+      modOsc.stop();
       source.disconnect();
-      filter.disconnect();
+      modOsc.disconnect();
+      modGain.disconnect();
+      highpass.disconnect();
+      lowpass.disconnect();
+      tone.disconnect();
+      compressor.disconnect();
       output.disconnect();
     },
     setVolume(value: number) {
       output.gain.cancelScheduledValues(context.currentTime);
-      output.gain.setTargetAtTime(Math.max(0, Math.min(0.8, value * 0.4)), context.currentTime, 0.08);
+      output.gain.setTargetAtTime(Math.max(0, Math.min(0.7, value * 0.34)), context.currentTime, 0.08);
     },
   };
 }
@@ -429,7 +486,7 @@ function createAmbientController(context: AudioContext, presetId: AmbientPresetI
   return createGamingMusicController(context);
 }
 
-function BackgroundAudioDock() {
+function BackgroundAudioDock({ embedded = false }: { embedded?: boolean }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<AmbientPresetId>('white_noise');
@@ -520,51 +577,28 @@ function BackgroundAudioDock() {
     }
   };
 
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        data-playing={isPlaying ? 'true' : 'false'}
-        className="ambient-dock-trigger group relative rounded-2xl border px-3 py-2 transition-all"
-        title="背景音乐"
-      >
-        <div className="flex items-center gap-2">
-          <Disc3 className={cn("h-4 w-4 transition-transform", isPlaying && "animate-spin")} />
-          <span className="hidden text-xs font-semibold sm:inline">{isPlaying ? currentPreset.label : '背景音乐'}</span>
-          {isPlaying ? <Volume2 className="h-3.5 w-3.5" /> : <Waves className="h-3.5 w-3.5" />}
-        </div>
-      </button>
-
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -10, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.98 }}
-            transition={{ duration: 0.18 }}
-            className="ambient-dock-panel absolute right-0 top-[calc(100%+0.75rem)] z-30 w-[22rem] max-w-[min(22rem,92vw)] overflow-hidden rounded-[1.6rem] border backdrop-blur-xl"
+  const panelContent = (
+    <>
+      <div className={cn(!embedded && "border-b border-white/8", "px-4 py-4")}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="ambient-dock-kicker">Ambient Deck</p>
+            <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">背景音乐</h3>
+            <p className="mt-1 text-[11px] leading-5 text-[color:var(--text-secondary)]">白噪音和褐噪音是本地生成，其他预设是轻量氛围合成。</p>
+          </div>
+          <button
+            type="button"
+            onClick={togglePlayback}
+            data-playing={isPlaying ? 'true' : 'false'}
+            className="ambient-dock-toggle flex h-10 w-10 items-center justify-center rounded-2xl border transition-all"
+            title={isPlaying ? '暂停播放' : '开始播放'}
           >
-            <div className="border-b border-white/8 px-4 py-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="ambient-dock-kicker">Ambient Deck</p>
-                  <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">登录后可直接播放的背景音乐</h3>
-                  <p className="mt-1 text-[11px] leading-5 text-[color:var(--text-secondary)]">白噪音和褐噪音是本地生成，后摇和游戏音乐是轻量氛围合成，同时给你外部歌单跳转。</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={togglePlayback}
-                  data-playing={isPlaying ? 'true' : 'false'}
-                  className="ambient-dock-toggle flex h-10 w-10 items-center justify-center rounded-2xl border transition-all"
-                  title={isPlaying ? '暂停播放' : '开始播放'}
-                >
-                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
-                </button>
-              </div>
-            </div>
+            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
+          </button>
+        </div>
+      </div>
 
-            <div className="space-y-4 px-4 py-4">
+      <div className="space-y-4 px-4 py-4">
               <div className="grid grid-cols-2 gap-2">
                 {AMBIENT_PRESETS.map((preset) => (
                   <button
@@ -643,7 +677,40 @@ function BackgroundAudioDock() {
                   {audioError}
                 </div>
               )}
-            </div>
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="ambient-dock-panel ambient-dock-panel-embedded overflow-hidden rounded-[1.6rem] border backdrop-blur-xl">{panelContent}</div>;
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        data-playing={isPlaying ? 'true' : 'false'}
+        className="ambient-dock-trigger group relative rounded-2xl border px-3 py-2 transition-all"
+        title="背景音乐"
+      >
+        <div className="flex items-center gap-2">
+          <Disc3 className={cn("h-4 w-4 transition-transform", isPlaying && "animate-spin")} />
+          <span className="hidden text-xs font-semibold sm:inline">{isPlaying ? currentPreset.label : '背景音乐'}</span>
+          {isPlaying ? <Volume2 className="h-3.5 w-3.5" /> : <Waves className="h-3.5 w-3.5" />}
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ duration: 0.18 }}
+            className="ambient-dock-panel absolute right-0 top-[calc(100%+0.75rem)] z-30 w-[22rem] max-w-[min(22rem,92vw)] overflow-hidden rounded-[1.6rem] border backdrop-blur-xl"
+          >
+            {panelContent}
           </motion.div>
         )}
       </AnimatePresence>
@@ -699,6 +766,37 @@ type AIRssScoutSuggestion = {
   keywords: string[];
   reason: string;
 };
+type AIWorldNewsInsight = {
+  summary: string;
+  worth_reading: Array<{
+    id: string;
+    reason: string;
+  }>;
+  skip_summary: string;
+  ideas: string[];
+  next_actions: string[];
+};
+type AIFocusCheckin = {
+  summary: string;
+  suggested_action: 'continue' | 'rest' | 'pause';
+  reason: string;
+  reply_prompt: string;
+  created_at: number;
+  paused_task_ids: string[];
+  primary_task_id: string | null;
+  status: 'pending' | 'resolved';
+  resolved_action?: 'continue' | 'rest' | 'pause';
+};
+type TaskLineRow = {
+  id: string;
+  mode: TaskExecutionMode;
+  tasks: Task[];
+};
+type ElevatorDisplayGroup = {
+  key: string;
+  parallel: boolean;
+  tasks: Task[];
+};
 type TrendradarSnapshotItem = {
   platform_id: string;
   platform_name: string;
@@ -742,6 +840,14 @@ const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
     unit: '财富',
     kind: 'special',
     gainPerHour: 188,
+  },
+  {
+    id: 'special:token',
+    label: 'Token',
+    description: '任务推进时持续累积 token，给任务线一个更明确的即时反馈。',
+    unit: 'TK',
+    kind: 'special',
+    gainPerHour: 96,
   },
 ];
 const DEFAULT_ABILITY_GAIN_PER_HOUR = 36;
@@ -816,6 +922,13 @@ function createDefaultAbilityModuleSettings(): AbilityModuleSettings {
     active_module_id: 'special:mokugyo',
     special_totals: {},
     tracked_ms_baseline: 0,
+    updated_at: Date.now(),
+  };
+}
+
+function createDefaultNewsPreferences(): NewsPreferences {
+  return {
+    ignored_terms: [],
     updated_at: Date.now(),
   };
 }
@@ -967,6 +1080,7 @@ function buildAbilityModuleOptions(abilityDimensions: string[]): AbilityModuleOp
 function getMotivationMode(moduleId: string) {
   if (moduleId === 'special:caishen') return 'special:caishen';
   if (moduleId === 'special:mokugyo') return 'special:mokugyo';
+  if (moduleId === 'special:token') return 'special:token';
   return 'ability';
 }
 
@@ -989,6 +1103,46 @@ function normalizeRecoveredEnergy(value: unknown) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return 0;
   return clamp(numeric, 0, 100);
+}
+
+function normalizeNewsPreferences(value: unknown): NewsPreferences {
+  if (!value || typeof value !== 'object') {
+    return createDefaultNewsPreferences();
+  }
+  const raw = value as Partial<NewsPreferences>;
+  const ignoredTerms = Array.isArray(raw.ignored_terms)
+    ? raw.ignored_terms
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 200)
+    : [];
+  return {
+    ignored_terms: Array.from(new Set(ignoredTerms)),
+    updated_at: Number.isFinite(Number(raw.updated_at)) ? Number(raw.updated_at) : Date.now(),
+  };
+}
+
+function normalizeSavedLinks(value: unknown): SavedLink[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const raw = item as Partial<SavedLink>;
+      const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+      const url = typeof raw.url === 'string' ? raw.url.trim() : '';
+      if (!url) return null;
+      return {
+        id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : `link-${Date.now()}-${index}`,
+        title: title || url,
+        url,
+        pinned: Boolean(raw.pinned),
+        created_at: Number.isFinite(Number(raw.created_at)) ? Number(raw.created_at) : Date.now(),
+      } satisfies SavedLink;
+    })
+    .filter((item): item is SavedLink => Boolean(item))
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.created_at - a.created_at)
+    .slice(0, 120);
 }
 
 function normalizeSelfRating(value: unknown) {
@@ -1313,7 +1467,7 @@ function stopTrackingTaskState(task: Task, now: number, liveBurnDeduction: numbe
 function getPressureTone(score: number) {
   if (score >= 80) return { label: '过载', card: 'border-rose-400/30 bg-rose-500/12 text-rose-100', bar: 'from-rose-500 to-pink-300' };
   if (score >= 60) return { label: '偏高', card: 'border-stone-300/25 bg-stone-500/12 text-stone-100', bar: 'from-stone-300 to-zinc-100' };
-  if (score >= 35) return { label: '可控', card: 'border-slate-300/25 bg-slate-500/12 text-slate-100', bar: 'from-slate-300 to-blue-100' };
+  if (score >= 35) return { label: '平稳', card: 'border-slate-300/25 bg-slate-500/12 text-slate-100', bar: 'from-slate-300 to-blue-100' };
   return { label: '轻松', card: 'border-indigo-300/20 bg-indigo-500/10 text-indigo-100', bar: 'from-indigo-300 to-slate-100' };
 }
 
@@ -1322,6 +1476,31 @@ function getEnergyTone(score: number) {
   if (score <= 55) return { label: '一般', card: 'border-stone-300/25 bg-stone-500/12 text-stone-100', bar: 'from-stone-300 to-zinc-100' };
   if (score <= 75) return { label: '稳定', card: 'border-slate-300/25 bg-slate-500/12 text-slate-100', bar: 'from-slate-300 to-blue-100' };
   return { label: '充足', card: 'border-indigo-300/20 bg-indigo-500/10 text-indigo-100', bar: 'from-indigo-300 to-slate-100' };
+}
+
+function getBatteryVisual(score: number) {
+  if (score <= 32) {
+    return {
+      level: '偏低',
+      fill: '22%',
+      shellClass: 'battery-meter-low',
+      cells: 1,
+    } as const;
+  }
+  if (score <= 68) {
+    return {
+      level: '一般',
+      fill: '58%',
+      shellClass: 'battery-meter-mid',
+      cells: 2,
+    } as const;
+  }
+  return {
+    level: '充足',
+    fill: '92%',
+    shellClass: 'battery-meter-high',
+    cells: 3,
+  } as const;
 }
 
 function getEnergyDeltaLabel(value: number) {
@@ -1569,6 +1748,66 @@ function sortTasksForLine(tasks: Task[], energyScore: number, pressureScore: num
   });
 }
 
+function buildTaskLineRows(tasks: Task[]) {
+  const rows: TaskLineRow[] = [];
+  let parallelBuffer: Task[] = [];
+
+  const flushParallelBuffer = () => {
+    if (parallelBuffer.length === 0) return;
+    rows.push({
+      id: `parallel-${parallelBuffer.map((task) => task.id).join('-')}`,
+      mode: 'parallel',
+      tasks: parallelBuffer,
+    });
+    parallelBuffer = [];
+  };
+
+  tasks.forEach((task) => {
+    if ((task.execution_mode || 'serial') === 'parallel') {
+      parallelBuffer.push(task);
+      if (parallelBuffer.length === 3) flushParallelBuffer();
+      return;
+    }
+
+    flushParallelBuffer();
+    rows.push({
+      id: `serial-${task.id}`,
+      mode: 'serial',
+      tasks: [task],
+    });
+  });
+
+  flushParallelBuffer();
+  return rows;
+}
+
+function buildElevatorDisplayGroups(tasks: Task[], parallelRowIdByTaskId: Map<string, string>) {
+  const groups: ElevatorDisplayGroup[] = [];
+
+  tasks.forEach((task) => {
+    const parallelRowId = parallelRowIdByTaskId.get(task.id);
+    const previousGroup = groups[groups.length - 1];
+
+    if (
+      parallelRowId &&
+      previousGroup &&
+      previousGroup.parallel &&
+      previousGroup.key === parallelRowId
+    ) {
+      previousGroup.tasks.push(task);
+      return;
+    }
+
+    groups.push({
+      key: parallelRowId || `single-${task.id}`,
+      parallel: Boolean(parallelRowId),
+      tasks: [task],
+    });
+  });
+
+  return groups;
+}
+
 function normalizeTask(rawTask: Task): Task {
   const partial = rawTask as Partial<Task>;
   const dependencyIds = Array.isArray(partial.dependency_ids)
@@ -1654,6 +1893,8 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
       rss_feeds: [],
       news_items: [],
       idea_notes: [],
+      news_preferences: createDefaultNewsPreferences(),
+      saved_links: [],
     };
   }
   if (payload && typeof payload === 'object') {
@@ -1679,6 +1920,8 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
       rss_feeds: Array.isArray(raw.rss_feeds) ? raw.rss_feeds : [],
       news_items: Array.isArray(raw.news_items) ? raw.news_items : [],
       idea_notes: Array.isArray(raw.idea_notes) ? raw.idea_notes : [],
+      news_preferences: normalizeNewsPreferences(raw.news_preferences),
+      saved_links: normalizeSavedLinks(raw.saved_links),
     };
   }
   return {
@@ -1692,6 +1935,8 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
     rss_feeds: [],
     news_items: [],
     idea_notes: [],
+    news_preferences: createDefaultNewsPreferences(),
+    saved_links: [],
   };
 }
 
@@ -1819,6 +2064,22 @@ function getTaskQuadrantZone(task: Task, now: number): TaskQuadrantZone {
   if (isImportant) return 'build';
   if (isUrgent) return 'quick';
   return 'release';
+}
+
+type EnergyMapLane = 'deep' | 'hybrid' | 'light';
+
+function getTaskEnergyLane(task: Task): EnergyMapLane {
+  if (task.collaboration_level === 'high' || task.execution_mode === 'parallel') return 'hybrid';
+  if (task.cognitive_load === 'high' || (task.stress_score || 3) >= 4) return 'deep';
+  return 'light';
+}
+
+type EnergyElevatorLevel = 'sprint' | 'steady' | 'easy';
+
+function getEnergyElevatorLevel(task: Task): EnergyElevatorLevel {
+  if (task.cognitive_load === 'high' || (task.stress_score || 3) >= 4) return 'sprint';
+  if (task.collaboration_level === 'high' || task.execution_mode === 'parallel') return 'steady';
+  return 'easy';
 }
 
 function getDimensionColor(task: Task) {
@@ -2010,6 +2271,117 @@ async function requestAIRssScout(
   };
 }
 
+async function requestAIWorldNewsInsight(
+  payload: {
+    focus: string;
+    tasks: Array<Pick<Task, 'title' | 'status' | 'category_key'>>;
+    focusCandidates: NewsItem[];
+    otherCandidates: NewsItem[];
+  },
+  token: string
+) {
+  const response = await fetch('/api/ai/world-news-insight', {
+    method: 'POST',
+    headers: withAuthHeaders(token, {
+      'Content-Type': 'application/json',
+    }),
+    body: JSON.stringify(payload),
+  });
+
+  const rawPayload = await response.json().catch(() => ({} as {
+    error?: string;
+    summary?: string;
+    worth_reading?: Array<Record<string, unknown>>;
+    skip_summary?: string;
+    ideas?: string[];
+    next_actions?: string[];
+  }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
+  }
+
+  return {
+    summary: typeof rawPayload?.summary === 'string' ? rawPayload.summary.trim() : '',
+    worth_reading: Array.isArray(rawPayload?.worth_reading)
+      ? rawPayload.worth_reading
+          .map((item) => ({
+            id: typeof item?.id === 'string' ? item.id.trim() : '',
+            reason: typeof item?.reason === 'string' ? item.reason.trim() : '',
+          }))
+          .filter((item) => item.id)
+          .slice(0, 3)
+      : [],
+    skip_summary: typeof rawPayload?.skip_summary === 'string' ? rawPayload.skip_summary.trim() : '',
+    ideas: Array.isArray(rawPayload?.ideas)
+      ? rawPayload.ideas.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()).slice(0, 4)
+      : [],
+    next_actions: Array.isArray(rawPayload?.next_actions)
+      ? rawPayload.next_actions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()).slice(0, 4)
+      : [],
+  } satisfies AIWorldNewsInsight;
+}
+
+async function requestAIFocusCheckin(
+  payload: {
+    primaryTask: {
+      id: string;
+      title: string;
+      next_action: string;
+      cognitive_load: TaskCognitiveLoad;
+      collaboration_level: TaskCollaborationLevel;
+      execution_mode: TaskExecutionMode;
+      current_session_minutes: number;
+    } | null;
+    runningTasks: Array<{
+      id: string;
+      title: string;
+      execution_mode: TaskExecutionMode;
+      current_session_minutes: number;
+    }>;
+    energyScore: number;
+    pressureScore: number;
+    sleepHours: number;
+    selfRating: number;
+  },
+  token: string
+) {
+  const response = await fetch('/api/ai/focus-checkin', {
+    method: 'POST',
+    headers: withAuthHeaders(token, {
+      'Content-Type': 'application/json',
+    }),
+    body: JSON.stringify(payload),
+  });
+
+  const rawPayload = await response.json().catch(() => ({} as {
+    error?: string;
+    summary?: string;
+    suggested_action?: string;
+    reason?: string;
+    reply_prompt?: string;
+  }));
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!response.ok) {
+    throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
+  }
+
+  return {
+    summary: typeof rawPayload?.summary === 'string' ? rawPayload.summary.trim() : '',
+    suggested_action: rawPayload?.suggested_action === 'rest'
+      ? 'rest'
+      : rawPayload?.suggested_action === 'pause'
+        ? 'pause'
+        : 'continue',
+    reason: typeof rawPayload?.reason === 'string' ? rawPayload.reason.trim() : '',
+    reply_prompt: typeof rawPayload?.reply_prompt === 'string' ? rawPayload.reply_prompt.trim() : '',
+  } as const;
+}
+
 async function requestTrendradarLatestNews(token: string, limit = 60) {
   const response = await fetch(`/api/world-news/trendradar/latest?limit=${encodeURIComponent(String(limit))}`, {
     cache: 'no-store',
@@ -2143,6 +2515,25 @@ function summarizePreviewText(text: string, maxLength = 140) {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function collectNewsPreferenceTerms(news: NewsItem) {
+  const titleKeywords = extractMeaningfulKeywords(news.title).slice(0, 6);
+  const tagKeywords = news.tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean).slice(0, 6);
+  return Array.from(new Set([...tagKeywords, ...titleKeywords])).slice(0, 10);
+}
+
+function matchesIgnoredNews(news: NewsItem, ignoredTerms: string[]) {
+  if (ignoredTerms.length === 0) return false;
+  const haystack = `${news.title} ${news.content} ${news.url} ${news.tags.join(' ')}`.toLowerCase();
+  return ignoredTerms.some((term) => term && haystack.includes(term));
+}
+
+function normalizeWebUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }
 
 function extractMeaningfulKeywords(text: string) {
@@ -2409,20 +2800,20 @@ function AdminResetView({
   return (
     <div className="px-4 py-5 sm:px-6 sm:py-6">
       <div className="mx-auto grid max-w-6xl gap-6 xl:grid-cols-[minmax(0,1.18fr)_360px]">
-        <section className="overflow-hidden rounded-[2rem] border border-amber-400/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.18),rgba(15,23,42,0.92)_55%,rgba(120,113,108,0.22))] shadow-[0_24px_80px_rgba(15,23,42,0.42)]">
+        <section className="admin-console-shell overflow-hidden rounded-[2rem] border border-amber-400/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.18),rgba(15,23,42,0.92)_55%,rgba(120,113,108,0.22))] shadow-[0_24px_80px_rgba(15,23,42,0.42)]">
           <div className="border-b border-white/10 px-5 py-5 sm:px-7">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="max-w-2xl">
-                <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-amber-200/70">Admin Console</p>
-                <h2 className="mt-2 text-2xl font-bold tracking-tight text-amber-50 sm:text-3xl">管理员密码重置入口</h2>
-                <p className="mt-3 max-w-xl text-sm leading-6 text-amber-100/80">
+                <p className="admin-console-kicker text-[11px] font-bold uppercase tracking-[0.28em] text-amber-200/70">Admin Console</p>
+                <h2 className="admin-console-title mt-2 text-2xl font-bold tracking-tight text-amber-50 sm:text-3xl">管理员密码重置入口</h2>
+                <p className="admin-console-copy mt-3 max-w-xl text-sm leading-6 text-amber-100/80">
                   这里不展示旧密码。管理员只需输入目标账号和新密码，系统会直接覆盖原登录口令。
                 </p>
               </div>
-              <div className="rounded-3xl border border-amber-300/20 bg-amber-50/10 px-4 py-3 text-right backdrop-blur-sm">
-                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-amber-200/70">当前管理员</p>
-                <p className="mt-2 flex items-center justify-end gap-2 text-sm font-semibold text-amber-50">
-                  <Star className="h-4 w-4 text-amber-300" />
+              <div className="admin-console-badge rounded-3xl border border-amber-300/20 bg-amber-50/10 px-4 py-3 text-right backdrop-blur-sm">
+                <p className="admin-console-kicker text-[10px] font-bold uppercase tracking-[0.24em] text-amber-200/70">当前管理员</p>
+                <p className="admin-console-title mt-2 flex items-center justify-end gap-2 text-sm font-semibold text-amber-50">
+                  <Star className="admin-console-icon h-4 w-4 text-amber-300" />
                   {currentUser}
                 </p>
               </div>
@@ -2432,8 +2823,8 @@ function AdminResetView({
           <form onSubmit={handleSubmit} className="grid gap-5 px-5 py-5 sm:px-7 sm:py-7">
             <div className="grid gap-5 md:grid-cols-[1.1fr_0.9fr]">
               <label className="grid gap-2">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/70">目标账号</span>
-                <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
+                <span className="admin-console-label text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/70">目标账号</span>
+                <div className="admin-console-field rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
                   <input
                     value={targetUsername}
                     onChange={(event) => setTargetUsername(event.target.value)}
@@ -2442,9 +2833,9 @@ function AdminResetView({
                   />
                 </div>
               </label>
-              <div className="rounded-[1.75rem] border border-white/10 bg-slate-950/35 p-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">重置规则</p>
-                <div className="mt-3 grid gap-2 text-sm text-slate-200/85">
+              <div className="admin-console-card rounded-[1.75rem] border border-white/10 bg-slate-950/35 p-4">
+                <p className="admin-console-kicker text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">重置规则</p>
+                <div className="admin-console-card-copy mt-3 grid gap-2 text-sm text-slate-200/85">
                   <p>密码长度必须在 8 到 128 位之间。</p>
                   <p>注册账号会直接更新哈希密码。</p>
                   <p>预置账号会写入本地覆盖密码，修改后立即生效。</p>
@@ -2454,8 +2845,8 @@ function AdminResetView({
 
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/70">新密码</span>
-                <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
+                <span className="admin-console-label text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/70">新密码</span>
+                <div className="admin-console-field rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
                   <input
                     type="password"
                     value={newPassword}
@@ -2466,8 +2857,8 @@ function AdminResetView({
                 </div>
               </label>
               <label className="grid gap-2">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/70">确认新密码</span>
-                <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
+                <span className="admin-console-label text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/70">确认新密码</span>
+                <div className="admin-console-field rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
                   <input
                     type="password"
                     value={confirmPassword}
@@ -2481,7 +2872,7 @@ function AdminResetView({
 
             {(error || successMessage) && (
               <div className={cn(
-                "rounded-2xl border px-4 py-3 text-sm font-semibold",
+                "admin-console-feedback rounded-2xl border px-4 py-3 text-sm font-semibold",
                 error
                   ? "border-rose-400/30 bg-rose-500/10 text-rose-100"
                   : "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
@@ -2495,7 +2886,7 @@ function AdminResetView({
                 type="submit"
                 disabled={isSubmitting}
                 className={cn(
-                  "inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold transition-all",
+                  "admin-console-primary-button inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold transition-all",
                   isSubmitting
                     ? "cursor-not-allowed border border-white/10 bg-white/5 text-slate-500"
                     : "border border-amber-300/30 bg-amber-500/15 text-amber-50 hover:bg-amber-500/20"
@@ -2507,7 +2898,7 @@ function AdminResetView({
               <button
                 type="button"
                 onClick={fillSuggestedPassword}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/10"
+                className="admin-console-secondary-button inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/10"
               >
                 <Edit3 className="h-4 w-4" />
                 生成随机密码
@@ -2517,17 +2908,17 @@ function AdminResetView({
         </section>
 
         <aside className="grid gap-4 content-start">
-          <div className="rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-5">
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">操作边界</p>
-            <div className="mt-4 grid gap-3 text-sm leading-6 text-slate-200/85">
+          <div className="admin-console-card rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-5">
+            <p className="admin-console-kicker text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">操作边界</p>
+            <div className="admin-console-card-copy mt-4 grid gap-3 text-sm leading-6 text-slate-200/85">
               <p>这里只处理账号密码，不碰用户任务数据。</p>
               <p>如果重置的是当前登录账号，当前会话会保留，新的密码在下次登录时生效。</p>
               <p>如果重置的是其他账号，对方旧会话会被踢下线，需要用新密码重新登录。</p>
             </div>
           </div>
-          <div className="rounded-[1.75rem] border border-teal-400/20 bg-teal-500/10 p-5">
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-teal-100/75">建议流程</p>
-            <div className="mt-4 grid gap-3 text-sm leading-6 text-teal-50/90">
+          <div className="admin-console-card admin-console-card-accent rounded-[1.75rem] border border-teal-400/20 bg-teal-500/10 p-5">
+            <p className="admin-console-kicker text-[11px] font-bold uppercase tracking-[0.22em] text-teal-100/75">建议流程</p>
+            <div className="admin-console-card-copy mt-4 grid gap-3 text-sm leading-6 text-teal-50/90">
               <p>先确认目标用户名完全正确，再执行重置。</p>
               <p>如需临时密码，可先点“生成随机密码”，再发给对应用户。</p>
               <p>账号不存在时，系统会直接返回错误，不会新建陌生账号。</p>
@@ -2544,6 +2935,10 @@ function WorldNewsView({
   setRssFeeds,
   newsItems,
   setNewsItems,
+  newsPreferences,
+  setNewsPreferences,
+  savedLinks,
+  setSavedLinks,
   abilityModule,
   spendSpecialReward,
   authToken,
@@ -2558,6 +2953,10 @@ function WorldNewsView({
   setRssFeeds: React.Dispatch<React.SetStateAction<RSSFeed[]>>;
   newsItems: NewsItem[];
   setNewsItems: React.Dispatch<React.SetStateAction<NewsItem[]>>;
+  newsPreferences: NewsPreferences;
+  setNewsPreferences: React.Dispatch<React.SetStateAction<NewsPreferences>>;
+  savedLinks: SavedLink[];
+  setSavedLinks: React.Dispatch<React.SetStateAction<SavedLink[]>>;
   abilityModule: AbilityModuleSettings;
   spendSpecialReward: (moduleId: string, amount: number) => boolean;
   authToken: string;
@@ -2577,6 +2976,8 @@ function WorldNewsView({
   const [newFeedName, setNewFeedName] = useState('');
   const [newFeedUrl, setNewFeedUrl] = useState('');
   const [newFeedCategory, setNewFeedCategory] = useState('');
+  const [newSavedLinkTitle, setNewSavedLinkTitle] = useState('');
+  const [newSavedLinkUrl, setNewSavedLinkUrl] = useState('');
   const [isLoadingNews, setIsLoadingNews] = useState(false);
   const [isSyncingAllFeeds, setIsSyncingAllFeeds] = useState(false);
   const [syncingFeedIds, setSyncingFeedIds] = useState<string[]>([]);
@@ -2599,6 +3000,9 @@ function WorldNewsView({
   const [rssScoutResults, setRssScoutResults] = useState<AIRssScoutSuggestion[]>([]);
   const [rssScoutError, setRssScoutError] = useState('');
   const [isRssScouting, setIsRssScouting] = useState(false);
+  const [newsInsight, setNewsInsight] = useState<AIWorldNewsInsight | null>(null);
+  const [newsInsightError, setNewsInsightError] = useState('');
+  const [isGeneratingNewsInsight, setIsGeneratingNewsInsight] = useState(false);
   const [isImportingTechPresets, setIsImportingTechPresets] = useState(false);
   const [techPresetMessage, setTechPresetMessage] = useState('');
   const [rssActivityMessage, setRssActivityMessage] = useState('');
@@ -2613,12 +3017,13 @@ function WorldNewsView({
 
   const categories = Array.from(new Set(rssFeeds.map((item) => item.category || '默认'))).sort((a, b) => a.localeCompare(b, 'zh-CN'));
   const enabledFeeds = rssFeeds.filter((feed) => feed.enabled);
-  const unreadCount = newsItems.filter((item) => !item.is_read).length;
-  const importantCount = newsItems.filter((item) => item.is_important).length;
+  const visibleNewsItems = newsItems.filter((item) => !matchesIgnoredNews(item, newsPreferences.ignored_terms));
+  const unreadCount = visibleNewsItems.filter((item) => !item.is_read).length;
+  const importantCount = visibleNewsItems.filter((item) => item.is_important).length;
   const filteredNotes = [...ideaNotes]
     .filter((note) => noteFilter === 'all' ? true : note.note_type === noteFilter)
     .sort((a, b) => b.updated_at - a.updated_at);
-  const sortedNews = [...newsItems].sort((a, b) => b.published_at - a.published_at);
+  const sortedNews = [...visibleNewsItems].sort((a, b) => b.published_at - a.published_at);
   const triagedNews = sortedNews
     .map((news) => {
       const relevanceScore = scoreNewsRelevance(news, coreFocusTitle, tasks);
@@ -2633,6 +3038,16 @@ function WorldNewsView({
   const focusNews = triagedNews.filter((item) => item.bucket === 'focus');
   const laterNews = triagedNews.filter((item) => item.bucket === 'later');
   const ignoreNews = triagedNews.filter((item) => item.bucket === 'ignore');
+  const aiWorthReading = (newsInsight?.worth_reading || [])
+    .map((item) => {
+      const matched = [...laterNews, ...ignoreNews, ...focusNews].find((entry) => entry.news.id === item.id);
+      if (!matched) return null;
+      return {
+        news: matched.news,
+        reason: item.reason || matched.reason,
+      };
+    })
+    .filter((item): item is { news: NewsItem; reason: string } => Boolean(item));
   const detailVisible = Boolean(detailMode === 'news' ? selectedNews : detailMode === 'note' ? selectedNote : null);
 
   const closeDetail = () => {
@@ -2661,6 +3076,11 @@ function WorldNewsView({
       document.body.style.overflow = '';
     };
   }, [detailVisible]);
+
+  useEffect(() => {
+    setNewsInsight(null);
+    setNewsInsightError('');
+  }, [coreFocusTitle, newsItems.length]);
 
   const openNewsDetail = (news: NewsItem) => {
     const nextNews = news.is_read ? newsItems : newsItems.map((item) => item.id === news.id ? { ...item, is_read: true } : item);
@@ -2727,6 +3147,21 @@ function WorldNewsView({
     setSelectedNews((prev) => prev?.id === newsId ? { ...prev, is_read: !prev.is_read } : prev);
   };
 
+  const markNewsNotInterested = (news: NewsItem) => {
+    const ignoredTerms = collectNewsPreferenceTerms(news);
+    setNewsPreferences((prev) => ({
+      ignored_terms: Array.from(new Set([...prev.ignored_terms, ...ignoredTerms])).slice(0, 200),
+      updated_at: Date.now(),
+    }));
+    setNewsItems((prev) => prev.filter((item) => item.id !== news.id));
+    setIdeaNotes((prev) => prev.map((note) => ({
+      ...note,
+      related_news_ids: note.related_news_ids.filter((id) => id !== news.id),
+    })));
+    if (selectedNews?.id === news.id) closeDetail();
+    setWorkspaceMessage(`已忽略“${news.title}”的相关主题。`);
+  };
+
   const deleteNewsItem = (newsId: string) => {
     setNewsItems((prev) => prev.filter((item) => item.id !== newsId));
     setIdeaNotes((prev) => prev.map((note) => ({ ...note, related_news_ids: note.related_news_ids.filter((id) => id !== newsId) })));
@@ -2748,6 +3183,33 @@ function WorldNewsView({
     setIdeaNotes((prev) => prev.map((note) => note.related_news_ids.length > 0 ? { ...note, related_news_ids: [] } : note));
     closeDetail();
     setWorkspaceMessage('新闻列表已清空。');
+  };
+
+  const addSavedLink = () => {
+    const normalizedUrl = normalizeWebUrl(newSavedLinkUrl);
+    if (!normalizedUrl) return;
+    const title = newSavedLinkTitle.trim() || normalizedUrl;
+    const nextLink: SavedLink = {
+      id: `saved-link-${Date.now()}`,
+      title,
+      url: normalizedUrl,
+      pinned: savedLinks.length === 0,
+      created_at: Date.now(),
+    };
+    setSavedLinks((prev) => [nextLink, ...prev].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.created_at - a.created_at));
+    setNewSavedLinkTitle('');
+    setNewSavedLinkUrl('');
+    setWorkspaceMessage(`已收藏：${title}`);
+  };
+
+  const toggleSavedLinkPin = (linkId: string) => {
+    setSavedLinks((prev) => prev
+      .map((item) => item.id === linkId ? { ...item, pinned: !item.pinned } : item)
+      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.created_at - a.created_at));
+  };
+
+  const deleteSavedLink = (linkId: string) => {
+    setSavedLinks((prev) => prev.filter((item) => item.id !== linkId));
   };
 
   const importFeeds = (feedsToImport: Array<{ name: string; url: string; category?: string; keywords?: string[] }>) => {
@@ -2785,6 +3247,36 @@ function WorldNewsView({
   const addSuggestedFeed = (feed: AIRssScoutSuggestion) => {
     const addedCount = importFeeds([feed]);
     if (addedCount > 0) setRssActivityMessage(`已采纳订阅源：${feed.name}`);
+  };
+
+  const runWorldNewsInsight = async () => {
+    const focusCandidates = focusNews.slice(0, 4).map((item) => item.news);
+    const otherCandidates = [...laterNews, ...ignoreNews].slice(0, 10).map((item) => item.news);
+    if (focusCandidates.length === 0 && otherCandidates.length === 0) return;
+
+    setIsGeneratingNewsInsight(true);
+    setNewsInsightError('');
+    try {
+      const result = await requestAIWorldNewsInsight({
+        focus: coreFocusTitle,
+        tasks: tasks.slice(0, 8).map((task) => ({
+          title: task.title,
+          status: task.status,
+          category_key: task.category_key,
+        })),
+        focusCandidates,
+        otherCandidates,
+      }, authToken);
+      setNewsInsight(result);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+        onUnauthorized();
+        return;
+      }
+      setNewsInsightError(error instanceof Error ? error.message : 'AI 总结失败');
+    } finally {
+      setIsGeneratingNewsInsight(false);
+    }
   };
 
   const importTechnicalPresets = async (limit: number) => {
@@ -2871,7 +3363,7 @@ function WorldNewsView({
           published_at: item.published_at || existing?.published_at || fallbackTs,
           created_at: existing?.created_at || item.created_at || fallbackTs,
         };
-      });
+      }).filter((item) => !matchesIgnoredNews(item, newsPreferences.ignored_terms));
       const nextFingerprints = new Set(normalizedIncoming.map((item) => {
         const sourceKey = item.feed_id || item.tags[0] || 'world';
         return buildWorldNewsFingerprint(item.title, item.url, sourceKey);
@@ -3228,6 +3720,58 @@ function WorldNewsView({
               </div>
 
               <div className="world-news-section">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="world-news-kicker">网页收藏夹</p>
+                    <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">置顶你反复会开的链接</h3>
+                  </div>
+                  <span className="world-news-pill">{savedLinks.length} 条</span>
+                </div>
+                <div className="mt-3 grid gap-2">
+                  <input type="text" value={newSavedLinkTitle} onChange={(event) => setNewSavedLinkTitle(event.target.value)} placeholder="标题（可选）" className="world-news-input" />
+                  <div className="flex gap-2">
+                    <input type="text" value={newSavedLinkUrl} onChange={(event) => setNewSavedLinkUrl(event.target.value)} placeholder="网页链接" className="world-news-input flex-1" />
+                    <button type="button" onClick={addSavedLink} className="world-news-button world-news-button-accent">收藏</button>
+                  </div>
+                </div>
+                <div className="world-news-scroll mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
+                  {savedLinks.length === 0 ? (
+                    <div className="world-news-subcard text-[11px] leading-5 text-[color:var(--text-secondary)]">把常看的网页放在这里，后面就不用再翻标签页了。</div>
+                  ) : savedLinks.map((link) => (
+                    <div key={link.id} className="world-news-feed-row items-center gap-2">
+                      <a href={link.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-[color:var(--text-strong)]">{link.title}</p>
+                        <p className="truncate text-[11px] text-[color:var(--text-secondary)]">{link.url}</p>
+                      </a>
+                      <button type="button" onClick={() => toggleSavedLinkPin(link.id)} className="world-news-icon-button" title={link.pinned ? '取消置顶' : '置顶'}>
+                        <Star className={cn('h-4 w-4', link.pinned && 'fill-current')} />
+                      </button>
+                      <button type="button" onClick={() => deleteSavedLink(link.id)} className="world-news-icon-button" title="删除收藏">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {newsPreferences.ignored_terms.length > 0 && (
+                <div className="world-news-section">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="world-news-kicker">忽略偏好</p>
+                      <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">这些主题以后不再优先推</h3>
+                    </div>
+                    <span className="world-news-pill">{newsPreferences.ignored_terms.length}</span>
+                  </div>
+                  <div className="mt-3 flex max-h-28 flex-wrap gap-2 overflow-y-auto pr-1">
+                    {newsPreferences.ignored_terms.slice(0, 24).map((term) => (
+                      <span key={`ignored-${term}`} className="world-news-chip">{term}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="world-news-section">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="world-news-kicker">AI 订阅侦察</p>
@@ -3449,14 +3993,14 @@ function WorldNewsView({
                       <p className="mt-2 text-[11px] leading-5 text-rose-100/80 text-safe-wrap">优先处理和“{coreFocusTitle}”相关的消息。</p>
                     </div>
                     <div className="rounded-[1.25rem] border border-slate-300/20 bg-slate-500/10 p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-200/75">晚点再看</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-100">晚点再看</p>
                       <p className="mt-2 text-lg font-semibold text-white">{laterNews.length} 条</p>
-                      <p className="mt-2 text-[11px] leading-5 text-slate-300/85">可能相关，但不值得现在打断主线。</p>
+                      <p className="mt-2 text-[12px] leading-6 text-slate-100">可能相关，但不值得现在打断主线。</p>
                     </div>
                     <div className="rounded-[1.25rem] border border-zinc-300/20 bg-zinc-500/10 p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-200/75">可忽略</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-100">可忽略</p>
                       <p className="mt-2 text-lg font-semibold text-white">{ignoreNews.length} 条</p>
-                      <p className="mt-2 text-[11px] leading-5 text-zinc-300/85">先不让这些信息抢走注意力。</p>
+                      <p className="mt-2 text-[12px] leading-6 text-zinc-100">先不让这些信息抢走注意力。</p>
                     </div>
                   </div>
                 )}
@@ -3475,7 +4019,86 @@ function WorldNewsView({
                     </div>
                   ) : (
                     <div className="world-news-scroll h-full overflow-y-auto pr-1">
-                      <div className="mb-4 grid gap-3 lg:grid-cols-3">
+                      <div className="mb-4 rounded-[1.4rem] border border-white/10 bg-white/[0.04] p-4">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <p className="world-news-kicker">AI 洞察</p>
+                            <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">从未优先项里捞重点，顺手压缩噪音</h3>
+                            <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)]">
+                              {newsInsight?.summary || (focusNews.length === 0
+                                ? '当前“值得看”为空，主要因为现在还是本地规则先做匹配。这里可以再让 AI 从剩余消息里捞一遍。'
+                                : '本地规则已经先分过层，AI 会继续对没排到前面的消息做归纳和提炼。')}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={runWorldNewsInsight}
+                            disabled={isGeneratingNewsInsight || (focusNews.length === 0 && laterNews.length === 0 && ignoreNews.length === 0)}
+                            className="world-news-button world-news-button-accent shrink-0"
+                          >
+                            {isGeneratingNewsInsight ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                            {newsInsight ? '重新生成洞察' : 'AI 总结未优先项'}
+                          </button>
+                        </div>
+                        {newsInsightError && <div className="world-news-inline-message world-news-inline-message-warn mt-3">{newsInsightError}</div>}
+                        {(aiWorthReading.length > 0 || newsInsight?.skip_summary || (newsInsight?.ideas?.length || 0) > 0 || (newsInsight?.next_actions?.length || 0) > 0) && (
+                          <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+                            <div className="grid gap-3">
+                              <div className="world-news-subcard">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--accent)]">AI 认为值得看</p>
+                                <div className="mt-3 grid gap-2">
+                                  {aiWorthReading.length === 0 ? (
+                                    <p className="text-[11px] leading-5 text-[color:var(--text-secondary)]">这一轮没有从未优先项里捞出必须马上读的内容。</p>
+                                  ) : aiWorthReading.map(({ news, reason }) => (
+                                    <button
+                                      key={`ai-worth-${news.id}`}
+                                      type="button"
+                                      onClick={() => openNewsDetail(news)}
+                                      className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition-colors hover:bg-white/[0.08]"
+                                    >
+                                      <p className="text-sm font-semibold text-[color:var(--text-strong)] line-clamp-2">{news.title}</p>
+                                      <p className="mt-1 text-[11px] leading-5 text-[color:var(--text-secondary)] line-clamp-3">{reason}</p>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              {newsInsight?.skip_summary && (
+                                <div className="world-news-subcard">
+                                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--accent)]">先不看的原因</p>
+                                  <p className="mt-3 text-[12px] leading-6 text-[color:var(--text-secondary)] text-safe-wrap">{newsInsight.skip_summary}</p>
+                                </div>
+                              )}
+                            </div>
+                            <div className="grid gap-3">
+                              {(newsInsight?.ideas?.length || 0) > 0 && (
+                                <div className="world-news-subcard">
+                                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--accent)]">AI 的想法</p>
+                                  <div className="mt-3 grid gap-2">
+                                    {newsInsight?.ideas.map((idea, index) => (
+                                      <div key={`insight-idea-${index}`} className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-[12px] leading-6 text-[color:var(--text-secondary)] text-safe-wrap">
+                                        {idea}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {(newsInsight?.next_actions?.length || 0) > 0 && (
+                                <div className="world-news-subcard">
+                                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--accent)]">下一步</p>
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    {newsInsight?.next_actions.map((action, index) => (
+                                      <span key={`insight-action-${index}`} className="world-news-pill text-safe-wrap">
+                                        {action}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="world-news-news-summary mb-4 grid gap-3 lg:grid-cols-3">
                         {[
                           { title: '当前值得看', items: focusNews, tone: 'border-rose-300/20 bg-rose-500/10 text-rose-100' },
                           { title: '稍后处理', items: laterNews, tone: 'border-slate-300/20 bg-slate-500/10 text-slate-100' },
@@ -3485,7 +4108,11 @@ function WorldNewsView({
                             <p className="text-[10px] font-bold uppercase tracking-[0.18em]">{section.title}</p>
                             <div className="mt-3 grid gap-2">
                               {section.items.length === 0 ? (
-                                <p className="text-[11px] leading-5 opacity-80">当前没有这一类消息。</p>
+                                <p className="text-[11px] leading-5 opacity-80">
+                                  {section.title === '当前值得看'
+                                    ? '本地规则暂时没有命中，可以用上面的 AI 洞察再捞一轮。'
+                                    : '当前没有这一类消息。'}
+                                </p>
                               ) : section.items.slice(0, 2).map(({ news, reason }) => (
                                 <button
                                   key={`triage-${section.title}-${news.id}`}
@@ -3501,7 +4128,7 @@ function WorldNewsView({
                           </div>
                         ))}
                       </div>
-                      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+                      <div className="world-news-news-list grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
                         {triagedNews.map(({ news, reason, bucket }) => (
                           <motion.article
                             key={news.id}
@@ -3529,15 +4156,19 @@ function WorldNewsView({
                                   ))}
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
-                                  <button type="button" onClick={(event) => { event.stopPropagation(); createTaskFromNews(news); }} className="world-news-button world-news-button-accent">
-                                    <ListTodo className="h-4 w-4" />
-                                    转任务
-                                  </button>
-                                  <button type="button" onClick={(event) => { event.stopPropagation(); createNoteFromNews(news); }} className="world-news-button">
-                                    <Edit3 className="h-4 w-4" />
-                                    转笔记
-                                  </button>
-                                </div>
+                                <button type="button" onClick={(event) => { event.stopPropagation(); createTaskFromNews(news); }} className="world-news-button world-news-button-accent">
+                                  <ListTodo className="h-4 w-4" />
+                                  转任务
+                                </button>
+                                <button type="button" onClick={(event) => { event.stopPropagation(); createNoteFromNews(news); }} className="world-news-button">
+                                  <Edit3 className="h-4 w-4" />
+                                  转笔记
+                                </button>
+                                <button type="button" onClick={(event) => { event.stopPropagation(); markNewsNotInterested(news); }} className="world-news-button">
+                                  <EyeOff className="h-4 w-4" />
+                                  不感兴趣
+                                </button>
+                              </div>
                               </div>
                               <div className="flex shrink-0 flex-col gap-2 opacity-85 transition-opacity group-hover:opacity-100">
                                 <button type="button" onClick={(event) => { event.stopPropagation(); toggleNewsImportant(news.id); }} className="world-news-icon-button" title="标记重点">
@@ -3794,15 +4425,22 @@ export default function App() {
   const [wellbeing, setWellbeing] = useState<WellbeingSettings>(createDefaultWellbeingSettings());
   const [abilityModule, setAbilityModule] = useState<AbilityModuleSettings>(createDefaultAbilityModuleSettings());
   const [aiDayPlan, setAiDayPlan] = useState<AIDayPlanWorkspace>(createDefaultAIDayPlanWorkspace());
-  const [isAiPlannerExpanded, setIsAiPlannerExpanded] = useState(false);
-  const [isEnergyTheoryOpen, setIsEnergyTheoryOpen] = useState(false);
+  const [homeSurface, setHomeSurface] = useState<'status' | 'line' | 'map'>('line');
+  const motivationPanelEnabled = false;
+  const [primaryTaskId, setPrimaryTaskId] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return window.localStorage.getItem(PRIMARY_TASK_STORAGE_KEY) || '';
+  });
   const [focusReminderSettings, setFocusReminderSettings] = useState<FocusReminderSettings>(createDefaultFocusReminderSettings());
   const [rssFeeds, setRssFeeds] = useState<RSSFeed[]>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [ideaNotes, setIdeaNotes] = useState<IdeaNote[]>([]);
+  const [newsPreferences, setNewsPreferences] = useState<NewsPreferences>(createDefaultNewsPreferences());
+  const [savedLinks, setSavedLinks] = useState<SavedLink[]>([]);
   const [currentView, setCurrentView] = useState<'tasks' | 'world_news' | 'admin'>('tasks');
   const [newAbilityDimension, setNewAbilityDimension] = useState('');
   const [behaviorChatInput, setBehaviorChatInput] = useState('');
+  const [behaviorNudge, setBehaviorNudge] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
@@ -3811,7 +4449,9 @@ export default function App() {
   const [isSuggestionOpen, setIsSuggestionOpen] = useState(false);
   const [isTopBoardCollapsed, setIsTopBoardCollapsed] = useState(true);
   const [isMotivationPanelOpen, setIsMotivationPanelOpen] = useState(false);
-  const [isMatrixExpanded, setIsMatrixExpanded] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDesignPanelOpen, setIsDesignPanelOpen] = useState(false);
+  const [isLive2dReady, setIsLive2dReady] = useState(false);
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
   const [aiError, setAiError] = useState('');
   const [dayPlanError, setDayPlanError] = useState('');
@@ -3819,7 +4459,15 @@ export default function App() {
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
   const [storageError, setStorageError] = useState('');
   const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
+  const [draggedLineTaskId, setDraggedLineTaskId] = useState<string | null>(null);
+  const live2dControllerRef = useRef<ReturnType<typeof wlLive2d> | null>(null);
+  const [dragOverLineTaskId, setDragOverLineTaskId] = useState<string | null>(null);
+  const [dragOverLineZone, setDragOverLineZone] = useState<'before' | 'after' | 'overlap' | null>(null);
   const [nowTs, setNowTs] = useState(Date.now());
+  const [focusCheckin, setFocusCheckin] = useState<AIFocusCheckin | null>(null);
+  const [isGeneratingFocusCheckin, setIsGeneratingFocusCheckin] = useState(false);
+  const [focusCheckinError, setFocusCheckinError] = useState('');
+  const [lastFocusCheckinAt, setLastFocusCheckinAt] = useState<number | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
     typeof window !== 'undefined' && 'Notification' in window ? window.Notification.permission : 'unsupported'
   );
@@ -3827,6 +4475,7 @@ export default function App() {
   const quadrantRef = useRef<HTMLDivElement>(null);
   const hasHydratedRef = useRef(false);
   const topBoardDragStateRef = useRef<{ startY: number; collapsed: boolean } | null>(null);
+  const behaviorNudgeTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -3835,6 +4484,128 @@ export default function App() {
       localStorage.setItem(THEME_STORAGE_KEY, theme);
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (homeSurface === 'status') {
+      setHomeSurface('line');
+    }
+  }, [homeSurface]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    let disposed = false;
+    let bindTimer: number | null = null;
+    let pointerStart: { x: number; y: number } | null = null;
+    let pointerMoved = false;
+
+    setIsLive2dReady(false);
+    live2dControllerRef.current?.destroy();
+    document.querySelectorAll('.live2d-wrapper, .live2d-toggle').forEach((node) => node.remove());
+
+    const bindWidgetClick = () => {
+      const container = document.querySelector('.live2d-wrapper') as HTMLElement | null;
+      if (!container) return false;
+
+      container.style.cursor = 'grab';
+      container.onpointerdown = (event) => {
+        pointerStart = { x: event.clientX, y: event.clientY };
+        pointerMoved = false;
+      };
+      container.onpointermove = (event) => {
+        if (!pointerStart) return;
+        if (Math.abs(event.clientX - pointerStart.x) > 8 || Math.abs(event.clientY - pointerStart.y) > 8) {
+          pointerMoved = true;
+        }
+      };
+      container.onpointerup = () => {
+        if (!disposed && !pointerMoved) {
+          setIsBehaviorChatOpen((prev) => !prev);
+        }
+        pointerStart = null;
+        pointerMoved = false;
+      };
+      container.onpointercancel = () => {
+        pointerStart = null;
+        pointerMoved = false;
+      };
+
+      const canvas = container.querySelector('canvas') as HTMLCanvasElement | null;
+      if (canvas) {
+        canvas.style.cursor = 'grab';
+      }
+
+      setIsLive2dReady(true);
+      return true;
+    };
+
+    const controller = wlLive2d(new DLive2dOptions({
+      sayHello: false,
+      transitionTime: 320,
+      selector: 'body',
+      fixed: true,
+      dockedRight: true,
+      plugins: [],
+      drag: true,
+      homePath: '/',
+      hitFrame: false,
+      menus: [],
+      models: [
+        new DModel({
+          path: LIVE2D_YISELIN_MODEL_PATH,
+          volume: 0.5,
+          scale: 0.69,
+          rotate: 0,
+          backgroundColor: 'transparent',
+          width: null,
+          height: null,
+          motionPreload: null,
+          position: { x: -22, y: 4 },
+        }),
+      ],
+      tips: new DTips({
+        minWidth: 180,
+        minHeight: 72,
+        offsetX: 0,
+        offsetY: 0,
+        drag: false,
+        message: [],
+        duration: 2200,
+        interval: 600000,
+        talk: false,
+        talkInterval: 600000,
+        talkApis: [],
+        motionMessage: false,
+      }),
+    }));
+
+    live2dControllerRef.current = controller;
+    controller.onModelLoaded(() => {
+      if (!disposed) {
+        bindWidgetClick();
+      }
+    });
+    controller.onModelError(() => {
+      if (!disposed) {
+        setIsLive2dReady(false);
+      }
+    });
+
+    if (!bindWidgetClick()) {
+      bindTimer = window.setInterval(() => {
+        if (bindWidgetClick() && bindTimer) {
+          window.clearInterval(bindTimer);
+          bindTimer = null;
+        }
+      }, 600);
+    }
+
+    return () => {
+      disposed = true;
+      if (bindTimer) window.clearInterval(bindTimer);
+      live2dControllerRef.current?.destroy();
+      live2dControllerRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -3855,6 +4626,11 @@ export default function App() {
     setAbilityModule(createDefaultAbilityModuleSettings());
     setAiDayPlan(createDefaultAIDayPlanWorkspace());
     setFocusReminderSettings(createDefaultFocusReminderSettings());
+    setRssFeeds([]);
+    setNewsItems([]);
+    setIdeaNotes([]);
+    setNewsPreferences(createDefaultNewsPreferences());
+    setSavedLinks([]);
     setSelectedTask(null);
     setIsLoadingTasks(false);
     setStorageError('');
@@ -3899,6 +4675,7 @@ export default function App() {
   const todayBehaviorEvents = wellbeing.daily_behavior_events[todayKey] ?? [];
   const todayChatMessages = wellbeing.daily_chat_messages[todayKey] ?? [];
   const activeBehaviorEvents = todayBehaviorEvents.filter((event) => isBehaviorEventActive(event, nowTs));
+  const latestAssistantChat = [...todayChatMessages].reverse().find((message) => message.role === 'assistant') || null;
   const dueTodayTasks = activeTasks.filter((task) => task.timeline === 'temporary' || isLongTermDue(task, nowTs));
   const dueTodayEstimatedMinutes = dueTodayTasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
   const overdueTodayTasks = dueTodayTasks.filter((task) => task.timeline === 'temporary' && Boolean(task.deadline_at) && (task.deadline_at || 0) <= nowTs);
@@ -3944,10 +4721,8 @@ export default function App() {
   const liveEnergyBurnRate = runningTasks.reduce((sum, task) => sum + getTaskEnergyBurnRate(task, behaviorBurnRateModifier, runningTasks.length), 0);
   const liveRestRecovery = getLiveRestRecovery(todayRestSession, nowTs);
   const totalRestRecovery = normalizeRecoveredEnergy(todayRestSession.recovered_energy) + liveRestRecovery;
-  const sleepRecoveryBoost = (todayStateReport.sleep_hours - 7) * 6;
-  const selfRatingBoost = (todayStateReport.self_rating - 3) * 5;
   const energyScore = clamp(
-    Math.round(todayInitialEnergy - pressureScore * 0.45 + completionBoost + energyDeltaBoost + progressBoost - liveEnergyBurn + totalRestRecovery + behaviorRecovery + sleepRecoveryBoost + selfRatingBoost),
+    Math.round(todayInitialEnergy - pressureScore * 0.45 + completionBoost + energyDeltaBoost + progressBoost - liveEnergyBurn + totalRestRecovery + behaviorRecovery),
     0,
     100
   );
@@ -4021,7 +4796,7 @@ export default function App() {
   const statusSummary = pressureScore >= 70
     ? (energyScore >= 60 ? '高压高能，适合短冲刺推进' : '高压低能，优先降载和缓冲')
     : (energyScore >= 60 ? '状态良好，可以先吃掉高价值任务' : '低压低能，适合整理和恢复');
-  const stateSignalSummary = `睡眠 ${todayStateReport.sleep_hours}h · 自评 ${todayStateReport.self_rating}/5`;
+  const stateSignalSummary = `外部行为 ${activeBehaviorEvents.length} 项`;
   const getAbilityModuleDisplayValue = (moduleId: string) => {
     const module = abilityModuleOptions.find((item) => item.id === moduleId);
     const baseValue = abilityModule.special_totals[moduleId] || 0;
@@ -4038,8 +4813,8 @@ export default function App() {
     { id: 'ability', label: '能力成长', disabled: abilityDimensionModules.length === 0 },
     { id: 'special:mokugyo', label: '木鱼激励', disabled: false },
     { id: 'special:caishen', label: '财神激励', disabled: false },
+    { id: 'special:token', label: 'Token 激励', disabled: false },
   ] as const;
-  const isExecutionSparse = runningTasks.length === 0 && executableTasks.length === 0;
   const runningTaskIds = new Set(runningTasks.map((task) => task.id));
   const rankedReadyTasks = [...executableTasks].sort(
     (a, b) => scoreTaskForMoment(b, energyScore, pressureScore, nowTs) - scoreTaskForMoment(a, energyScore, pressureScore, nowTs)
@@ -4069,19 +4844,20 @@ export default function App() {
       .forEach((task) => focusDeck.push(task));
   }
   const recommendedPrimaryTask = focusDeck[0] || rankedReadyTasks[0] || lowEnergyStandby[0] || blockedQueue[0] || null;
+  const currentPrimaryTask = tasks.find((task) => task.id === primaryTaskId && !task.archived_at && task.status !== 'completed') || recommendedPrimaryTask;
   const focusHeadline = runningTasks.length > 0
     ? '先把已经开始的任务收束到 1 到 2 项'
     : energyScore >= 65
       ? '当前适合先吃掉一个高价值任务'
       : '现在先从低阻力任务起手，把节奏带起来';
-  const currentCoreFocusTitle = aiDayPlan.core_focus || recommendedPrimaryTask?.title || '先确定今天最重要的一件事';
-  const currentCoreFocusDetail = recommendedPrimaryTask
-    ? getTaskNextActionText(recommendedPrimaryTask)
+  const currentCoreFocusTitle = aiDayPlan.core_focus || currentPrimaryTask?.title || '先确定今天最重要的一件事';
+  const currentCoreFocusDetail = currentPrimaryTask
+    ? getTaskNextActionText(currentPrimaryTask)
     : (aiDayPlan.summary || focusHeadline);
   const focusFillCount = Math.max(0, FOCUS_WIP_LIMIT - runningTasks.length);
   const simpleHomeTasks: Task[] = [];
   [
-    ...(recommendedPrimaryTask ? [recommendedPrimaryTask] : []),
+    ...(currentPrimaryTask ? [currentPrimaryTask] : []),
     ...focusDeck,
     ...dailyMixTasks,
     ...lowEnergyStandby,
@@ -4093,11 +4869,34 @@ export default function App() {
   const homeLineTasks = sortTasksForLine(simpleHomeTasks, energyScore, pressureScore, nowTs);
   const serialLineTasks = homeLineTasks.filter((task) => task.execution_mode !== 'parallel');
   const parallelLineTasks = homeLineTasks.filter((task) => task.execution_mode === 'parallel');
-  const theorySummary = todayStateReport.sleep_hours >= 7.5 && todayStateReport.self_rating >= 4
-    ? '先吃主线。你现在有条件把串行任务往前压。'
-    : todayStateReport.sleep_hours < 6.5
-      ? '睡眠不足时，先把并行等待项挂起来，再处理低阻力任务。'
-      : '状态一般时，把串行任务留给高能段，并行任务塞进等待空档。';
+  const homeLineRows = buildTaskLineRows(homeLineTasks);
+  const parallelRowIdByTaskId = new Map<string, string>();
+  homeLineRows.forEach((row) => {
+    if (row.mode !== 'parallel') return;
+    row.tasks.forEach((task) => parallelRowIdByTaskId.set(task.id, row.id));
+  });
+  const energyMapTasks = [...homeLineTasks]
+    .sort((a, b) => (a.line_order || a.created_at) - (b.line_order || b.created_at))
+    .slice(0, 15);
+  const energyElevatorOrder: EnergyElevatorLevel[] = ['sprint', 'steady', 'easy'];
+  const energyElevatorMeta: Record<EnergyElevatorLevel, { label: string; hint: string }> = {
+    easy: { label: '轻推层', hint: '低负荷，随时能做' },
+    steady: { label: '巡航层', hint: '协作/等待时推进' },
+    sprint: { label: '冲刺层', hint: '高认知，留给状态最好的时候' },
+  };
+  const energyElevatorGroups = energyElevatorOrder.map((level) => ({
+    level,
+    ...energyElevatorMeta[level],
+    tasks: energyMapTasks.filter((task) => getEnergyElevatorLevel(task) === level),
+    displayGroups: buildElevatorDisplayGroups(
+      energyMapTasks.filter((task) => getEnergyElevatorLevel(task) === level),
+      parallelRowIdByTaskId
+    ),
+  }));
+  const primaryRunningTask = runningTasks.find((task) => task.id === currentPrimaryTask?.id) || runningTasks[0] || null;
+  const primaryTrackedMinutes = primaryRunningTask?.tracking_started_at
+    ? Math.floor((nowTs - primaryRunningTask.tracking_started_at) / 60000)
+    : 0;
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -4105,6 +4904,21 @@ export default function App() {
       ? `当前主线：${currentCoreFocusTitle} · Planday`
       : 'Planday';
   }, [currentCoreFocusTitle]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!primaryTaskId) {
+      window.localStorage.removeItem(PRIMARY_TASK_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(PRIMARY_TASK_STORAGE_KEY, primaryTaskId);
+  }, [primaryTaskId]);
+
+  useEffect(() => {
+    if (!primaryTaskId) return;
+    if (tasks.some((task) => task.id === primaryTaskId && !task.archived_at && task.status !== 'completed')) return;
+    setPrimaryTaskId('');
+  }, [primaryTaskId, tasks]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -4182,32 +4996,6 @@ export default function App() {
       setNowTs(Date.now());
     }, 1000);
     return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (event: MouseEvent) => {
-      const dragState = topBoardDragStateRef.current;
-      if (!dragState) return;
-      const deltaY = event.clientY - dragState.startY;
-      if (dragState.collapsed && deltaY > 34) {
-        setIsTopBoardCollapsed(false);
-        topBoardDragStateRef.current = null;
-      } else if (!dragState.collapsed && deltaY < -34) {
-        setIsTopBoardCollapsed(true);
-        topBoardDragStateRef.current = null;
-      }
-    };
-
-    const handleMouseUp = () => {
-      topBoardDragStateRef.current = null;
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
   }, []);
 
   // Track mouse for placement mode
@@ -4307,6 +5095,8 @@ export default function App() {
         setRssFeeds(loadedData.rss_feeds || []);
         setNewsItems(loadedData.news_items || []);
         setIdeaNotes(loadedData.idea_notes || []);
+        setNewsPreferences(loadedData.news_preferences || createDefaultNewsPreferences());
+        setSavedLinks(loadedData.saved_links || []);
         setStorageError('');
       })
       .catch((e) => {
@@ -4349,6 +5139,8 @@ export default function App() {
         rss_feeds: rssFeeds,
         news_items: newsItems,
         idea_notes: ideaNotes,
+        news_preferences: newsPreferences,
+        saved_links: savedLinks,
       }, authToken)
         .then(() => setStorageError(''))
         .catch((e) => {
@@ -4363,7 +5155,7 @@ export default function App() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [tasks, abilityDimensions, wellbeing, abilityModule, aiDayPlan, focusReminderSettings, rssFeeds, newsItems, ideaNotes, isLoadingTasks, authToken]);
+  }, [tasks, abilityDimensions, wellbeing, abilityModule, aiDayPlan, focusReminderSettings, rssFeeds, newsItems, ideaNotes, newsPreferences, savedLinks, isLoadingTasks, authToken]);
 
   useEffect(() => {
     if (abilityModule.tracked_ms_baseline <= totalTrackedMsAllTasks) return;
@@ -4401,6 +5193,7 @@ export default function App() {
   ]);
 
   const handleAddTask = () => {
+    setHomeSurface('map');
     setIsPlacementMode(true);
   };
 
@@ -4532,7 +5325,7 @@ export default function App() {
     settleAbilityModuleProgress(moduleId);
   };
 
-  const switchMotivationMode = (modeId: 'ability' | 'special:mokugyo' | 'special:caishen') => {
+  const switchMotivationMode = (modeId: 'ability' | 'special:mokugyo' | 'special:caishen' | 'special:token') => {
     if (modeId === 'ability') {
       if (abilityDimensionModules.length === 0) return;
       const nextAbilityModuleId = activeMotivationMode === 'ability'
@@ -4570,6 +5363,53 @@ export default function App() {
       setSelectedTask((prevSelected) => (prevSelected?.id === task.id
         ? nextTasks.find(t => t.id === task.id) || prevSelected
         : prevSelected));
+      return nextTasks;
+    });
+  };
+
+  const pauseTasksForCheckin = (taskIds: string[], pausedAt = Date.now()) => {
+    if (taskIds.length === 0) return;
+    settleAbilityModuleProgress(undefined, pausedAt);
+    const targetIds = new Set(taskIds);
+
+    setTasks((prev) => {
+      const runningCount = prev.filter((task) => task.tracking_started_at).length;
+      const nextTasks = prev.map((task) => {
+        if (!task.tracking_started_at || !targetIds.has(task.id)) return task;
+        const currentBurnRateModifier = getBehaviorBurnRateModifier(
+          wellbeing.daily_behavior_events[getDayKey(pausedAt)] || [],
+          pausedAt
+        );
+        const liveBurnSession = getTaskLiveEnergyBurn(task, pausedAt, currentBurnRateModifier, Math.max(1, runningCount));
+        return stopTrackingTaskState(task, pausedAt, liveBurnSession);
+      });
+      setSelectedTask((prevSelected) => (
+        prevSelected && targetIds.has(prevSelected.id)
+          ? nextTasks.find((task) => task.id === prevSelected.id) || prevSelected
+          : prevSelected
+      ));
+      return nextTasks;
+    });
+  };
+
+  const resumeTasksAfterCheckin = (taskIds: string[], resumedAt = Date.now()) => {
+    if (taskIds.length === 0) return;
+    const targetIds = new Set(taskIds);
+    setTasks((prev) => {
+      const nextTasks = prev.map((task) => {
+        if (!targetIds.has(task.id) || task.tracking_started_at) return task;
+        if (!isTaskReady(task) || !isLongTermDue(task, resumedAt)) return task;
+        return {
+          ...task,
+          tracking_started_at: resumedAt,
+          tracking_accumulated_ms: normalizeTrackingAccumulatedMs(task.tracking_accumulated_ms),
+        };
+      });
+      setSelectedTask((prevSelected) => (
+        prevSelected && targetIds.has(prevSelected.id)
+          ? nextTasks.find((task) => task.id === prevSelected.id) || prevSelected
+          : prevSelected
+      ));
       return nextTasks;
     });
   };
@@ -4717,6 +5557,26 @@ export default function App() {
     }));
   };
 
+  const reorderTaskIds = (taskIds: string[]) => {
+    const orderedIds = taskIds.filter(Boolean);
+    setTasks((prev) => {
+      const rankMap = new Map(orderedIds.map((id, index) => [id, index + 1]));
+      return prev.map((task) => (
+        rankMap.has(task.id)
+          ? { ...task, line_order: rankMap.get(task.id) }
+          : task
+      ));
+    });
+  };
+
+  const reorderTaskAroundTarget = (taskId: string, targetTaskId: string | null, taskIds: string[]) => {
+    const orderedIds = taskIds.filter(Boolean).filter((id) => id !== taskId);
+    const insertIndex = targetTaskId ? orderedIds.indexOf(targetTaskId) : orderedIds.length;
+    const nextIds = [...orderedIds];
+    nextIds.splice(insertIndex >= 0 ? insertIndex : nextIds.length, 0, taskId);
+    reorderTaskIds(nextIds);
+  };
+
   const moveTaskInLine = (taskId: string, direction: -1 | 1, taskIds: string[]) => {
     const orderedIds = taskIds.filter(Boolean);
     const currentIndex = orderedIds.indexOf(taskId);
@@ -4724,14 +5584,166 @@ export default function App() {
     if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderedIds.length) return;
     const nextIds = [...orderedIds];
     [nextIds[currentIndex], nextIds[targetIndex]] = [nextIds[targetIndex], nextIds[currentIndex]];
+    reorderTaskIds(nextIds);
+  };
+
+  const moveTaskToLine = (
+    taskId: string,
+    targetTaskId: string | null,
+    taskIds: string[],
+    targetMode: TaskExecutionMode
+  ) => {
+    const orderedIds = taskIds.filter(Boolean).filter((id) => id !== taskId);
+    const insertIndex = targetTaskId ? orderedIds.indexOf(targetTaskId) : orderedIds.length;
+    const nextIds = [...orderedIds];
+    nextIds.splice(insertIndex >= 0 ? insertIndex : nextIds.length, 0, taskId);
+
     setTasks((prev) => {
       const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
-      return prev.map((task) => (
-        rankMap.has(task.id)
-          ? { ...task, line_order: rankMap.get(task.id) }
-          : task
-      ));
+      return prev.map((task) => {
+        if (task.id === taskId) {
+          return {
+            ...task,
+            execution_mode: targetMode,
+            line_order: rankMap.get(taskId) || task.line_order,
+          };
+        }
+
+        if (rankMap.has(task.id)) {
+          return {
+            ...task,
+            line_order: rankMap.get(task.id),
+          };
+        }
+
+        return task;
+      });
     });
+
+    setSelectedTask((prev) => (
+      prev?.id === taskId
+        ? {
+            ...prev,
+            execution_mode: targetMode,
+            line_order: nextIds.indexOf(taskId) + 1,
+          }
+        : prev
+    ));
+  };
+
+  const moveTaskAdjacent = (
+    taskId: string,
+    targetTaskId: string,
+    taskIds: string[],
+    targetMode: TaskExecutionMode,
+    placement: 'before' | 'after'
+  ) => {
+    const orderedIds = taskIds.filter(Boolean).filter((id) => id !== taskId);
+    const targetIndex = orderedIds.indexOf(targetTaskId);
+    const nextIds = [...orderedIds];
+    nextIds.splice(targetIndex >= 0 ? targetIndex + (placement === 'after' ? 1 : 0) : nextIds.length, 0, taskId);
+
+    setTasks((prev) => {
+      const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
+      return prev.map((task) => {
+        if (task.id === taskId) {
+          return {
+            ...task,
+            execution_mode: targetMode,
+            line_order: rankMap.get(taskId) || task.line_order,
+          };
+        }
+
+        if (rankMap.has(task.id)) {
+          return {
+            ...task,
+            line_order: rankMap.get(task.id),
+          };
+        }
+
+        return task;
+      });
+    });
+
+    setSelectedTask((prev) => (
+      prev?.id === taskId
+        ? {
+            ...prev,
+            execution_mode: targetMode,
+            line_order: nextIds.indexOf(taskId) + 1,
+          }
+        : prev
+    ));
+  };
+
+  const applyElevatorLevelToTask = (task: Task, targetLevel: EnergyElevatorLevel) => {
+    if (targetLevel === 'sprint') {
+      return {
+        ...task,
+        cognitive_load: 'high' as TaskCognitiveLoad,
+        stress_score: Math.max(4, task.stress_score || 3),
+      };
+    }
+
+    if (targetLevel === 'steady') {
+      return {
+        ...task,
+        cognitive_load: 'low' as TaskCognitiveLoad,
+        collaboration_level: 'high' as TaskCollaborationLevel,
+        stress_score: Math.min(3, task.stress_score || 3),
+      };
+    }
+
+    return {
+      ...task,
+      cognitive_load: 'low' as TaskCognitiveLoad,
+      collaboration_level: 'low' as TaskCollaborationLevel,
+      execution_mode: 'serial' as TaskExecutionMode,
+      stress_score: Math.min(3, task.stress_score || 3),
+    };
+  };
+
+  const moveTaskToElevatorLevel = (
+    taskId: string,
+    targetLevel: EnergyElevatorLevel,
+    targetTaskId: string | null,
+    taskIds: string[]
+  ) => {
+    const orderedIds = taskIds.filter(Boolean).filter((id) => id !== taskId);
+    const insertIndex = targetTaskId ? orderedIds.indexOf(targetTaskId) : orderedIds.length;
+    const nextIds = [...orderedIds];
+    nextIds.splice(insertIndex >= 0 ? insertIndex + 1 : nextIds.length, 0, taskId);
+
+    setTasks((prev) => {
+      const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
+      return prev.map((task) => {
+        if (task.id === taskId) {
+          const elevated = applyElevatorLevelToTask(task, targetLevel);
+          return {
+            ...elevated,
+            line_order: rankMap.get(taskId) || task.line_order,
+          };
+        }
+
+        if (rankMap.has(task.id)) {
+          return {
+            ...task,
+            line_order: rankMap.get(task.id),
+          };
+        }
+
+        return task;
+      });
+    });
+
+    setSelectedTask((prev) => (
+      prev?.id === taskId
+        ? {
+            ...applyElevatorLevelToTask(prev, targetLevel),
+            line_order: nextIds.indexOf(taskId) + 1,
+          }
+        : prev
+    ));
   };
 
   const toggleTaskExecutionMode = (task: Task) => {
@@ -4742,6 +5754,88 @@ export default function App() {
         : item
     )));
     setSelectedTask((prev) => (prev?.id === task.id ? { ...prev, execution_mode: nextMode } : prev));
+  };
+
+  const setTaskExecutionMode = (taskIds: string[], mode: TaskExecutionMode) => {
+    const idSet = new Set(taskIds.filter(Boolean));
+    if (idSet.size === 0) return;
+    setTasks((prev) => prev.map((item) => (
+      idSet.has(item.id)
+        ? { ...item, execution_mode: mode }
+        : item
+    )));
+    setSelectedTask((prev) => (
+      prev && idSet.has(prev.id)
+        ? { ...prev, execution_mode: mode }
+        : prev
+    ));
+  };
+
+  const startTaskDrag = (event: React.DragEvent<HTMLElement>, taskId: string) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', taskId);
+    setDraggedLineTaskId(taskId);
+    setDragOverLineTaskId(taskId);
+  };
+
+  const endTaskDrag = () => {
+    setDraggedLineTaskId(null);
+    setDragOverLineTaskId(null);
+    setDragOverLineZone(null);
+  };
+
+  const mergeTaskIntoParallel = (taskId: string, targetTaskId: string, taskIds: string[]) => {
+    const orderedIds = taskIds.filter(Boolean).filter((id) => id !== taskId);
+    const targetIndex = orderedIds.indexOf(targetTaskId);
+    const nextIds = [...orderedIds];
+    nextIds.splice(targetIndex >= 0 ? targetIndex + 1 : nextIds.length, 0, taskId);
+
+    const targetRow = buildTaskLineRows(
+      tasks
+        .filter((task) => nextIds.includes(task.id))
+        .sort((a, b) => nextIds.indexOf(a.id) - nextIds.indexOf(b.id))
+    ).find((row) => row.tasks.some((task) => task.id === targetTaskId));
+    const idsToParallelize = new Set([taskId, targetTaskId, ...(targetRow?.mode === 'parallel' ? targetRow.tasks.map((task) => task.id) : [])]);
+
+    setTasks((prev) => {
+      const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
+      return prev.map((task) => {
+        if (!rankMap.has(task.id) && !idsToParallelize.has(task.id)) return task;
+        return {
+          ...task,
+          line_order: rankMap.get(task.id) || task.line_order,
+          execution_mode: idsToParallelize.has(task.id) ? 'parallel' : task.execution_mode,
+        };
+      });
+    });
+
+    setSelectedTask((prev) => (
+      prev && idsToParallelize.has(prev.id)
+        ? { ...prev, execution_mode: 'parallel', line_order: nextIds.indexOf(prev.id) + 1 || prev.line_order }
+        : prev
+    ));
+  };
+
+  const handleTaskLineDrop = (
+    event: React.DragEvent<HTMLDivElement>,
+    task: Task,
+    taskIds: string[],
+    laneMode: TaskExecutionMode
+  ) => {
+    event.preventDefault();
+    const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
+    if (!droppedTaskId || droppedTaskId === task.id) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5;
+
+    if (ratio > 0.34 && ratio < 0.66) {
+      mergeTaskIntoParallel(droppedTaskId, task.id, taskIds);
+    } else {
+      moveTaskAdjacent(droppedTaskId, task.id, taskIds, laneMode, ratio <= 0.34 ? 'before' : 'after');
+    }
+
+    endTaskDrag();
   };
 
   const submitBehaviorChat = (rawInput?: string) => {
@@ -4952,6 +6046,146 @@ export default function App() {
     };
     return true;
   };
+
+  const requestHourlyFocusCheckin = async () => {
+    if (!authToken || runningTasks.length === 0 || isGeneratingFocusCheckin) return;
+    const pausedTaskIds = runningTasks.map((task) => task.id);
+    const primaryTask = primaryRunningTask || currentPrimaryTask || runningTasks[0] || null;
+    setIsGeneratingFocusCheckin(true);
+    setFocusCheckinError('');
+    try {
+      const result = await requestAIFocusCheckin({
+        primaryTask: primaryTask ? {
+          id: primaryTask.id,
+          title: primaryTask.title,
+          next_action: getTaskNextActionText(primaryTask),
+          cognitive_load: primaryTask.cognitive_load || 'low',
+          collaboration_level: primaryTask.collaboration_level || 'low',
+          execution_mode: primaryTask.execution_mode || 'serial',
+          current_session_minutes: primaryTask.tracking_started_at ? Math.floor((Date.now() - primaryTask.tracking_started_at) / 60000) : 0,
+        } : null,
+        runningTasks: runningTasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          execution_mode: task.execution_mode || 'serial',
+          current_session_minutes: task.tracking_started_at ? Math.floor((Date.now() - task.tracking_started_at) / 60000) : 0,
+        })),
+        energyScore: energyScore,
+        pressureScore: pressureScore,
+        sleepHours: todayStateReport.sleep_hours,
+        selfRating: todayStateReport.self_rating,
+      }, authToken);
+      pauseTasksForCheckin(pausedTaskIds, Date.now());
+      setFocusCheckin({
+        ...result,
+        created_at: Date.now(),
+        paused_task_ids: pausedTaskIds,
+        primary_task_id: primaryTask?.id || null,
+        status: 'pending',
+      });
+      if (notificationPermission === 'granted' && currentCoreFocusTitle) {
+        showFocusNotification(currentCoreFocusTitle, result.summary || result.reply_prompt || '请回应一次当前节奏建议。');
+      }
+    } catch (error) {
+      console.error('AI focus check-in failed', error);
+      if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+        clearAuth();
+        setLoginError('登录已过期，请重新登录。');
+        return;
+      }
+      setFocusCheckinError(error instanceof Error ? error.message : 'AI 校准失败');
+    } finally {
+      setIsGeneratingFocusCheckin(false);
+    }
+  };
+
+  const respondToFocusCheckin = (action: 'continue' | 'rest' | 'pause') => {
+    const current = focusCheckin;
+    if (!current) return;
+    const now = Date.now();
+    setFocusCheckin({
+      ...current,
+      status: 'resolved',
+      resolved_action: action,
+    });
+    setLastFocusCheckinAt(now);
+    setFocusCheckinError('');
+
+    if (action === 'continue') {
+      resumeTasksAfterCheckin(current.paused_task_ids, now);
+      return;
+    }
+
+    if (action === 'rest' && !todayRestSession.is_resting) {
+      toggleRestMode();
+    }
+  };
+
+  useEffect(() => {
+    if (!authToken) return;
+    if (runningTasks.length === 0) return;
+    if (focusCheckin?.status === 'pending') return;
+    if (isGeneratingFocusCheckin) return;
+    if (primaryTrackedMinutes < 60) return;
+    if (lastFocusCheckinAt && (nowTs - lastFocusCheckinAt) < AI_FOCUS_CHECKIN_INTERVAL_MS) return;
+    requestHourlyFocusCheckin();
+  }, [
+    authToken,
+    focusCheckin?.status,
+    isGeneratingFocusCheckin,
+    lastFocusCheckinAt,
+    nowTs,
+    primaryTrackedMinutes,
+    runningTasks.length,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    if (behaviorNudgeTimeoutRef.current) {
+      window.clearTimeout(behaviorNudgeTimeoutRef.current);
+      behaviorNudgeTimeoutRef.current = null;
+    }
+
+    if (isBehaviorChatOpen || currentView !== 'tasks') {
+      setBehaviorNudge('');
+      return undefined;
+    }
+
+    const pool = [
+      focusCheckin?.summary,
+      focusCheckin?.reply_prompt,
+      latestAssistantChat?.text,
+      currentPrimaryTask ? `先盯住「${currentPrimaryTask.title}」。如果状态变了，直接告诉我。` : '状态变了就直接和我说一句，我会帮你修正精力。',
+    ].filter((item): item is string => Boolean(item && item.trim()));
+
+    if (pool.length === 0) return undefined;
+
+    const showDelay = 22000 + Math.round(Math.random() * 18000);
+    behaviorNudgeTimeoutRef.current = window.setTimeout(() => {
+      const nextText = pool[Math.floor(Math.random() * pool.length)];
+      setBehaviorNudge(nextText);
+      behaviorNudgeTimeoutRef.current = window.setTimeout(() => {
+        setBehaviorNudge('');
+        behaviorNudgeTimeoutRef.current = null;
+      }, 6500);
+    }, showDelay);
+
+    return () => {
+      if (behaviorNudgeTimeoutRef.current) {
+        window.clearTimeout(behaviorNudgeTimeoutRef.current);
+        behaviorNudgeTimeoutRef.current = null;
+      }
+    };
+  }, [
+    currentView,
+    currentPrimaryTask?.id,
+    currentPrimaryTask?.title,
+    focusCheckin?.reply_prompt,
+    focusCheckin?.summary,
+    isBehaviorChatOpen,
+    latestAssistantChat?.text,
+  ]);
 
   const generateAIDayPlan = async () => {
     const input = aiDayPlan.input.trim();
@@ -5197,6 +6431,73 @@ export default function App() {
     </div>
   );
 
+  const renderSharedEnergyBar = (contextKey: string) => {
+    const normalizedValue = clamp(Math.round(todayInitialEnergy), 0, 100);
+    const levelClass = normalizedValue <= 30 ? 'energy-battery-low' : normalizedValue <= 65 ? 'energy-battery-mid' : 'energy-battery-high';
+
+    return (
+      <div className={cn("energy-battery-shell", levelClass)}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="energy-battery-kicker">Energy</p>
+            <h3 className="energy-battery-title">精力</h3>
+          </div>
+          <div className="energy-battery-value">
+            <strong>{normalizedValue}</strong>
+            <span>{getBatteryVisual(normalizedValue).level}</span>
+          </div>
+        </div>
+        <div className="energy-battery-frame">
+          <div className="energy-battery-head" />
+          <div className="energy-battery-track">
+            <div className="energy-battery-fill" style={{ width: `${normalizedValue}%` }} />
+            {[20, 40, 60, 80].map((mark) => (
+              <span key={`${contextKey}-energy-mark-${mark}`} className="energy-battery-divider" style={{ left: `${mark}%` }} />
+            ))}
+          </div>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={todayInitialEnergy}
+          onChange={(e) => updateTodayInitialEnergy(Number(e.target.value))}
+          className="energy-battery-range"
+          aria-label="调整精力"
+        />
+      </div>
+    );
+  };
+
+  const renderInlineEnergyBar = (contextKey: string) => {
+    const normalizedValue = clamp(Math.round(todayInitialEnergy), 0, 100);
+    const levelClass = normalizedValue <= 30 ? 'energy-battery-low' : normalizedValue <= 65 ? 'energy-battery-mid' : 'energy-battery-high';
+
+    return (
+      <div className={cn("energy-inline-shell", levelClass)}>
+        <span className="energy-inline-value">{normalizedValue}</span>
+        <div className="energy-inline-frame">
+          <div className="energy-battery-head energy-inline-head" />
+          <div className="energy-battery-track energy-inline-track">
+            <div className="energy-battery-fill energy-inline-fill" style={{ width: `${normalizedValue}%` }} />
+            {[20, 40, 60, 80].map((mark) => (
+              <span key={`${contextKey}-inline-energy-mark-${mark}`} className="energy-battery-divider energy-inline-divider" style={{ left: `${mark}%` }} />
+            ))}
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={todayInitialEnergy}
+            onChange={(e) => updateTodayInitialEnergy(Number(e.target.value))}
+            className="energy-inline-range"
+            aria-label="调整精力"
+          />
+        </div>
+      </div>
+    );
+  };
+
   const renderTaskCard = (
     task: Task,
     {
@@ -5215,9 +6516,9 @@ export default function App() {
     const progress = Math.round(getTaskProgress(task) * 100);
     const firstLine = note || (ready ? buildRecommendationReason(task, energyScore, nowTs) : getTaskBlockingLabel(task));
     const toneClasses = {
-      focus: 'border-rose-400/28 bg-rose-500/[0.08] shadow-[0_18px_44px_rgba(34,20,24,0.18)]',
-      today: 'border-cyan-300/18 bg-slate-950/52',
-      standby: 'border-stone-300/22 bg-stone-500/[0.08]',
+      focus: 'border-indigo-300/35 bg-indigo-500/[0.08] shadow-[0_18px_44px_rgba(99,102,241,0.12)]',
+      today: 'border-sky-200/40 bg-sky-500/[0.06]',
+      standby: 'border-slate-200/80 bg-slate-500/[0.04]',
       blocked: 'border-amber-400/22 bg-amber-500/[0.09]',
     } as const;
 
@@ -5238,7 +6539,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setSelectedTask(task)}
-              className="mt-1 text-left text-[1rem] font-semibold leading-6 text-white transition-colors hover:text-rose-200 text-safe-wrap"
+              className="mt-1 text-left text-[1rem] font-semibold leading-6 text-white transition-colors hover:text-indigo-200 text-safe-wrap"
             >
               {task.title || '未命名任务'}
             </button>
@@ -5263,9 +6564,6 @@ export default function App() {
             {getCollaborationLevelLabel(task.collaboration_level || 'low')}
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
-            {getExecutionModeLabel(task.execution_mode || 'serial')}
-          </span>
-          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
             {getTaskCategoryLabel(task.category_key || 'misc')}
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
@@ -5284,7 +6582,7 @@ export default function App() {
               "mt-3 rounded-2xl border px-3 py-2 text-[11px] font-semibold",
               task.timeline === 'temporary'
                 ? (task.deadline_at || 0) <= nowTs
-                  ? 'border-rose-400/40 bg-rose-500/18 text-rose-100'
+                  ? 'border-indigo-300/40 bg-indigo-500/18 text-indigo-100'
                   : 'border-amber-400/35 bg-amber-500/18 text-amber-100'
                 : isLongTermDue(task, nowTs)
                   ? 'border-indigo-400/35 bg-indigo-500/18 text-indigo-100'
@@ -5337,7 +6635,7 @@ export default function App() {
                 ready
                   ? task.tracking_started_at
                     ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
-                    : "border-rose-300/30 bg-rose-500/16 text-rose-100 hover:bg-rose-500/25"
+                    : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
                   : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
               )}
             >
@@ -5353,110 +6651,213 @@ export default function App() {
   const renderTaskLine = (
     task: Task,
     {
-      label,
       emphasis = 'default',
-      canMoveUp = false,
-      canMoveDown = false,
+      laneMode = 'serial',
       taskIds = [],
+      rowTaskCount = 1,
     }: {
-      label?: string;
       emphasis?: 'default' | 'standby';
-      canMoveUp?: boolean;
-      canMoveDown?: boolean;
+      laneMode?: TaskExecutionMode;
       taskIds?: string[];
+      rowTaskCount?: number;
     } = {}
   ) => {
     const ready = isTaskReady(task) && isLongTermDue(task, nowTs);
+    const compactParallel = laneMode === 'parallel';
+    const tripleParallel = compactParallel && rowTaskCount >= 3;
+    const dualParallel = compactParallel && rowTaskCount === 2;
     const toneClasses = emphasis === 'standby'
       ? 'border-stone-300/20 bg-stone-500/[0.06]'
       : 'border-white/10 bg-white/[0.03]';
+    const isDragged = draggedLineTaskId === task.id;
+    const isDragTarget = dragOverLineTaskId === task.id && draggedLineTaskId !== task.id;
+    const dragZone = isDragTarget ? dragOverLineZone : null;
+    const nextActionText = getTaskNextActionText(task);
+    const timerText = task.tracking_started_at
+      ? `计时 ${formatDurationFromMs(getTrackedMs(task, nowTs))}`
+      : `实际 ${getDisplayedActualMinutes(task, nowTs)}m`;
 
     return (
       <div
         key={`line-${task.id}`}
+        draggable
+        onDragStart={(event) => startTaskDrag(event, task.id)}
+        onDragEnd={endTaskDrag}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          const rect = event.currentTarget.getBoundingClientRect();
+          const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5;
+          const zone: 'before' | 'after' | 'overlap' = ratio <= 0.34 ? 'before' : ratio >= 0.66 ? 'after' : 'overlap';
+          if (dragOverLineTaskId !== task.id) setDragOverLineTaskId(task.id);
+          if (dragOverLineZone !== zone) setDragOverLineZone(zone);
+        }}
+        onDragLeave={() => {
+          if (dragOverLineTaskId === task.id) {
+            setDragOverLineTaskId(null);
+            setDragOverLineZone(null);
+          }
+        }}
+        onDrop={(event) => handleTaskLineDrop(event, task, taskIds, laneMode)}
         className={cn(
-          "task-line-shell flex items-center gap-3 rounded-[1rem] border px-3 py-3 transition-colors hover:border-white/20",
+          "task-line-shell rounded-[1rem] border px-3 py-3 transition-colors hover:border-white/20",
           toneClasses,
-          emphasis === 'standby' && "task-line-shell-standby"
+          emphasis === 'standby' && "task-line-shell-standby",
+          isDragged && "task-line-shell-dragging",
+          isDragTarget && "task-line-shell-drop",
+          dragZone === 'before' && "task-line-shell-drop-before",
+          dragZone === 'after' && "task-line-shell-drop-after",
+          dragZone === 'overlap' && "task-line-shell-drop-overlap",
+          compactParallel ? "flex h-full min-h-[176px] flex-col" : "flex items-center gap-3"
         )}
       >
-        <div className="task-line-dot-wrap shrink-0">
-          <div
-            className="h-2.5 w-2.5 rounded-full shadow-[0_0_10px_currentColor]"
-            style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
-          />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            {label ? (
-              <span className="task-line-label rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold text-slate-300">
-                {label}
+        {dragZone && (
+          <div className="task-line-drop-hint">
+            {dragZone === 'before' ? '识别：上方' : dragZone === 'after' ? '识别：下方' : '识别：重叠并行'}
+          </div>
+        )}
+        {compactParallel ? (
+          <>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex min-w-0 items-start gap-2">
+                <div className="task-line-drag-handle shrink-0 pt-0.5 text-slate-500">
+                  <GripVertical className="h-4 w-4" />
+                </div>
+                <div
+                  className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
+                  style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+                />
+                <div className="min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTask(task)}
+                  className={cn(
+                      "text-left font-semibold leading-5 text-white transition-colors hover:text-indigo-200 break-words text-safe-wrap",
+                      tripleParallel ? "line-clamp-2 text-[13px]" : "line-clamp-2 text-sm"
+                    )}
+                  >
+                    {task.title || '未命名任务'}
+                  </button>
+                  <p className="mt-1 text-[10px] font-semibold text-slate-400">
+                    {getTaskCategoryLabel(task.category_key || 'misc')}
+                  </p>
+                </div>
+              </div>
+              <span className={cn(
+                "shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold",
+                ready
+                  ? "border-emerald-300/25 bg-emerald-500/12 text-emerald-100"
+                  : "border-white/10 bg-white/[0.04] text-slate-300"
+              )}>
+                {timerText}
               </span>
-            ) : null}
-            <span className="task-line-label rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold text-slate-300">
-              {getExecutionModeLabel(task.execution_mode || 'serial')}
-            </span>
-            <span className="task-line-label rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold text-slate-300">
-              {getTaskCategoryLabel(task.category_key || 'misc')}
-            </span>
-            <button
-              type="button"
-              onClick={() => setSelectedTask(task)}
-              className="line-clamp-2 text-left text-sm font-semibold leading-5 text-white transition-colors hover:text-rose-200 text-safe-wrap"
-            >
-              {task.title || '未命名任务'}
-            </button>
-          </div>
-          <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-slate-400 text-safe-wrap">
-            {getTaskNextActionText(task)}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
-            <span>{task.estimated_minutes}m</span>
-            <span>{getCollaborationLevelLabel(task.collaboration_level || 'low')}</span>
-            <span>耗能 {getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h</span>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => moveTaskInLine(task.id, -1, taskIds)}
-            disabled={!canMoveUp}
-            className={cn("rounded-full border border-white/10 p-1.5 text-slate-300 transition-colors", canMoveUp ? "hover:bg-white/8 hover:text-white" : "cursor-not-allowed opacity-35")}
-          >
-            <ChevronUp className="h-3 w-3" />
-          </button>
-            <button
-              type="button"
-              onClick={() => moveTaskInLine(task.id, 1, taskIds)}
-            disabled={!canMoveDown}
-            className={cn("rounded-full border border-white/10 p-1.5 text-slate-300 transition-colors", canMoveDown ? "hover:bg-white/8 hover:text-white" : "cursor-not-allowed opacity-35")}
-          >
-            <ChevronDown className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleTaskExecutionMode(task)}
-            className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold text-slate-200 transition-colors hover:bg-white/8 hover:text-white"
-          >
-            {task.execution_mode === 'parallel' ? '转串行' : '转并行'}
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleTaskTracking(task)}
-            disabled={!ready}
-            className={cn(
-              "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-              ready
-                ? task.tracking_started_at
-                  ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
-                  : "border-rose-300/30 bg-rose-500/16 text-rose-100 hover:bg-rose-500/25"
-                : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
-            )}
-          >
-            {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-            {task.tracking_started_at ? formatDurationFromMs(getTrackedMs(task, nowTs)) : '开始'}
-          </button>
-        </div>
+            </div>
+
+            <div className="mt-3 min-h-[3.25rem]">
+              <p className={cn(
+                "break-words text-safe-wrap text-slate-300",
+                tripleParallel ? "line-clamp-2 text-[11px] leading-5" : "line-clamp-3 text-[12px] leading-5"
+              )}>
+                {nextActionText}
+              </p>
+            </div>
+
+            <div className={cn(
+              "mt-3 grid gap-2",
+              dualParallel ? "grid-cols-2" : tripleParallel ? "grid-cols-1" : "grid-cols-3"
+            )}>
+              <div className="rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-2">
+                <div className="text-[10px] text-slate-500">预计</div>
+                <div className="mt-1 text-[11px] font-semibold text-slate-800">{task.estimated_minutes}m</div>
+              </div>
+              <div className="rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-2">
+                <div className="text-[10px] text-slate-500">负荷</div>
+                <div className="mt-1 text-[11px] font-semibold text-slate-800">{getCognitiveLoadLabel(task.cognitive_load || 'low')}</div>
+              </div>
+              {!dualParallel && !tripleParallel && (
+                <div className="rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-2">
+                  <div className="text-[10px] text-slate-500">协作</div>
+                  <div className="mt-1 text-[11px] font-semibold text-slate-800">{getCollaborationLevelLabel(task.collaboration_level || 'low')}</div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedTask(task)}
+                className="flex-1 rounded-full border border-white/12 px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/8 hover:text-white"
+              >
+                查看
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleTaskTracking(task)}
+                disabled={!ready}
+                className={cn(
+                  "inline-flex flex-1 items-center justify-center gap-1 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                  ready
+                    ? task.tracking_started_at
+                      ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                      : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
+                    : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
+                )}
+              >
+                {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                {task.tracking_started_at ? '暂停' : '开始'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="task-line-drag-handle shrink-0 text-slate-500">
+              <GripVertical className="h-4 w-4" />
+            </div>
+            <div className="task-line-dot-wrap shrink-0">
+              <div
+                className="h-2.5 w-2.5 rounded-full shadow-[0_0_10px_currentColor]"
+                style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTask(task)}
+                  className="line-clamp-2 text-left text-sm font-semibold leading-5 text-white transition-colors hover:text-indigo-200 text-safe-wrap"
+                >
+                  {task.title || '未命名任务'}
+                </button>
+              </div>
+              <p className="mt-1 line-clamp-1 text-[11px] leading-5 text-slate-400 text-safe-wrap">
+                {nextActionText}
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                <span>{task.estimated_minutes}m</span>
+                <span>{getTaskCategoryLabel(task.category_key || 'misc')}</span>
+                <span>{getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h</span>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => toggleTaskTracking(task)}
+                disabled={!ready}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                  ready
+                    ? task.tracking_started_at
+                      ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                      : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
+                    : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
+                )}
+              >
+                {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                {task.tracking_started_at ? formatDurationFromMs(getTrackedMs(task, nowTs)) : '开始'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     );
   };
@@ -5500,6 +6901,26 @@ export default function App() {
             <div className="coin-burst coin-burst-2"><Coins className="h-5 w-5" /></div>
             <div className="coin-burst coin-burst-3"><Coins className="h-4 w-4" /></div>
             <div className="coin-burst coin-burst-4"><Coins className="h-5 w-5" /></div>
+          </div>
+        </div>
+      );
+    }
+
+    if (activeMotivationMode === 'special:token') {
+      return (
+        <div className="motivation-stage motivation-stage-token">
+          <div className="motivation-glow motivation-glow-token" />
+          <div className="token-scene">
+            <div className="token-orbit token-orbit-1">TK</div>
+            <div className="token-orbit token-orbit-2">TK</div>
+            <div className="token-orbit token-orbit-3">TK</div>
+            <div className="token-core">
+              <Coins className="h-7 w-7" />
+            </div>
+          </div>
+          <div className="mt-3 text-center">
+            <div className="text-sm font-semibold text-amber-50">Token 累积</div>
+            <div className="text-[11px] text-amber-100/75">每次推进都能看到更直接的增长</div>
           </div>
         </div>
       );
@@ -5605,100 +7026,107 @@ export default function App() {
     <div className="app-shell relative isolate min-h-screen w-screen flex flex-col text-slate-100 font-sans selection:bg-rose-500/30">
 
       {/* Header */}
-      <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b border-white/[0.08] glass-panel px-4 py-3 sm:h-16 sm:flex-nowrap sm:justify-between sm:px-6 sm:py-0">
-        <div className="brand-shell brand-shell-planner flex min-w-0 items-center gap-3 rounded-2xl px-3 py-2 shadow-[0_10px_30px_rgba(2,6,23,0.45)]">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500 shadow-lg shadow-rose-500/20 ring-1 ring-white/20">
-            <LayoutGrid className="text-white w-5 h-5 stroke-[2.5]" />
-          </div>
-          <div className="min-w-0 leading-none">
-            <h1 className="text-base font-bold tracking-tight text-zinc-100 sm:text-xl text-safe-wrap">
-              Task Axis Planner
-            </h1>
-            <p className="mt-1 hidden text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400 sm:block">Importance x Urgency</p>
-          </div>
-        </div>
+      <header className="sticky top-0 z-20 border-b border-white/[0.08] glass-panel px-3 py-3 sm:px-4 lg:px-5">
+        <div className="mx-auto w-full max-w-[1360px] overflow-x-auto">
+          <div className="flex min-w-max items-center gap-2.5">
+            <div className="brand-shell brand-shell-planner planner-mark-shell flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] shadow-[0_10px_30px_rgba(2,6,23,0.28)]">
+              <div className="planner-mark" aria-label="Task Axis Planner">
+                <span className="planner-mark-axis planner-mark-axis-x" />
+                <span className="planner-mark-axis planner-mark-axis-y" />
+                <span className="planner-mark-node planner-mark-node-a" />
+                <span className="planner-mark-node planner-mark-node-b" />
+                <span className="planner-mark-node planner-mark-node-c" />
+              </div>
+            </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
-          <button
-            onClick={() => setCurrentView('tasks')}
-            className={cn(
-              "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all sm:px-4",
-              currentView === 'tasks'
-                ? "bg-rose-500/20 text-rose-50 border border-rose-400/30"
-                : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
-            )}
-          >
-            <LayoutGrid className="h-4 w-4" />
-            <span className="hidden sm:inline">任务</span>
-          </button>
-          <button
-            onClick={() => setCurrentView('world_news')}
-            className={cn(
-              "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all sm:px-4",
-              currentView === 'world_news'
-                ? "bg-rose-500/20 text-rose-50 border border-rose-400/30"
-                : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
-            )}
-          >
-            <Globe className="h-4 w-4" />
-            <span className="hidden sm:inline">世界消息</span>
-          </button>
-          {isAdmin && (
-            <button
-              onClick={() => setCurrentView('admin')}
-              className={cn(
-                "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all sm:px-4",
-                currentView === 'admin'
-                ? "bg-zinc-500/20 text-zinc-100 border border-zinc-400/30"
-                : "bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
-              )}
-            >
-              <Briefcase className="h-4 w-4" />
-              <span className="hidden sm:inline">管理员</span>
-            </button>
-          )}
-        </div>
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="flex items-center gap-1.5 rounded-2xl border border-white/10 bg-white/[0.03] p-1.5">
+              <button
+                onClick={() => setCurrentView('tasks')}
+                className={cn(
+                  "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all",
+                  currentView === 'tasks'
+                    ? "border border-rose-400/30 bg-rose-500/20 text-rose-50"
+                    : "border border-transparent bg-transparent text-slate-300 hover:bg-white/8"
+                )}
+              >
+                <LayoutGrid className="h-4 w-4" />
+                <span>任务</span>
+              </button>
+              <button
+                onClick={() => setCurrentView('world_news')}
+                className={cn(
+                  "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all",
+                  currentView === 'world_news'
+                    ? "border border-rose-400/30 bg-rose-500/20 text-rose-50"
+                    : "border border-transparent bg-transparent text-slate-300 hover:bg-white/8"
+                )}
+              >
+                <Globe className="h-4 w-4" />
+                <span>世界消息</span>
+              </button>
+              </div>
+            </div>
 
-        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap sm:gap-4">
-          <span className="hidden text-xs font-semibold text-slate-300 sm:block">
-            {isAdmin ? '管理员' : '用户'}：{authUser || loginUsername}
-          </span>
-          <BackgroundAudioDock />
-          <div className="order-last flex w-full min-w-0 justify-end sm:order-none sm:w-auto">
-            {renderThemeSwitcher('compact')}
+            <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                title={authUser || loginUsername || undefined}
+                onClick={() => {
+                  if (isAdmin) setCurrentView('admin');
+                }}
+                className={cn(
+                  "identity-chip",
+                  isAdmin && "identity-chip-clickable",
+                  currentView === 'admin' && "identity-chip-active"
+                )}
+              >
+                <span className={cn("identity-chip-badge", isAdmin ? "identity-chip-badge-admin" : "identity-chip-badge-member")}>
+                  {isAdmin ? <Briefcase className="h-3.5 w-3.5" /> : <Circle className="h-3 w-3 fill-current" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="identity-chip-label">身份</span>
+                  <span className="identity-chip-value">{isAdmin ? '管理员' : '成员'}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen((prev) => !prev)}
+                className={cn(
+                  "identity-chip identity-chip-clickable",
+                  isSettingsOpen && "identity-chip-active"
+                )}
+                title="打开设置"
+              >
+                <span className="identity-chip-badge identity-chip-badge-member">
+                  <Settings2 className="h-3.5 w-3.5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="identity-chip-label">设置</span>
+                  <span className="identity-chip-value">同步与主题</span>
+                </span>
+              </button>
+              <button
+                onClick={() => setIsTaskListOpen(true)}
+                className="relative rounded-xl border border-white/10 bg-white/[0.03] p-2.5 transition-all hover:bg-white/[0.08] active:scale-95"
+                title="打开任务清单"
+              >
+                <ListTodo className="h-5 w-5 text-slate-300" />
+                {(activeTasks.length + archivedTasks.length) > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white shadow-[0_0_10px_rgba(244,114,182,0.35)]">
+                    {activeTasks.length + archivedTasks.length}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={clearAuth}
+                className="rounded-xl border border-white/10 bg-white/[0.03] p-2.5 text-slate-300 transition-colors hover:bg-white/[0.08] hover:text-white"
+                title="退出登录"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
           </div>
-          <button
-            onClick={clearAuth}
-            className="rounded-xl border border-white/15 bg-white/5 p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-            title="退出登录"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => setIsTaskListOpen(true)}
-            className="relative rounded-xl p-2.5 transition-all hover:bg-white/5 active:scale-95 group border border-transparent hover:border-white/10"
-          >
-            <ListTodo className="h-5 w-5 text-slate-300 group-hover:text-rose-300 transition-colors" />
-            {(activeTasks.length + archivedTasks.length) > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white shadow-[0_0_10px_rgba(244,114,182,0.35)]">
-                {activeTasks.length + archivedTasks.length}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={handleAddTask}
-            disabled={isPlacementMode}
-            className={cn(
-              "group relative overflow-hidden rounded-xl px-4 py-2 text-sm font-semibold transition-all sm:flex sm:items-center sm:gap-2 sm:px-5",
-              isPlacementMode
-                ? "bg-white/5 text-slate-500 cursor-not-allowed border border-white/5"
-                : "bg-white/10 text-white hover:bg-white/20 active:scale-95 border border-white/10"
-            )}
-          >
-            <div className="absolute inset-0 bg-gradient-to-r from-rose-500/0 via-rose-500/10 to-sky-400/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-300" />
-            <Plus className="h-4 w-4 hidden sm:block transition-transform group-hover:rotate-90" />
-            <span>新建任务</span>
-          </button>
         </div>
       </header>
 
@@ -5711,26 +7139,104 @@ export default function App() {
         </div>
       )}
 
-      {currentView !== 'admin' && (
-        <div className="z-10 grid grid-cols-2 gap-2 border-b border-white/[0.08] bg-slate-900 px-4 py-2 text-xs sm:grid-cols-4 sm:px-6">
-          <div className="rounded-lg border border-rose-400/25 bg-rose-500/8 px-3 py-2 text-rose-100 text-safe-wrap">
-            可执行任务: <span className="font-bold">{executableTasks.length}</span>
-          </div>
-          <div className="rounded-lg border border-slate-300/20 bg-slate-500/8 px-3 py-2 text-slate-100 text-safe-wrap">
-            正在做: <span className="font-bold">{runningTasks.length}</span>
-          </div>
-          <div className={cn("rounded-lg border px-3 py-2 text-safe-wrap", energyTone.card)}>
-            当前精力: <span className="font-bold">{energyScore}</span>
-          </div>
-          <div className="rounded-lg border border-zinc-300/20 bg-zinc-500/8 px-3 py-2 text-zinc-200 text-safe-wrap">
-            阻塞任务: <span className="font-bold">{blockedTasks.length}</span>
-          </div>
-        </div>
-      )}
-
       {currentView === 'tasks' ? (
         <>
-      <div className="z-10 border-b border-white/[0.08] bg-slate-950/70">
+          <AnimatePresence>
+            {isSettingsOpen && (
+              <motion.section
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="mx-4 mt-4 sm:mx-6"
+              >
+                <div className="settings-panel rounded-[1.7rem] border border-white/10 p-5 sm:p-6">
+                  <div className="settings-panel-grid">
+                    <section className="settings-card">
+                      <p className="settings-card-kicker">主题</p>
+                      <h3 className="settings-card-title">预设主题</h3>
+                      <div className="mt-4">
+                        {renderThemeSwitcher('full')}
+                      </div>
+                    </section>
+
+                    <section className="settings-card">
+                      <p className="settings-card-kicker">日历同步</p>
+                      <h3 className="settings-card-title">把今天的安排推到外部日历</h3>
+                      <div className="mt-4 grid gap-3">
+                        <button
+                          type="button"
+                          onClick={exportCurrentPlanToCalendar}
+                          className="settings-action-button"
+                        >
+                          <CalendarDays className="h-4 w-4" />
+                          导出 ICS
+                        </button>
+                        <button
+                          type="button"
+                          onClick={copyCalendarSubscriptionUrl}
+                          className="settings-action-button"
+                        >
+                          <Link2 className="h-4 w-4" />
+                          复制订阅链接
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleResetCalendarSubscription}
+                          className="settings-action-button"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                          重置订阅链接
+                        </button>
+                      </div>
+                      <div className="settings-subcard mt-4">
+                        <div className="settings-subtitle">订阅地址</div>
+                        <div className="mt-2 break-all text-[11px] leading-5 text-slate-300">{calendarSubscription?.url || '正在生成订阅地址...'}</div>
+                      </div>
+                    </section>
+
+                    <section className="settings-card">
+                      <p className="settings-card-kicker">桌面弹窗</p>
+                      <h3 className="settings-card-title">和当前主线保持同步</h3>
+                      <button
+                        type="button"
+                        onClick={testDesktopNotification}
+                        className="settings-action-button mt-4"
+                      >
+                        <BellRing className="h-4 w-4" />
+                        测试弹窗
+                      </button>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {[30, 60, 90].map((minutes) => (
+                          <button
+                            key={`settings-interval-${minutes}`}
+                            type="button"
+                            onClick={() => setFocusReminderSettings((prev) => ({
+                              ...prev,
+                              enabled: true,
+                              desktop_notifications: true,
+                              interval_minutes: minutes,
+                            }))}
+                            className={cn(
+                              "settings-choice",
+                              focusReminderSettings.interval_minutes === minutes && focusReminderSettings.enabled && "settings-choice-active"
+                            )}
+                          >
+                            每 {minutes} 分钟
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="settings-card settings-card-wide">
+                      <BackgroundAudioDock embedded />
+                    </section>
+                  </div>
+                </div>
+              </motion.section>
+            )}
+          </AnimatePresence>
+
+      <div className="hidden">
         <div
           role="button"
           tabIndex={0}
@@ -5990,7 +7496,7 @@ export default function App() {
                         <p className="mt-2 text-[11px] text-current/80">
                           {statusSummary}{' · '}{stateSignalSummary}{'\u3002\u5df2\u5b8c\u6210'} {completedTodayTasks.length} {'\u9879\uff0c\u6062\u590d'} {(totalRestRecovery + behaviorRecovery).toFixed(1)} {'\uff0c\u5f53\u524d\u901f\u7387'} {liveEnergyBurnRate.toFixed(0)}{'\u002f\u5c0f\u65f6\u3002'}
                         </p>
-                        <p className="mt-1 text-[11px] text-current/75">{latestBehaviorMessage}</p>
+                        <p className="behavior-message-inline mt-1 text-[11px] text-current/75">{latestBehaviorMessage}</p>
                         <div className="mt-3 flex items-center justify-between gap-3">
                           <div className="text-[11px] text-current/80">
                             {todayRestSession.is_resting ? '\u4f11\u606f\u4e2d\uff0c\u7cbe\u529b\u6b63\u5728\u7f13\u6162\u6062\u590d\u3002' : '\u9700\u8981\u7f13\u51b2\u65f6\uff0c\u53ef\u4ee5\u5f00\u4f11\u606f\u6a21\u5f0f\u56de\u4e00\u70b9\u7cbe\u529b\u3002'}
@@ -6146,7 +7652,7 @@ export default function App() {
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-100/70">外部行为状态</p>
-                            <p className="mt-1 text-[11px] leading-5 text-amber-50/85">{latestBehaviorMessage}</p>
+                            <p className="behavior-message-inline mt-1 text-[11px] leading-5 text-amber-50/85">{latestBehaviorMessage}</p>
                           </div>
                           <span className="rounded-lg border border-amber-300/25 bg-slate-950/50 px-2 py-1 text-[10px] font-bold text-amber-100">
                             +{behaviorRecovery.toFixed(1)}
@@ -6276,7 +7782,111 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {isMotivationPanelOpen && (
+        {isDesignPanelOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDesignPanelOpen(false)}
+              className="fixed inset-0 z-40 bg-slate-950/60"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.96 }}
+              className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,760px)] -translate-x-1/2 -translate-y-1/2 rounded-[2rem] border border-white/10 glass-modal p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">设计</p>
+                  <h3 className="mt-1 text-lg font-bold text-white">AI 任务设计</h3>
+                  <p className="mt-1 text-[11px] text-slate-400">用一句话整理今天的任务安排，再写回任务线。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDesignPanelOpen(false)}
+                  className="rounded-xl border border-white/10 bg-white/5 p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <div className="rounded-[1.4rem] border border-white/10 bg-white/[0.03] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-rose-100/75">任务规划</p>
+                      <h4 className="mt-2 text-base font-semibold text-white text-safe-wrap">{aiDayPlan.core_focus || currentCoreFocusTitle || '先给今天一句任务说明'}</h4>
+                    </div>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-slate-200">
+                      {aiDayPlan.tasks.length > 0 ? `${aiDayPlan.tasks.length} 项草案` : `${simpleHomeTasks.length} 项待办`}
+                    </span>
+                  </div>
+                  <textarea
+                    value={aiDayPlan.input}
+                    onChange={(e) => setAiDayPlan((prev) => ({ ...prev, input: e.target.value }))}
+                    placeholder="直接写：今天要做什么、什么时候开会、精力大概怎样。"
+                    className="mt-4 min-h-[180px] w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-white outline-none transition-colors placeholder:text-slate-500 focus:border-rose-300/35"
+                  />
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={generateAIDayPlan}
+                      disabled={isGeneratingDayPlan}
+                      className="inline-flex items-center gap-2 rounded-xl border border-rose-300/30 bg-rose-500/14 px-4 py-2.5 text-sm font-semibold text-rose-100 transition-colors hover:bg-rose-500/22 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isGeneratingDayPlan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      {isGeneratingDayPlan ? '整理中' : '生成安排'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={applyAIDayPlanToTasks}
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]"
+                    >
+                      <Save className="h-4 w-4" />
+                      写入任务
+                    </button>
+                  </div>
+                  {dayPlanError && (
+                    <div className="mt-3 rounded-xl border border-rose-300/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                      {dayPlanError}
+                    </div>
+                  )}
+                </div>
+
+                {aiDayPlan.summary && (
+                  <div className="rounded-[1.4rem] border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-sm leading-6 text-slate-300 text-safe-wrap">{aiDayPlan.summary}</p>
+                    {(aiDayPlan.tasks.length > 0 || simpleHomeTasks.length > 0) && (
+                      <div className="mt-4 grid gap-2">
+                        {(aiDayPlan.tasks.length > 0
+                          ? aiDayPlan.tasks.slice(0, 4).map((task, index) => ({
+                              key: `draft-${index}`,
+                              title: task.title,
+                              detail: task.description || `${task.estimated_minutes} 分钟`,
+                            }))
+                          : simpleHomeTasks.slice(0, 4).map((task) => ({
+                              key: task.id,
+                              title: task.title || '未命名任务',
+                              detail: getTaskNextActionText(task),
+                            }))
+                        ).map((item, index) => (
+                          <div key={item.key} className="rounded-xl border border-white/10 bg-slate-950/55 px-3 py-2">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">#{index + 1}</div>
+                            <div className="mt-1 text-sm font-semibold text-white text-safe-wrap">{item.title}</div>
+                            <div className="mt-1 text-[11px] leading-5 text-slate-300 text-safe-wrap">{item.detail}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+        {motivationPanelEnabled && isMotivationPanelOpen && (
           <>
             <motion.div
               initial={{ opacity: 0 }}
@@ -6429,9 +8039,42 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {currentView === 'tasks' && (
+        <>
+          <button
+            type="button"
+            onClick={() => setHomeSurface('line')}
+            disabled={homeSurface === 'line'}
+            className={cn(
+              "surface-edge-button surface-edge-button-left",
+              homeSurface === 'line' ? "surface-edge-button-active" : "surface-edge-button-idle"
+            )}
+            aria-label="切换到任务线"
+          >
+            <span className="surface-edge-button-icon">
+              <ChevronLeft className="h-4.5 w-4.5" />
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setHomeSurface('map')}
+            disabled={homeSurface === 'map'}
+            className={cn(
+              "surface-edge-button surface-edge-button-right",
+              homeSurface === 'map' ? "surface-edge-button-active" : "surface-edge-button-idle"
+            )}
+            aria-label="切换到任务地图"
+          >
+            <span className="surface-edge-button-icon">
+              <ChevronRight className="h-4.5 w-4.5" />
+            </span>
+          </button>
+        </>
+      )}
+
       <main className="relative flex flex-1 overflow-hidden">
-        <div className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
-          <div className="mx-auto grid max-w-[1120px] gap-5 pt-4">
+        <div className="custom-scrollbar flex-1 overflow-y-auto px-3 pb-4 sm:px-4 lg:px-5 sm:pb-6">
+          <div className="mx-auto grid max-w-[1360px] gap-5 pt-4">
             <div className="grid gap-5">
           <AnimatePresence>
             {isPlacementMode && (
@@ -6439,9 +8082,9 @@ export default function App() {
                 initial={{ y: -32, opacity: 0, scale: 0.96 }}
                 animate={{ y: 0, opacity: 1, scale: 1 }}
                 exit={{ y: -32, opacity: 0, scale: 0.96 }}
-                className="sticky top-4 z-30 flex items-center gap-3 rounded-2xl border border-teal-400/35 bg-teal-900/78 px-4 py-3 text-teal-100 shadow-[0_18px_40px_rgba(7,24,31,0.28)] sm:px-5"
+                className="placement-banner sticky top-4 z-30 flex items-center gap-3 rounded-2xl border border-teal-400/35 bg-teal-900/78 px-4 py-3 text-teal-100 shadow-[0_18px_40px_rgba(7,24,31,0.28)] sm:px-5"
               >
-                <MousePointer2 className="h-5 w-5 animate-bounce shrink-0 text-teal-300" />
+                <MousePointer2 className="placement-banner-icon h-5 w-5 animate-bounce shrink-0 text-teal-300" />
                 <span className="text-sm font-semibold sm:text-base">请在下方四象限地图点击一个位置来放置任务</span>
                 <button
                   type="button"
@@ -6454,299 +8097,47 @@ export default function App() {
             )}
           </AnimatePresence>
 
-              <section className="glass-panel rounded-[1.6rem] p-5 sm:p-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-rose-200/70">AI 日程规划</p>
-                    <h3 className="mt-1 text-lg font-semibold text-white text-safe-wrap">AI 规划</h3>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {aiDayPlan.summary ? (
-                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-slate-200">
-                        主线：{aiDayPlan.core_focus || '待确认'}
-                      </span>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => setIsAiPlannerExpanded((prev) => !prev)}
-                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
-                    >
-                      {isAiPlannerExpanded ? '收起 AI 规划' : '展开 AI 规划'}
-                      <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isAiPlannerExpanded && "rotate-90")} />
-                    </button>
-                  </div>
-                </div>
-                {isAiPlannerExpanded && (
-                <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_22rem]">
-                  <div>
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-rose-200/70">AI 日程规划</p>
-                        <h3 className="mt-2 text-[clamp(1.22rem,2.3vw,1.8rem)] font-semibold leading-tight text-white text-safe-wrap">
-                          用自然语言把今天排出来。
-                        </h3>
-                        <p className="mt-2 max-w-[60ch] text-sm leading-6 text-slate-300 text-safe-wrap">
-                          直接说你今天要做什么、几点有会、现在精力怎么样，AI 会收敛成一条主线和一组可执行待办。
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">当前核心工作</p>
-                        <p className="mt-2 font-semibold text-white text-safe-wrap">{currentCoreFocusTitle}</p>
-                        <p className="mt-1 text-xs leading-5 text-slate-400 text-safe-wrap">{currentCoreFocusDetail}</p>
-                      </div>
-                    </div>
+              <section className="hidden" />
 
-                    <div className="mt-4 grid gap-3">
-                      <textarea
-                        value={aiDayPlan.input}
-                        onChange={(e) => setAiDayPlan((prev) => ({ ...prev, input: e.target.value }))}
-                        placeholder="例如：今天 10 点开组会，下午要交一版首页设计，我现在精力一般，希望别排太满，还得留 30 分钟回消息。"
-                        className="min-h-[120px] w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-white outline-none transition-colors placeholder:text-slate-500 focus:border-rose-300/35"
-                      />
-                      <div className="flex flex-wrap gap-3">
-                        <button
-                          type="button"
-                          onClick={generateAIDayPlan}
-                          disabled={isGeneratingDayPlan}
-                          className="inline-flex items-center gap-2 rounded-xl border border-rose-300/30 bg-rose-500/14 px-4 py-2.5 text-sm font-semibold text-rose-100 transition-colors hover:bg-rose-500/22 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isGeneratingDayPlan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                          {isGeneratingDayPlan ? '正在整理今天' : 'AI 生成今天安排'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={applyAIDayPlanToTasks}
-                          className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]"
-                        >
-                          <Save className="h-4 w-4" />
-                          一键写入任务
-                        </button>
-                        <button
-                          type="button"
-                          onClick={exportCurrentPlanToCalendar}
-                          className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]"
-                        >
-                          <Clock3 className="h-4 w-4" />
-                          导出到日历
-                        </button>
-                      </div>
-                      {dayPlanError && (
-                        <div className="rounded-xl border border-rose-300/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                          {dayPlanError}
-                        </div>
-                      )}
-                      {aiDayPlan.summary && (
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
-                            <span className="rounded-full border border-rose-300/25 bg-rose-500/12 px-3 py-1 text-rose-100">主线：{aiDayPlan.core_focus || '待确认'}</span>
-                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-slate-200">AI 已整理 {aiDayPlan.tasks.length} 项</span>
-                          </div>
-                          <p className="mt-3 text-sm leading-6 text-slate-300 text-safe-wrap">{aiDayPlan.summary}</p>
-                          {aiDayPlan.schedule_markdown && (
-                            <div className="mt-4 rounded-xl border border-white/8 bg-black/10 p-4">
-                              <Markdown>{aiDayPlan.schedule_markdown}</Markdown>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <aside className="grid gap-3">
-                    <div className="rounded-[1.2rem] border border-white/10 bg-white/[0.03] p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">核心提醒</p>
-                          <h4 className="mt-2 text-base font-semibold text-white">让电脑持续提醒你现在最该做什么</h4>
-                        </div>
-                        {focusReminderSettings.enabled ? <BellRing className="h-5 w-5 text-rose-200" /> : <Bell className="h-5 w-5 text-slate-400" />}
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-300 text-safe-wrap">
-                        当前会围绕“{currentCoreFocusTitle}”发提醒。打开桌面通知后，页面会按节奏弹出提示。
-                      </p>
-                      <div className="mt-4 grid gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setFocusReminderSettings((prev) => ({ ...prev, enabled: !prev.enabled }))}
-                          className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
-                        >
-                          <span>启用提醒</span>
-                          <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-semibold", focusReminderSettings.enabled ? "bg-rose-500/18 text-rose-100" : "bg-white/[0.04] text-slate-400")}>
-                            {focusReminderSettings.enabled ? '已开启' : '已关闭'}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const checked = !focusReminderSettings.desktop_notifications;
-                            if (checked && notificationPermission !== 'granted') {
-                              const permission = await requestDesktopNotificationPermission();
-                              if (permission !== 'granted') return;
-                            }
-                            setFocusReminderSettings((prev) => ({ ...prev, desktop_notifications: checked }));
-                          }}
-                          className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
-                        >
-                          <span>桌面弹窗</span>
-                          <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-semibold", focusReminderSettings.desktop_notifications ? "bg-rose-500/18 text-rose-100" : "bg-white/[0.04] text-slate-400")}>
-                            {notificationPermission === 'unsupported'
-                              ? '不支持'
-                              : focusReminderSettings.desktop_notifications
-                                ? '已开启'
-                                : notificationPermission === 'denied'
-                                  ? '已拒绝'
-                                  : '未开启'}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={testDesktopNotification}
-                          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-sm font-semibold text-slate-100 transition-colors hover:bg-white/[0.05]"
-                        >
-                          <BellRing className="h-4 w-4" />
-                          立即测试弹窗
-                        </button>
-                        <label className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3 text-sm text-slate-200">
-                          <span>提醒间隔</span>
-                          <input
-                            type="range"
-                            min={10}
-                            max={90}
-                            step={5}
-                            value={focusReminderSettings.interval_minutes}
-                            onChange={(e) => setFocusReminderSettings((prev) => ({ ...prev, interval_minutes: Number(e.target.value) }))}
-                            className="w-full accent-rose-400"
-                          />
-                          <span className="text-xs text-slate-400">每 {focusReminderSettings.interval_minutes} 分钟提醒一次</span>
-                        </label>
-                        <div className="rounded-xl border border-dashed border-white/10 px-3 py-3 text-xs leading-5 text-slate-400">
-                          手机先用日历最省事：导出 `.ics` 后，Google Calendar 用“导入”，Apple Calendar 直接打开即可添加。后面再补 Web Push。
-                        </div>
-                        <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3 text-xs leading-5 text-slate-300">
-                          <p className="font-semibold text-slate-100">订阅链接</p>
-                          {calendarSubscription?.url ? (
-                            <>
-                              <p className="mt-2 break-all text-slate-400">{calendarSubscription.url}</p>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <button type="button" onClick={copyCalendarSubscriptionUrl} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]">
-                                  <Link2 className="h-3.5 w-3.5" />
-                                  复制订阅链接
-                                </button>
-                                <a href={calendarSubscription.appleUrl} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]">
-                                  <ExternalLink className="h-3.5 w-3.5" />
-                                  Apple 日历打开
-                                </a>
-                                <button type="button" onClick={handleResetCalendarSubscription} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-100 transition-colors hover:bg-white/[0.08]">
-                                  <RefreshCw className="h-3.5 w-3.5" />
-                                  重置链接
-                                </button>
-                              </div>
-                            </>
-                          ) : (
-                            <p className="mt-2 text-slate-400">正在生成订阅地址…</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </aside>
-                </div>
-                )}
-              </section>
-
-              <section className="home-stage rounded-[1.9rem] border border-white/10 bg-[linear-gradient(160deg,rgba(6,17,29,0.96),rgba(9,25,37,0.88))] p-5 shadow-[0_26px_64px_rgba(2,8,18,0.34)] sm:p-6">
+                {homeSurface === 'line' && (
+              <section className="mx-4 mt-4 sm:mx-6 home-stage rounded-[1.9rem] border border-white/10 bg-[linear-gradient(160deg,rgba(6,17,29,0.96),rgba(9,25,37,0.88))] p-5 shadow-[0_26px_64px_rgba(2,8,18,0.34)] sm:p-6">
                 <div className="home-stage-header">
-                  <div className="max-w-3xl">
+                  <div className="min-w-0 flex-1">
                     <p className="home-stage-kicker text-[10px] font-bold uppercase tracking-[0.24em] text-rose-200/70">任务线</p>
-                    <h3 className="mt-2 text-[clamp(1.42rem,2.6vw,2.2rem)] font-semibold leading-tight text-white text-safe-wrap">
-                      今日任务
-                    </h3>
-                  </div>
-                  <div className="home-stage-stats">
-                    <div className="home-stage-stat">
-                      <span>主线</span>
-                      <strong>1 件</strong>
-                    </div>
-                    <div className="home-stage-stat">
-                      <span>串行 / 并行</span>
-                      <strong>{serialLineTasks.length} / {parallelLineTasks.length}</strong>
-                    </div>
-                    <div className="home-stage-stat">
-                      <span>激励模块</span>
-                      <strong>{formatMetricValue(activeAbilityModuleScore)}</strong>
+                    <div className="home-line-title-row">
+                      <h3 className="text-[clamp(1.42rem,2.6vw,2.2rem)] font-semibold leading-tight text-white text-safe-wrap">
+                        任务线
+                      </h3>
+                      {renderInlineEnergyBar('line-title')}
                     </div>
                   </div>
                 </div>
 
                 <div className="home-stage-body">
                   <div className="home-focus-column">
-                    <div className="home-focus-banner">
-                      <span>主线轨道</span>
-                      <span>{recommendedPrimaryTask?.tracking_started_at ? '正在推进' : '先开这一件'}</span>
-                    </div>
                     <div className="home-focus-shell">
                       <div className="home-focus-meta">
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-100/75">现在先做</p>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">现在先做</p>
                           <h4 className="mt-1 text-[1.05rem] font-semibold leading-6 text-white text-safe-wrap">
-                            {recommendedPrimaryTask ? '把这一件推进到一个完整段落' : '先给今天留一个最小动作'}
+                            {currentPrimaryTask ? '当前主线' : '先拖一个任务进来'}
                           </h4>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setIsTaskListOpen(true)}
-                          className="home-open-list rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
-                        >
-                          打开清单
-                        </button>
-                      </div>
-
-                      <div className="home-focus-card-wrap">
-                        {recommendedPrimaryTask ? (
-                          renderTaskCard(recommendedPrimaryTask, {
-                            laneLabel: recommendedPrimaryTask.tracking_started_at ? '正在推进' : '主任务',
-                            note: recommendedPrimaryTask.tracking_started_at
-                              ? '先把当前这段做完，再决定要不要切换。'
-                              : '只盯这一件，别让首页把你拉去做别的。',
-                            tone: 'focus',
-                          })
-                        ) : (
-                          <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
-                            当前没有可直接开工的任务。先新建一个最小动作，或者把阻塞项解除。
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="home-focus-footer">
-                        <span className="home-note-pill">{focusHeadline}</span>
-                        <span className="home-note-pill">WIP {runningTasks.length}/{FOCUS_WIP_LIMIT}</span>
-                        <span className="home-note-pill">{activeAbilityModule?.label || '木鱼'} {formatMetricValue(activeAbilityModuleScore)}</span>
-                        <button
-                          type="button"
-                          onClick={() => setIsEnergyTheoryOpen((prev) => !prev)}
-                          className="home-note-pill cursor-pointer transition-colors hover:bg-white/[0.12]"
-                        >
-                          {isEnergyTheoryOpen ? '收起精力理论' : '查看精力理论'}
-                        </button>
-                      </div>
-                    </div>
-                    {isEnergyTheoryOpen && (
-                      <div className="rounded-[1rem] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-6 text-slate-300">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">精力理论</p>
-                        <p className="mt-2 text-safe-wrap">{theorySummary}</p>
-                        <p className="mt-2 text-safe-wrap">睡眠报告会抬高或压低今日基线，自评决定你今天适合先啃串行任务，还是先让并行等待项跑起来。</p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="home-side-column">
-                    <section className="home-stack-card">
-                      <div className="home-stack-head">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">串行主线</p>
-                          <h4 className="mt-1 text-sm font-semibold text-white text-safe-wrap">串行</h4>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span>{serialLineTasks.length} 项</span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsTaskListOpen(true)}
+                            className="home-open-list rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
+                          >
+                            打开清单
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsDesignPanelOpen(true)}
+                            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
+                          >
+                            AI设计
+                          </button>
                           <button
                             type="button"
                             onClick={handleAddTask}
@@ -6756,60 +8147,165 @@ export default function App() {
                           </button>
                         </div>
                       </div>
-                      <div className="home-stack-body">
-                        {serialLineTasks.length === 0 ? (
-                          <div className="rounded-[1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
-                            先放 1 到 3 个必须亲自盯住的任务，剩下都不要挤进主线。
-                          </div>
+
+                      <div
+                        className="home-focus-card-wrap"
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
+                          if (!droppedTaskId) return;
+                          setPrimaryTaskId(droppedTaskId);
+                          setDraggedLineTaskId(null);
+                          setDragOverLineTaskId(null);
+                          setDragOverLineZone(null);
+                        }}
+                      >
+                        {currentPrimaryTask ? (
+                          renderTaskCard(currentPrimaryTask, {
+                            laneLabel: currentPrimaryTask.tracking_started_at ? '正在推进' : '主任务',
+                            tone: 'focus',
+                          })
                         ) : (
-                          serialLineTasks.map((task, index) =>
-                            renderTaskLine(task, {
-                              label: index === 0 ? '现在' : '下一位',
-                              canMoveUp: index > 0,
-                              canMoveDown: index < serialLineTasks.length - 1,
-                              taskIds: serialLineTasks.map((item) => item.id),
-                            })
-                          )
+                          <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
+                            拖一个任务到这里。
+                          </div>
                         )}
                       </div>
-                    </section>
 
-                    <section className="home-stack-card home-stack-card-standby">
+                      <div className="mt-3 rounded-[1.1rem] border border-white/10 bg-white/[0.03] px-4 py-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">AI 建议</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={requestHourlyFocusCheckin}
+                            disabled={isGeneratingFocusCheckin || runningTasks.length === 0}
+                            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isGeneratingFocusCheckin ? '生成中...' : '现在校准'}
+                          </button>
+                        </div>
+                        {focusCheckin?.summary && (
+                          <p className="mt-3 text-[12px] leading-6 text-slate-300 text-safe-wrap">{focusCheckin.summary}</p>
+                        )}
+                        {(focusCheckin?.reason || focusCheckin?.reply_prompt) && (
+                          <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/55 px-3 py-3">
+                            {focusCheckin?.reason && (
+                              <p className="text-[11px] leading-5 text-slate-300 text-safe-wrap">{focusCheckin.reason}</p>
+                            )}
+                            {focusCheckin?.reply_prompt && (
+                              <p className="mt-2 text-[11px] font-semibold text-rose-100 text-safe-wrap">{focusCheckin.reply_prompt}</p>
+                            )}
+                          </div>
+                        )}
+                        {focusCheckinError && (
+                          <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
+                            {focusCheckinError}
+                          </div>
+                        )}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => respondToFocusCheckin('continue')}
+                            disabled={focusCheckin?.status !== 'pending'}
+                            className="rounded-full border border-emerald-300/30 bg-emerald-500/14 px-3 py-1.5 text-[11px] font-semibold text-emerald-100 transition-colors hover:bg-emerald-500/22 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            继续
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => respondToFocusCheckin('rest')}
+                            disabled={focusCheckin?.status !== 'pending'}
+                            className="rounded-full border border-sky-300/30 bg-sky-500/14 px-3 py-1.5 text-[11px] font-semibold text-sky-100 transition-colors hover:bg-sky-500/22 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            休息一下
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => respondToFocusCheckin('pause')}
+                            disabled={focusCheckin?.status !== 'pending'}
+                            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            保持暂停
+                          </button>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+
+                  <div className="home-side-column">
+                    <section className="home-stack-card">
                       <div className="home-stack-head">
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-stone-200/80">并行窗口</p>
-                          <h4 className="mt-1 text-sm font-semibold text-white text-safe-wrap">并行</h4>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">任务排布</p>
                         </div>
-                        <span>{parallelLineTasks.length} 项</span>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-300">
+                          <span>{homeLineTasks.length} 项</span>
+                        </div>
                       </div>
-                      <div className="home-stack-body">
-                        {parallelLineTasks.length === 0 ? (
+                      <div className="home-stack-body custom-scrollbar space-y-3">
+                        {homeLineRows.length === 0 ? (
                           <div className="rounded-[1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
-                            把高协作任务切到并行，这样等 AI 跑回复时你还能继续推进别的事。
+                            空
                           </div>
                         ) : (
-                          parallelLineTasks.map((task, index) =>
-                            renderTaskLine(task, {
-                              label: index === 0 ? '挂起中' : '并行',
-                              emphasis: 'standby',
-                              canMoveUp: index > 0,
-                              canMoveDown: index < parallelLineTasks.length - 1,
-                              taskIds: parallelLineTasks.map((item) => item.id),
-                            })
-                          )
+                          homeLineRows.map((row) => (
+                            <div
+                              key={row.id}
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                event.dataTransfer.dropEffect = 'move';
+                                setDragOverLineTaskId(null);
+                                setDragOverLineZone(null);
+                              }}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
+                                if (!droppedTaskId) return;
+                                moveTaskToLine(droppedTaskId, row.tasks[0]?.id || null, homeLineTasks.map((item) => item.id), row.mode);
+                                setDraggedLineTaskId(null);
+                                setDragOverLineTaskId(null);
+                                setDragOverLineZone(null);
+                              }}
+                              className={cn(
+                                "rounded-[1rem] border px-3 py-3",
+                                row.mode === 'parallel'
+                                  ? "parallel-row-shell border-sky-200/40 bg-sky-500/[0.05]"
+                                  : "border-white/10 bg-white/[0.03]"
+                              )}
+                            >
+                              <div className={cn(
+                                "grid gap-3",
+                                row.mode === 'parallel'
+                                  ? row.tasks.length >= 3
+                                    ? "md:grid-cols-2 xl:grid-cols-3"
+                                    : row.tasks.length === 2
+                                      ? "md:grid-cols-2"
+                                      : "grid-cols-1"
+                                  : "grid-cols-1"
+                              )}>
+                                {row.tasks.map((task) => renderTaskLine(task, {
+                                  emphasis: row.mode === 'parallel' ? 'standby' : 'default',
+                                  laneMode: row.mode,
+                                  taskIds: homeLineTasks.map((item) => item.id),
+                                  rowTaskCount: row.tasks.length,
+                                }))}
+                              </div>
+                            </div>
+                          ))
                         )}
                       </div>
                     </section>
-
-                    <div className="home-ambient-note">
-                      <span className="home-ambient-dot" />
-                      <p className="text-safe-wrap">
-                        {isExecutionSparse ? '先新建一个最小动作，然后直接开始计时。' : `睡眠 ${todayStateReport.sleep_hours}h · 自评 ${todayStateReport.self_rating}/5 · 当前速率 ${liveEnergyBurnRate.toFixed(1)}/小时`}
-                      </p>
-                    </div>
                   </div>
                 </div>
               </section>
+              )}
 
               <section className="hidden">
                 <div className="rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,18,31,0.94),rgba(8,19,31,0.86))] p-5 shadow-[0_20px_52px_rgba(2,8,18,0.28)]">
@@ -7021,158 +8517,222 @@ export default function App() {
                 </div>
               </section>
 
-              <section className="home-map-panel rounded-[1.55rem] border border-white/10 p-4 shadow-[0_18px_44px_rgba(2,8,18,0.24)]">
+              {homeSurface === 'map' && (
+              <section className="mx-4 mt-5 sm:mx-6 home-map-panel rounded-[1.9rem] border border-white/10 p-6 sm:p-7">
                 <div className="home-map-summary">
                   <div className="home-map-copy">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">四象限地图</p>
-                    <h3 className="mt-1 text-base font-semibold text-white text-safe-wrap">四象限</h3>
-                  </div>
-                  <div className="home-map-actions">
-                    <span className="home-map-pill">仅在校准时出现</span>
-                    <button
-                      type="button"
-                      onClick={() => setIsMatrixExpanded((prev) => !prev)}
-                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
-                    >
-                      {isMatrixExpanded ? '收起地图' : '展开地图'}
-                      <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isMatrixExpanded && "rotate-90")} />
-                    </button>
+                    <div className="home-map-title-row">
+                      <h3 className="text-[clamp(1.2rem,2vw,1.7rem)] font-semibold text-white text-safe-wrap">任务地图</h3>
+                      {renderInlineEnergyBar('map-title')}
+                    </div>
                   </div>
                 </div>
 
-                {isMatrixExpanded ? (
-                <div
-                  ref={quadrantRef}
-                  onClick={handleQuadrantClick}
-                  className={cn(
-                    "quadrant-board relative quadrant-grid mt-4 h-[23rem] overflow-hidden rounded-[1.55rem] border border-white/10 shadow-[0_24px_54px_rgba(2,6,23,0.24)] transition-all duration-500 sm:h-[28rem]",
-                    isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
-                  )}
-                >
-            <div className="pointer-events-none absolute inset-0 z-0 quadrant-tints">
-              <div className="quadrant-tint quadrant-tint-nw" />
-              <div className="quadrant-tint quadrant-tint-ne" />
-              <div className="quadrant-tint quadrant-tint-sw" />
-              <div className="quadrant-tint quadrant-tint-se" />
-            </div>
-            <div className="pointer-events-none absolute inset-0 z-[2]">
-              <div className="quadrant-axis-line quadrant-axis-line-vertical absolute left-1/2 top-0 h-full w-px" />
-              <div className="quadrant-axis-line quadrant-axis-line-horizontal absolute left-0 top-1/2 h-px w-full" />
-              <span className="axis-label absolute left-3 top-3 rounded-md px-2 py-1 text-[10px] font-semibold">紧急度: 高</span>
-              <span className="axis-label absolute left-3 bottom-14 rounded-md px-2 py-1 text-[10px] font-semibold">紧急度: 低</span>
-              <span className="axis-label absolute left-14 bottom-3 rounded-md px-2 py-1 text-[10px] font-semibold">重要性: 低</span>
-              <span className="axis-label absolute right-3 bottom-3 rounded-md px-2 py-1 text-[10px] font-semibold">重要性: 高</span>
+                <div className="home-map-layout">
+                  <section className="elevator-map-panel rounded-[1.6rem] border border-white/10">
+                    <div className="elevator-map-head">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">体力电梯图</p>
+                      </div>
+                      <span className="elevator-map-badge">{energyMapTasks.length} 项</span>
+                    </div>
+                    <div className="elevator-map-board">
+                      {energyElevatorGroups.map((group) => (
+                        <section key={group.level} className={cn("elevator-level", `elevator-level-${group.level}`)}>
+                          <div className="elevator-level-head">
+                            <strong>{group.label}</strong>
+                            <span>{group.hint}</span>
+                          </div>
+                          <div
+                            className="elevator-level-body"
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = 'move';
+                            }}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
+                              if (!droppedTaskId) return;
+                              moveTaskToElevatorLevel(
+                                droppedTaskId,
+                                group.level,
+                                group.tasks[group.tasks.length - 1]?.id || null,
+                                energyMapTasks.map((item) => item.id)
+                              );
+                              endTaskDrag();
+                            }}
+                          >
+                            {group.displayGroups.length === 0 ? (
+                              <div className="elevator-empty">这一层今天先空着</div>
+                            ) : group.displayGroups.map((displayGroup) => (
+                              <div
+                                key={`elevator-group-${displayGroup.key}`}
+                                className={cn("elevator-display-group", displayGroup.parallel && "elevator-display-group-parallel")}
+                              >
+                                {displayGroup.tasks.map((task) => (
+                                  <div
+                                    key={`elevator-${task.id}`}
+                                    onDragOver={(event) => {
+                                      event.preventDefault();
+                                      event.dataTransfer.dropEffect = 'move';
+                                      if (dragOverLineTaskId !== task.id) setDragOverLineTaskId(task.id);
+                                    }}
+                                    onDragLeave={() => {
+                                      if (dragOverLineTaskId === task.id) setDragOverLineTaskId(null);
+                                    }}
+                                    onDrop={(event) => {
+                                      event.preventDefault();
+                                      const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
+                                      if (!droppedTaskId) return;
+                                      moveTaskToElevatorLevel(
+                                        droppedTaskId,
+                                        group.level,
+                                        task.id,
+                                        energyMapTasks.map((item) => item.id)
+                                      );
+                                      endTaskDrag();
+                                    }}
+                                    className={cn(
+                                      "elevator-task-chip",
+                                      draggedLineTaskId === task.id && "elevator-task-chip-dragging",
+                                      dragOverLineTaskId === task.id && draggedLineTaskId !== task.id && "elevator-task-chip-drop"
+                                    )}
+                                  >
+                                    <div className="elevator-task-chip-top">
+                                      <div
+                                        className="elevator-task-drag"
+                                        draggable
+                                        onDragStart={(event) => startTaskDrag(event, task.id)}
+                                        onDragEnd={endTaskDrag}
+                                      >
+                                        <GripVertical className="h-3.5 w-3.5" />
+                                      </div>
+                                      <button
+                                        type="button"
+                                        draggable={false}
+                                        onPointerDown={(event) => event.stopPropagation()}
+                                        onClick={() => setSelectedTask(task)}
+                                        className="elevator-task-main"
+                                      >
+                                        <span className="elevator-task-title">{task.title || '未命名任务'}</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  </section>
 
-              <div className="quadrant-caption quadrant-caption-nw" data-zone="quick">
-                <strong>快清区</strong>
-                <span>紧急但不重要</span>
-              </div>
-              <div className="quadrant-caption quadrant-caption-ne" data-zone="focus">
-                <strong>主战区</strong>
-                <span>重要且紧急</span>
-              </div>
-              <div className="quadrant-caption quadrant-caption-sw" data-zone="release">
-                <strong>回收区</strong>
-                <span>不急也不重要</span>
-              </div>
-              <div className="quadrant-caption quadrant-caption-se" data-zone="build">
-                <strong>积累区</strong>
-                <span>重要但不紧急</span>
-              </div>
-            </div>
-            <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-              <defs>
-                <marker id="dependency-arrow-blocked" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-                  <path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" />
-                </marker>
-                <marker id="dependency-arrow-ready" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-                  <path d="M0,0 L8,4 L0,8 z" fill="#22c55e" />
-                </marker>
-              </defs>
-              {activeTasks.flatMap((task) =>
-                task.dependency_ids.map((dependencyId) => {
-                  const fromTask = taskById.get(dependencyId);
-                  if (!fromTask) return null;
-                  if (fromTask.status === 'completed') return null;
-                  const edgeReady = isDependencySatisfied(fromTask);
-                  return (
-                    <line
-                      key={`${dependencyId}-${task.id}`}
-                      x1={fromTask.x}
-                      y1={getTaskRenderY(fromTask, nowTs)}
-                      x2={task.x}
-                      y2={getTaskRenderY(task, nowTs)}
-                      stroke={edgeReady ? '#22c55e' : '#94a3b8'}
-                      strokeOpacity={edgeReady ? 0.8 : 0.55}
-                      strokeWidth={0.35}
-                      markerEnd={edgeReady ? 'url(#dependency-arrow-ready)' : 'url(#dependency-arrow-blocked)'}
-                    />
-                  );
-                })
-              )}
-            </svg>
+                  <div
+                    ref={quadrantRef}
+                    onClick={handleQuadrantClick}
+                    className={cn(
+                      "quadrant-board relative quadrant-grid aspect-square w-full overflow-hidden rounded-[1.8rem] border border-white/10 transition-all duration-500",
+                      isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
+                    )}
+                  >
+                    <div className="pointer-events-none absolute inset-0 z-0 quadrant-tints">
+                      <div className="quadrant-tint quadrant-tint-nw" />
+                      <div className="quadrant-tint quadrant-tint-ne" />
+                      <div className="quadrant-tint quadrant-tint-sw" />
+                      <div className="quadrant-tint quadrant-tint-se" />
+                    </div>
+                    <div className="pointer-events-none absolute inset-0 z-[2]">
+                      <div className="quadrant-axis-line quadrant-axis-line-vertical absolute left-1/2 top-0 h-full w-px" />
+                      <div className="quadrant-axis-line quadrant-axis-line-horizontal absolute left-0 top-1/2 h-px w-full" />
 
-            {isPlacementMode && mousePos && (
-              <div
-                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
-                style={{ left: `${mousePos.x}%`, top: `${mousePos.y}%` }}
-              >
-                <div className="w-8 h-8 rounded-2xl border-2 border-dashed border-teal-400 bg-teal-50/50 flex items-center justify-center animate-pulse">
-                  <Plus className="w-4 h-4 text-teal-400" />
-                </div>
-              </div>
-            )}
-
-            {activeTasks.map(task => (
-              <TaskPoint
-                key={task.id}
-                task={task}
-                nowTs={nowTs}
-                onOpen={() => setSelectedTask(task)}
-                onMove={updateTaskPosition}
-              />
-            ))}
-
-                  {activeTasks.length === 0 && archivedTasks.length === 0 && !isPlacementMode && (
-                    <div className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center p-5 sm:p-8">
-                      <div className="quadrant-empty max-w-md text-center">
-                        <p className="quadrant-empty-kicker">矩阵已清空</p>
-                        <h3 className="quadrant-empty-title">先把第一个任务放进四象限，再决定今天的路线</h3>
-                        <p className="quadrant-empty-copy">
-                          点一下坐标区就能落点。越靠右越重要，越靠上越紧急。
-                        </p>
-                        <button
-                          type="button"
-                          onClick={handleAddTask}
-                          className="pointer-events-auto mt-4 rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
-                        >
-                          新建第一个任务
-                        </button>
+                      <div className="quadrant-caption quadrant-caption-nw" data-zone="quick">
+                        <strong>快清区</strong>
+                      </div>
+                      <div className="quadrant-caption quadrant-caption-ne" data-zone="focus">
+                        <strong>主战区</strong>
+                      </div>
+                      <div className="quadrant-caption quadrant-caption-sw" data-zone="release">
+                        <strong>回收区</strong>
+                      </div>
+                      <div className="quadrant-caption quadrant-caption-se" data-zone="build">
+                        <strong>积累区</strong>
                       </div>
                     </div>
-                  )}
-                </div>
-                ) : (
-                  <div className="home-map-mini-grid">
-                    <div className="home-map-mini-cell">
-                      <strong>主战区</strong>
-                      <span>重要又紧急</span>
-                    </div>
-                    <div className="home-map-mini-cell">
-                      <strong>积累区</strong>
-                      <span>重要但不急</span>
-                    </div>
-                    <div className="home-map-mini-cell">
-                      <strong>快清区</strong>
-                      <span>赶紧处理掉</span>
-                    </div>
-                    <div className="home-map-mini-cell">
-                      <strong>回收区</strong>
-                      <span>能删就删</span>
-                    </div>
+                    <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                      <defs>
+                        <marker id="dependency-arrow-blocked" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+                          <path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" />
+                        </marker>
+                        <marker id="dependency-arrow-ready" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+                          <path d="M0,0 L8,4 L0,8 z" fill="#22c55e" />
+                        </marker>
+                      </defs>
+                      {activeTasks.flatMap((task) =>
+                        task.dependency_ids.map((dependencyId) => {
+                          const fromTask = taskById.get(dependencyId);
+                          if (!fromTask) return null;
+                          if (fromTask.status === 'completed') return null;
+                          const edgeReady = isDependencySatisfied(fromTask);
+                          return (
+                            <line
+                              key={`${dependencyId}-${task.id}`}
+                              x1={fromTask.x}
+                              y1={getTaskRenderY(fromTask, nowTs)}
+                              x2={task.x}
+                              y2={getTaskRenderY(task, nowTs)}
+                              stroke={edgeReady ? '#22c55e' : '#94a3b8'}
+                              strokeOpacity={edgeReady ? 0.8 : 0.55}
+                              strokeWidth={0.35}
+                              markerEnd={edgeReady ? 'url(#dependency-arrow-ready)' : 'url(#dependency-arrow-blocked)'}
+                            />
+                          );
+                        })
+                      )}
+                    </svg>
+
+                    {isPlacementMode && mousePos && (
+                      <div
+                        className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
+                        style={{ left: `${mousePos.x}%`, top: `${mousePos.y}%` }}
+                      >
+                        <div className="w-8 h-8 rounded-2xl border-2 border-dashed border-teal-400 bg-teal-50/50 flex items-center justify-center animate-pulse">
+                          <Plus className="w-4 h-4 text-teal-400" />
+                        </div>
+                      </div>
+                    )}
+
+                    {activeTasks.map(task => (
+                      <TaskPoint
+                        key={task.id}
+                        task={task}
+                        nowTs={nowTs}
+                        onOpen={() => setSelectedTask(task)}
+                        onMove={updateTaskPosition}
+                      />
+                    ))}
+
+                    {activeTasks.length === 0 && archivedTasks.length === 0 && !isPlacementMode && (
+                      <div className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center p-5 sm:p-8">
+                        <div className="quadrant-empty max-w-md text-center">
+                          <p className="quadrant-empty-kicker">矩阵已清空</p>
+                          <h3 className="quadrant-empty-title">先把第一个任务放进四象限，再决定今天的路线</h3>
+                          <p className="quadrant-empty-copy">
+                            点一下坐标区就能落点。越靠右越重要，越靠上越紧急。
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleAddTask}
+                            className="pointer-events-auto mt-4 rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
+                          >
+                            新建第一个任务
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </section>
+              )}
             </div>
 
             <aside className="hidden">
@@ -7224,6 +8784,7 @@ export default function App() {
                 </div>
               </section>
 
+              {motivationPanelEnabled && (
               <section className="rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,17,27,0.95),rgba(8,16,24,0.88))] p-5 shadow-[0_22px_52px_rgba(2,8,18,0.28)]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -7257,6 +8818,7 @@ export default function App() {
                   </div>
                 </div>
               </section>
+              )}
             </aside>
           </div>
         </div>
@@ -7766,7 +9328,7 @@ export default function App() {
                         <button
                           key={mode}
                           type="button"
-                          onClick={() => setSelectedTask({ ...selectedTask, execution_mode: mode })}
+                          onClick={() => setTaskExecutionMode([selectedTask.id], mode)}
                           className={cn(
                             "rounded-xl border px-3 py-2 text-xs font-bold transition-all",
                             (selectedTask.execution_mode || 'serial') === mode
@@ -8143,31 +9705,24 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Draggable Group: Cat & Floating Chat Window */}
-      <motion.div
-        drag
-        dragMomentum={false}
-        className="fixed bottom-6 right-6 z-[60] flex flex-col items-end gap-3"
-      >
+      <PointerParticles />
+
+      <div className="fixed bottom-5 right-5 z-[60] flex flex-col items-end gap-2.5">
         <AnimatePresence>
           {isBehaviorChatOpen && (
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10, originX: 1, originY: 1 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="flex h-[28rem] w-80 min-w-0 flex-col rounded-[1.4rem] border border-cyan-300/18 bg-[linear-gradient(180deg,rgba(10,16,28,0.96),rgba(6,12,22,0.88))] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.8)] cursor-auto"
-              onPointerDown={(e) => e.stopPropagation()}
+              className="behavior-chat-shell flex h-[33rem] w-[21rem] min-w-0 flex-col p-3 cursor-auto"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-cyan-100/65">行为聊天窗口</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-50/85">小猫助手</p>
                   <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
                     <MessageSquare className="h-4 w-4 text-cyan-300" />
-                    外部行为管理
+                    聊聊现在的状态
                   </h4>
-                  <p className="mt-1 text-[11px] leading-5 text-slate-400">
-                    直接说你刚做了什么，小猫把它换算成精力恢复和耗能修正。
-                  </p>
                 </div>
                 <button
                   type="button"
@@ -8178,9 +9733,9 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="mt-2 flex items-center justify-between text-[10px] text-cyan-100/70">
+              <div className="mt-2 flex items-center justify-between text-[11px] text-cyan-50/85">
                 <span className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1">{activeBehaviorEvents.length} 个当前效果</span>
-                <span className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1">耗能 {Math.round(behaviorBurnRateModifier * 100)}%</span>
+                <span className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1">精力 {todayInitialEnergy}</span>
               </div>
 
               <div className="mt-3 flex flex-wrap gap-1.5">
@@ -8189,28 +9744,25 @@ export default function App() {
                     key={`quick-behavior-${preset.id}`}
                     type="button"
                     onClick={() => submitBehaviorChat(`我${preset.label}了`)}
-                    className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.09]"
+                    className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] font-semibold text-slate-100 transition-colors hover:bg-white/[0.09]"
                   >
                     {preset.label}
                   </button>
                 ))}
               </div>
 
-              <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950/55">
-                <div className="border-b border-white/8 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  今日对话
-                </div>
+              <div className="behavior-dialog-panel mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950/55">
                 <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto px-3 py-3">
                   {todayChatMessages.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[11px] leading-5 text-slate-400">
-                      还没有记录。试试告诉小猫“我喝茶了”，系统会立刻把它转成精力。
+                    <div className="behavior-chat-empty rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[13px] leading-6 text-slate-200">
+                      还没有记录。试试输入“我喝茶了”，系统会立刻把它转成精力。
                     </div>
                   ) : (
                     todayChatMessages.map((message) => (
                       <div
                         key={message.id}
                         className={cn(
-                          "max-w-[92%] rounded-2xl px-3 py-2 text-[11px] leading-5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]",
+                          "behavior-message-bubble max-w-[92%] rounded-2xl px-3 py-2 text-[13px] leading-6 shadow-[0_8px_24px_rgba(0,0,0,0.16)]",
                           message.role === 'user'
                             ? 'ml-auto border border-cyan-300/20 bg-cyan-500/16 text-cyan-50'
                             : 'border border-white/10 bg-white/[0.04] text-slate-200'
@@ -8223,7 +9775,7 @@ export default function App() {
                 </div>
 
                 <div className="border-t border-white/8 px-3 py-3">
-                  <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                  <div className="behavior-dialog-input flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
                     <input
                       type="text"
                       value={behaviorChatInput}
@@ -8235,7 +9787,7 @@ export default function App() {
                         }
                       }}
                       placeholder={BEHAVIOR_CHAT_PLACEHOLDER}
-                      className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+                      className="min-w-0 flex-1 bg-transparent text-[14px] text-white outline-none placeholder:text-slate-400"
                     />
                     <button
                       type="button"
@@ -8252,14 +9804,32 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        <button
-          onClick={() => setIsBehaviorChatOpen((prev) => !prev)}
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-800 shadow-[0_4px_20px_rgba(30,41,59,0.8)] transition-transform hover:scale-105 active:scale-95 border-2 border-slate-600/50 cursor-grab active:cursor-grabbing self-end"
-          title="和猫咪说话"
-        >
-          <span className="text-3xl leading-none pointer-events-none">🐱</span>
-        </button>
-      </motion.div>
+        <AnimatePresence>
+          {!isBehaviorChatOpen && behaviorNudge && (
+            <motion.button
+              type="button"
+              initial={{ opacity: 0, y: 8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.96 }}
+              onClick={() => setIsBehaviorChatOpen(true)}
+              className="behavior-nudge self-end text-left"
+            >
+              <span className="behavior-nudge-label">小猫刚刚说</span>
+              <span className="behavior-nudge-text">{behaviorNudge}</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
+
+        {!isLive2dReady && (
+          <button
+            onClick={() => setIsBehaviorChatOpen((prev) => !prev)}
+            className="behavior-chat-trigger self-end"
+            title="打开行为助手"
+          >
+            <MessageSquare className="h-5 w-5" />
+          </button>
+        )}
+      </div>
         </>
       ) : currentView === 'world_news' ? (
         <WorldNewsView
@@ -8267,6 +9837,10 @@ export default function App() {
           setRssFeeds={setRssFeeds}
           newsItems={newsItems}
           setNewsItems={setNewsItems}
+          newsPreferences={newsPreferences}
+          setNewsPreferences={setNewsPreferences}
+          savedLinks={savedLinks}
+          setSavedLinks={setSavedLinks}
           abilityModule={abilityModule}
           spendSpecialReward={spendSpecialReward}
           authToken={authToken}
@@ -8376,10 +9950,9 @@ function TaskPoint({
         onMouseDown={handleMouseDown}
         onClick={(e) => {
           e.stopPropagation();
-        }}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          onOpen();
+          if (!isDragging) {
+            onOpen();
+          }
         }}
         className={cn(
           "relative group cursor-grab active:cursor-grabbing p-4",
@@ -8389,67 +9962,51 @@ function TaskPoint({
         {/* Progress Ring / Circle Backdrop */}
         <div
           className={cn(
-            "task-point-shell w-8 h-8 rounded-2xl flex items-center justify-center overflow-hidden relative transition-all duration-300 border shadow-[0_4px_20px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_20px_rgba(20,184,166,0.3)]",
+            "task-point-shell task-point-shell-simple w-11 h-11 rounded-full overflow-hidden relative transition-all duration-300 border",
             timelineAccent.ring
           )}
           data-zone={quadrantZone}
           style={{
             ['--task-point-zone' as string]: quadrantMeta.tint,
             ['--task-point-zone-strong' as string]: quadrantMeta.strong,
+            ['--task-point-progress' as string]: `${Math.max(8, progress)}%`,
+            ['--task-point-node' as string]: nodeColor,
           } as React.CSSProperties}
         >
-          <div
-            className="absolute bottom-0 left-0 right-0 transition-all duration-700"
-            style={{
-              height: `${progress}%`,
-              background: `linear-gradient(to top, ${nodeColor}70, ${nodeColor}25)`,
-            }}
-          />
-          {/* Core dot */}
-          <div
-            className={cn(
-              "h-2.5 w-2.5 rounded-full transition-all duration-500 shadow-[0_0_10px_currentColor]",
-              progress === 100 && "scale-125"
-            )}
-            style={{ color: nodeColor, backgroundColor: nodeColor }}
-          />
-          <div
-            className={cn(
-              "absolute h-2.5 w-2.5 rounded-full transition-all duration-500 shadow-[0_0_12px_currentColor]",
-              progress === 100 ? "scale-125" : "group-hover:scale-110"
-            )}
-            style={{ color: nodeColor, backgroundColor: nodeColor }}
-          />
+          <div className="task-point-progress-donut" />
+          <div className="task-point-inner">
+            <div className="task-point-core-dot" style={{ backgroundColor: nodeColor }} />
+          </div>
+          <div className="task-point-glow" />
         </div>
 
         {/* Always-visible label */}
         <div className={cn("absolute pointer-events-none", labelPositionClass)}>
           <div
-            className="task-point-label rounded-xl border px-2 py-1 shadow-xl"
+            className="task-point-label rounded-[1rem] border px-2.5 py-2 shadow-xl"
             data-zone={quadrantZone}
             style={{
               ['--task-point-zone' as string]: quadrantMeta.tint,
               ['--task-point-zone-strong' as string]: quadrantMeta.strong,
             } as React.CSSProperties}
           >
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-start gap-2">
+              <span className="task-point-dot mt-1 shrink-0" style={{ backgroundColor: nodeColor }} />
               <span className="task-point-title line-clamp-2 text-[11px] font-semibold leading-4">{task.title || '未命名'}</span>
+            </div>
+            <div className="mt-1.5 flex items-center gap-1">
               <span className="task-point-zone-badge">{quadrantMeta.badge}</span>
-              <span className={cn("rounded border px-1 py-0 text-[9px] font-bold", timelineAccent.badge)}>
+              <span className={cn("rounded border px-1.5 py-0.5 text-[9px] font-bold", timelineAccent.badge)}>
                 {task.timeline === 'long_term' ? '长' : '临'}
               </span>
-            </div>
-            <div className="task-point-meta mt-0.5 flex items-center gap-2 text-[9px]">
-              <span>重:{importance}</span>
-              <span>急:{urgency}</span>
-              <span>{Math.round(progress)}%</span>
+              <span className="task-point-mini-score">{importance}/{urgency}</span>
             </div>
             {task.timeline === 'temporary' && task.deadline_at && (
               <div className={cn(
-                "mt-1 rounded border px-1 py-0.5 text-[9px] font-bold",
+                "mt-1.5 rounded border px-1.5 py-0.5 text-[9px] font-bold",
                 task.deadline_at <= nowTs
-                  ? "border-rose-400/60 bg-rose-500/30 text-rose-100"
-                  : "border-amber-400/60 bg-amber-500/30 text-amber-100"
+                  ? "border-[#FFBABA]/80 bg-[#FFBABA]/35 text-[#355244]"
+                  : "border-[#F7C5A8]/80 bg-[#F7C5A8]/30 text-[#355244]"
               )}>
                 {getCountdownText(task.deadline_at, nowTs)}
               </div>

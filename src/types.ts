@@ -174,6 +174,19 @@ export interface IdeaNote {
   updated_at: number;
 }
 
+export interface NewsPreferences {
+  ignored_terms: string[];
+  updated_at: number;
+}
+
+export interface SavedLink {
+  id: string;
+  title: string;
+  url: string;
+  pinned: boolean;
+  created_at: number;
+}
+
 export interface UserTaskData {
   tasks: Task[];
   ability_dimensions: string[];
@@ -185,6 +198,8 @@ export interface UserTaskData {
   rss_feeds?: RSSFeed[];
   news_items?: NewsItem[];
   idea_notes?: IdeaNote[];
+  news_preferences?: NewsPreferences;
+  saved_links?: SavedLink[];
 }
 
 export interface AuthResult {

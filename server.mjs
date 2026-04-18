@@ -78,6 +78,41 @@ const RSS_SCOUT_SYSTEM_PROMPT = `你是一位资深 RSS 订阅策展助手。请
 3. 优先选择长期稳定、更新频率合理、信息质量高的源。
 4. 如果 URL 把握不足，就不要编造。
 5. summary 和 reason 使用中文。`;
+const WORLD_NEWS_INSIGHT_SYSTEM_PROMPT = `你是一位帮助用户管理注意力的世界消息分析助手。请严格返回 JSON，不要有任何额外文字。
+返回结构:
+{
+  "summary": "一句中文总结当前消息面",
+  "worth_reading": [
+    {
+      "id": "news-1",
+      "reason": "为什么现在值得看"
+    }
+  ],
+  "skip_summary": "对暂时不值得看的内容做归纳总结",
+  "ideas": ["从这些消息里延伸出的想法 1", "想法 2"],
+  "next_actions": ["可以转成行动的下一步 1", "下一步 2"]
+}
+要求:
+1. worth_reading 最多返回 3 条，只能从用户提供的候选 id 中选择。
+2. 如果确实没有值得现在看的内容，worth_reading 返回空数组。
+3. skip_summary 要说明“不推荐现在看”的共性，不要只是复述标题。
+4. ideas 要更像自己的判断、联想、假设或研究/开发角度，不要空话。
+5. next_actions 要短、明确、可执行。
+6. 所有输出使用中文，不要编造原文没有提供的事实。`;
+const FOCUS_CHECKIN_SYSTEM_PROMPT = `你是一位每小时做一次工作校准的执行教练。请严格返回 JSON，不要有任何额外文字。
+返回结构:
+{
+  "summary": "一句话提醒",
+  "suggested_action": "continue 或 rest 或 pause",
+  "reason": "为什么这样建议",
+  "reply_prompt": "要求用户做出继续/休息/暂停的选择"
+}
+要求:
+1. 优先帮助用户减少疲劳和切换成本。
+2. 如果已经连续高压推进、精力偏低或并行过多，可以明确建议休息。
+3. 如果当前节奏稳定，也可以建议继续，但理由要具体。
+4. reply_prompt 要简短直接，明确要求用户回应。
+5. 所有输出使用中文。`;
 const DAY_PLAN_SYSTEM_PROMPT = `你是一位擅长把自然语言整理成当日行动安排的执行教练。请严格返回 JSON，不要有任何额外文字。
 返回结构:
 {
@@ -450,6 +485,80 @@ function buildRssScoutPrompt({ topic, guidance }) {
 请按要求返回。`;
 }
 
+function buildWorldNewsInsightPrompt({ focus, tasks, focusCandidates, otherCandidates }) {
+  const focusSummary = String(focus || '').trim() || '今天的主线暂未设置';
+  const taskSummary = Array.isArray(tasks) && tasks.length > 0
+    ? tasks
+        .slice(0, 8)
+        .map((task, index) => `${index + 1}. ${task.title || '未命名任务'}｜${task.status || 'pending'}｜${task.category_key || 'misc'}`)
+        .join('\n')
+    : '当前没有明确的任务列表。';
+  const focusList = Array.isArray(focusCandidates) && focusCandidates.length > 0
+    ? focusCandidates
+        .slice(0, 6)
+        .map((item, index) => `${index + 1}. [${item.id}] ${item.title}\n来源：${item.source_title || '未知来源'}\n摘要：${item.content || '无摘要'}`)
+        .join('\n\n')
+    : '当前本地规则没有筛出“值得现在看”的消息。';
+  const otherList = Array.isArray(otherCandidates) && otherCandidates.length > 0
+    ? otherCandidates
+        .slice(0, 12)
+        .map((item, index) => `${index + 1}. [${item.id}] ${item.title}\n来源：${item.source_title || '未知来源'}\n标签：${Array.isArray(item.tags) && item.tags.length > 0 ? item.tags.join(' / ') : '无'}\n摘要：${item.content || '无摘要'}`)
+        .join('\n\n')
+    : '当前没有其他候选消息。';
+  return `请结合用户当前主线和任务，判断这些世界消息里哪些值得现在看，哪些适合先跳过。
+
+当前主线：
+${focusSummary}
+
+任务列表：
+${taskSummary}
+
+本地规则已经判定为“值得现在看”的消息：
+${focusList}
+
+其余候选消息（包括稍后处理和先忽略）：
+${otherList}
+
+请重点做三件事：
+1. 如果本地规则漏掉了真正值得看的内容，从其余候选里捞出来；
+2. 把不值得现在看的内容压缩成高密度总结；
+3. 给出你自己的想法和下一步建议。`;
+}
+
+function buildFocusCheckinPrompt({ primaryTask, runningTasks, energyScore, pressureScore, sleepHours, selfRating }) {
+  const primarySummary = primaryTask
+    ? [
+        `主任务：${primaryTask.title || '未命名任务'}`,
+        `下一步：${primaryTask.next_action || '未提供'}`,
+        `认知负荷：${primaryTask.cognitive_load || 'low'}`,
+        `协作强度：${primaryTask.collaboration_level || 'low'}`,
+        `执行方式：${primaryTask.execution_mode || 'serial'}`,
+        `本轮已连续计时：${primaryTask.current_session_minutes || 0} 分钟`,
+      ].join('\n')
+    : '当前没有明确主任务。';
+  const runningSummary = Array.isArray(runningTasks) && runningTasks.length > 0
+    ? runningTasks
+        .slice(0, 4)
+        .map((task, index) => `${index + 1}. ${task.title || '未命名任务'}｜${task.execution_mode || 'serial'}｜${task.current_session_minutes || 0} 分钟`)
+        .join('\n')
+    : '当前没有正在计时的任务。';
+  return `请对这位用户做一次整点工作校准，帮助他判断是继续、休息还是暂停。
+
+主任务信息：
+${primarySummary}
+
+当前正在计时的任务：
+${runningSummary}
+
+当前状态：
+- 精力：${Number.isFinite(Number(energyScore)) ? Number(energyScore) : 60}
+- 压力：${Number.isFinite(Number(pressureScore)) ? Number(pressureScore) : 50}
+- 睡眠：${Number.isFinite(Number(sleepHours)) ? Number(sleepHours) : 7} 小时
+- 自评：${Number.isFinite(Number(selfRating)) ? Number(selfRating) : 3}/5
+
+请给出一句提醒、一条明确建议、简短原因，并要求用户回复。`;
+}
+
 function extractJsonText(raw) {
   const trimmed = String(raw || '').trim();
   const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
@@ -549,6 +658,47 @@ function parseRssScoutPayload(raw) {
           .filter((feed) => feed.name && feed.url && isValidHttpUrl(feed.url))
           .slice(0, 6)
       : [],
+  };
+}
+
+function parseWorldNewsInsightPayload(raw) {
+  const jsonText = extractJsonText(raw);
+  const parsed = JSON.parse(jsonText);
+  return {
+    summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
+    worth_reading: Array.isArray(parsed.worth_reading)
+      ? parsed.worth_reading
+          .filter((item) => item && typeof item === 'object')
+          .map((item) => ({
+            id: typeof item.id === 'string' ? item.id.trim() : '',
+            reason: typeof item.reason === 'string' ? item.reason.trim() : '',
+          }))
+          .filter((item) => item.id)
+          .slice(0, 3)
+      : [],
+    skip_summary: typeof parsed.skip_summary === 'string' ? parsed.skip_summary.trim() : '',
+    ideas: Array.isArray(parsed.ideas)
+      ? parsed.ideas.filter((item) => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()).slice(0, 4)
+      : [],
+    next_actions: Array.isArray(parsed.next_actions)
+      ? parsed.next_actions.filter((item) => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()).slice(0, 4)
+      : [],
+  };
+}
+
+function parseFocusCheckinPayload(raw) {
+  const jsonText = extractJsonText(raw);
+  const parsed = JSON.parse(jsonText);
+  const suggestedAction = parsed.suggested_action === 'rest'
+    ? 'rest'
+    : parsed.suggested_action === 'pause'
+      ? 'pause'
+      : 'continue';
+  return {
+    summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
+    suggested_action: suggestedAction,
+    reason: typeof parsed.reason === 'string' ? parsed.reason.trim() : '',
+    reply_prompt: typeof parsed.reply_prompt === 'string' ? parsed.reply_prompt.trim() : '',
   };
 }
 
@@ -1358,6 +1508,148 @@ async function requestAIRssScout(params) {
   return requestRssScoutByGemini(params);
 }
 
+async function requestWorldNewsInsightByChatCompletions(params) {
+  const response = await fetch(`${AI_API_BASE}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: WORLD_NEWS_INSIGHT_SYSTEM_PROMPT },
+        { role: 'user', content: buildWorldNewsInsightPrompt(params) },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await parseErrorResponse(response);
+    throw new Error(`chat completions failed: ${response.status}${details ? ` ${details}` : ''}`);
+  }
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('chat completions returned empty content');
+  }
+  return parseWorldNewsInsightPayload(content);
+}
+
+async function requestWorldNewsInsightByGemini(params) {
+  const response = await fetch(`${AI_API_BASE}/v1beta/models/${AI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+      'x-goog-api-key': AI_API_KEY,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `${WORLD_NEWS_INSIGHT_SYSTEM_PROMPT}\n\n${buildWorldNewsInsightPrompt(params)}` }] }],
+      generationConfig: {
+        temperature: 0.3,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await parseErrorResponse(response);
+    throw new Error(`generateContent failed: ${response.status}${details ? ` ${details}` : ''}`);
+  }
+  const data = await response.json();
+  const content = data?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('\n');
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('generateContent returned empty content');
+  }
+  return parseWorldNewsInsightPayload(content);
+}
+
+async function requestAIWorldNewsInsight(params) {
+  if (!AI_API_KEY) {
+    throw new Error('服务器未配置 AI_API_KEY');
+  }
+  if (shouldUseOpenAICompat()) {
+    return requestWorldNewsInsightByChatCompletions(params);
+  }
+  return requestWorldNewsInsightByGemini(params);
+}
+
+async function requestFocusCheckinByChatCompletions(params) {
+  const response = await fetch(`${AI_API_BASE}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      temperature: 0.25,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: FOCUS_CHECKIN_SYSTEM_PROMPT },
+        { role: 'user', content: buildFocusCheckinPrompt(params) },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await parseErrorResponse(response);
+    throw new Error(`chat completions failed: ${response.status}${details ? ` ${details}` : ''}`);
+  }
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('chat completions returned empty content');
+  }
+  return parseFocusCheckinPayload(content);
+}
+
+async function requestFocusCheckinByGemini(params) {
+  const response = await fetch(`${AI_API_BASE}/v1beta/models/${AI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+      'x-goog-api-key': AI_API_KEY,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `${FOCUS_CHECKIN_SYSTEM_PROMPT}\n\n${buildFocusCheckinPrompt(params)}` }] }],
+      generationConfig: {
+        temperature: 0.25,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await parseErrorResponse(response);
+    throw new Error(`generateContent failed: ${response.status}${details ? ` ${details}` : ''}`);
+  }
+  const data = await response.json();
+  const content = data?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('\n');
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('generateContent returned empty content');
+  }
+  return parseFocusCheckinPayload(content);
+}
+
+async function requestAIFocusCheckin(params) {
+  if (!AI_API_KEY) {
+    throw new Error('服务器未配置 AI_API_KEY');
+  }
+  if (shouldUseOpenAICompat()) {
+    return requestFocusCheckinByChatCompletions(params);
+  }
+  return requestFocusCheckinByGemini(params);
+}
+
 async function fetchTrendRadarLiveSnapshot({ limit = 60, platforms: rawPlatforms = '' } = {}) {
   const allPlatforms = await loadTrendRadarPlatforms();
   const targetPlatforms = filterTrendRadarPlatforms(allPlatforms, rawPlatforms);
@@ -1823,6 +2115,62 @@ app.post('/api/ai/rss-scout', requireAuth, async (req, res) => {
     }
 
     const result = await requestAIRssScout({ topic, guidance });
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'AI 生成失败';
+    const status = message.includes('AI_API_KEY') ? 503 : 502;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/ai/world-news-insight', requireAuth, async (req, res) => {
+  try {
+    const focus = typeof req.body?.focus === 'string' ? req.body.focus.trim() : '';
+    const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
+    const focusCandidates = Array.isArray(req.body?.focusCandidates) ? req.body.focusCandidates : [];
+    const otherCandidates = Array.isArray(req.body?.otherCandidates) ? req.body.otherCandidates : [];
+
+    if (focusCandidates.length === 0 && otherCandidates.length === 0) {
+      res.status(400).json({ error: '没有可分析的消息' });
+      return;
+    }
+
+    const result = await requestAIWorldNewsInsight({
+      focus,
+      tasks,
+      focusCandidates,
+      otherCandidates,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'AI 生成失败';
+    const status = message.includes('AI_API_KEY') ? 503 : 502;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/ai/focus-checkin', requireAuth, async (req, res) => {
+  try {
+    const primaryTask = req.body?.primaryTask && typeof req.body.primaryTask === 'object' ? req.body.primaryTask : null;
+    const runningTasks = Array.isArray(req.body?.runningTasks) ? req.body.runningTasks : [];
+    const energyScore = Number(req.body?.energyScore);
+    const pressureScore = Number(req.body?.pressureScore);
+    const sleepHours = Number(req.body?.sleepHours);
+    const selfRating = Number(req.body?.selfRating);
+
+    if (!primaryTask && runningTasks.length === 0) {
+      res.status(400).json({ error: '没有可校准的执行任务' });
+      return;
+    }
+
+    const result = await requestAIFocusCheckin({
+      primaryTask,
+      runningTasks,
+      energyScore: Number.isFinite(energyScore) ? energyScore : 60,
+      pressureScore: Number.isFinite(pressureScore) ? pressureScore : 50,
+      sleepHours: Number.isFinite(sleepHours) ? sleepHours : 7,
+      selfRating: Number.isFinite(selfRating) ? selfRating : 3,
+    });
     res.status(200).json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'AI 生成失败';
