@@ -94,6 +94,7 @@ import {
 
 type AppTheme = 'night' | 'day' | 'stardew' | 'starlit';
 type TaskSizeBucket = 'big' | 'medium' | 'small';
+type Live2dModelId = 'fox' | 'classic';
 type Live2dActionId =
   | 'heart'
   | 'star'
@@ -121,11 +122,43 @@ const THEME_OPTIONS: { id: AppTheme; label: string; shortLabel: string }[] = [
   { id: 'starlit', label: '静谧星空', shortLabel: '星' },
 ];
 
-const LIVE2D_APPLE_FOX_MODEL_PATH = encodeURI('/live2d/苹果小狐狸/苹果小狐狸.model3.json');
-const LIVE2D_MODEL_SCALE = 0.95;
-const LIVE2D_MODEL_WIDTH = 311;
-const LIVE2D_MODEL_HEIGHT = 311;
-const LIVE2D_MODEL_POSITION = { x: -8, y: 10 };
+type Live2dModelConfig = {
+  id: Live2dModelId;
+  label: string;
+  description: string;
+  path: string;
+  scale: number;
+  width: number;
+  height: number;
+  position: {
+    x: number;
+    y: number;
+  };
+};
+
+const LIVE2D_MODEL_OPTIONS: Live2dModelConfig[] = [
+  {
+    id: 'fox',
+    label: '桃心狐狸',
+    description: '当前本地模型，动作和表情更完整。',
+    path: encodeURI('/live2d/苹果小狐狸/苹果小狐狸.model3.json'),
+    scale: 0.95,
+    width: 311,
+    height: 311,
+    position: { x: -8, y: 10 },
+  },
+  {
+    id: 'classic',
+    label: '经典 2D',
+    description: '保留原来的 yiselin 模型，适合轻量陪伴。',
+    path: 'https://fastly.jsdelivr.net/gh/Eikanya/Live2d-model/%E5%B4%A9%E5%9D%8F%E5%AD%A6%E5%9B%AD2/yiselin/model.json',
+    scale: 0.72,
+    width: 220,
+    height: 340,
+    position: { x: -22, y: 4 },
+  },
+];
+
 const LIVE2D_WIDGET_OFFSET_RIGHT = 12;
 const LIVE2D_WIDGET_OFFSET_BOTTOM = 12;
 const LIVE2D_BOOT_DELAY_MS = 1200;
@@ -327,6 +360,7 @@ const AUTH_TOKEN_KEY = 'dayplan_auth_token';
 const THEME_STORAGE_KEY = 'dayplan_theme';
 const AMBIENT_AUDIO_STORAGE_KEY = 'dayplan_ambient_audio';
 const PRIMARY_TASK_STORAGE_KEY = 'dayplan_primary_task_id';
+const LIVE2D_MODEL_STORAGE_KEY = 'dayplan_live2d_model';
 const DEFAULT_INITIAL_ENERGY = 72;
 const REST_RECOVERY_PER_HOUR = 6;
 const MOTIVATION_SETTLE_INTERVAL_MS = 5000;
@@ -4863,6 +4897,13 @@ export default function App() {
     if (typeof window === 'undefined') return '';
     return window.localStorage.getItem(PRIMARY_TASK_STORAGE_KEY) || '';
   });
+  const [selectedLive2dModelId, setSelectedLive2dModelId] = useState<Live2dModelId>(() => {
+    if (typeof window === 'undefined') return 'fox';
+    const savedModelId = window.localStorage.getItem(LIVE2D_MODEL_STORAGE_KEY);
+    return LIVE2D_MODEL_OPTIONS.some((option) => option.id === savedModelId)
+      ? (savedModelId as Live2dModelId)
+      : 'fox';
+  });
   const [focusReminderSettings, setFocusReminderSettings] = useState<FocusReminderSettings>(createDefaultFocusReminderSettings());
   const [rssFeeds, setRssFeeds] = useState<RSSFeed[]>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
@@ -4875,7 +4916,9 @@ export default function App() {
   const [behaviorChatError, setBehaviorChatError] = useState('');
   const [isBehaviorChatSending, setIsBehaviorChatSending] = useState(false);
   const [behaviorNudge, setBehaviorNudge] = useState('');
-  const [live2dUiAnchor, setLive2dUiAnchor] = useState({ right: 20, top: 120, height: LIVE2D_MODEL_HEIGHT });
+  const activeLive2dModel =
+    LIVE2D_MODEL_OPTIONS.find((option) => option.id === selectedLive2dModelId) || LIVE2D_MODEL_OPTIONS[0];
+  const [live2dUiAnchor, setLive2dUiAnchor] = useState({ right: 20, top: 120, height: activeLive2dModel.height });
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
@@ -5060,6 +5103,11 @@ export default function App() {
   }, [homeSurface]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(LIVE2D_MODEL_STORAGE_KEY, selectedLive2dModelId);
+  }, [selectedLive2dModelId]);
+
+  useEffect(() => {
     if (typeof window === 'undefined' || !authToken) return;
     const timer = window.setTimeout(() => {
       setShouldBootLive2d(true);
@@ -5122,8 +5170,8 @@ export default function App() {
       if (!container) return false;
 
       container.style.cursor = 'grab';
-      container.style.width = `${LIVE2D_MODEL_WIDTH}px`;
-      container.style.height = `${LIVE2D_MODEL_HEIGHT}px`;
+      container.style.width = `${activeLive2dModel.width}px`;
+      container.style.height = `${activeLive2dModel.height}px`;
       container.style.left = 'auto';
       container.style.right = `${LIVE2D_WIDGET_OFFSET_RIGHT}px`;
       container.style.bottom = `${LIVE2D_WIDGET_OFFSET_BOTTOM}px`;
@@ -5161,8 +5209,8 @@ export default function App() {
       const canvas = container.querySelector('canvas') as HTMLCanvasElement | null;
       if (canvas) {
         canvas.style.cursor = 'grab';
-        canvas.style.width = `${LIVE2D_MODEL_WIDTH}px`;
-        canvas.style.height = `${LIVE2D_MODEL_HEIGHT}px`;
+        canvas.style.width = `${activeLive2dModel.width}px`;
+        canvas.style.height = `${activeLive2dModel.height}px`;
       }
 
       setIsLive2dReady(true);
@@ -5187,15 +5235,15 @@ export default function App() {
           menus: [],
           models: [
             new DModel({
-              path: LIVE2D_APPLE_FOX_MODEL_PATH,
+              path: activeLive2dModel.path,
               volume: 0.5,
-              scale: LIVE2D_MODEL_SCALE,
+              scale: activeLive2dModel.scale,
               rotate: 0,
               backgroundColor: 'transparent',
-              width: LIVE2D_MODEL_WIDTH,
-              height: LIVE2D_MODEL_HEIGHT,
+              width: activeLive2dModel.width,
+              height: activeLive2dModel.height,
               motionPreload: null,
-              position: LIVE2D_MODEL_POSITION,
+              position: activeLive2dModel.position,
             }),
           ],
           tips: new DTips({
@@ -5265,7 +5313,7 @@ export default function App() {
       live2dControllerRef.current = null;
       live2dModelRef.current = null;
     };
-  }, [authToken, shouldBootLive2d]);
+  }, [authToken, shouldBootLive2d, activeLive2dModel]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -7897,6 +7945,36 @@ export default function App() {
                       <h3 className="settings-card-title">预设主题</h3>
                       <div className="mt-4">
                         {renderThemeSwitcher('full')}
+                      </div>
+                    </section>
+
+                    <section className="settings-card">
+                      <p className="settings-card-kicker">Live2D</p>
+                      <h3 className="settings-card-title">看板模型</h3>
+                      <div className="mt-4 grid gap-3">
+                        {LIVE2D_MODEL_OPTIONS.map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setSelectedLive2dModelId(option.id)}
+                            className={cn(
+                              "rounded-2xl border px-4 py-3 text-left transition-colors",
+                              selectedLive2dModelId === option.id
+                                ? "border-[color:rgba(103,138,116,0.42)] bg-[color:rgba(103,138,116,0.14)]"
+                                : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-sm font-semibold text-[color:var(--text-strong)]">{option.label}</span>
+                              {selectedLive2dModelId === option.id && (
+                                <span className="rounded-full border border-[color:rgba(103,138,116,0.35)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--text-strong)]">
+                                  当前
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-2 text-xs leading-5 text-[color:var(--text-secondary)]">{option.description}</p>
+                          </button>
+                        ))}
                       </div>
                     </section>
 
