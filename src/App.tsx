@@ -128,8 +128,10 @@ type Live2dModelConfig = {
   description: string;
   path: string;
   scale: number;
-  width: number;
-  height: number;
+  width?: number;
+  height?: number;
+  frameWidth?: number;
+  frameHeight?: number;
   position: {
     x: number;
     y: number;
@@ -145,6 +147,8 @@ const LIVE2D_MODEL_OPTIONS: Live2dModelConfig[] = [
     scale: 0.95,
     width: 311,
     height: 311,
+    frameWidth: 311,
+    frameHeight: 311,
     position: { x: -8, y: 10 },
   },
   {
@@ -152,9 +156,9 @@ const LIVE2D_MODEL_OPTIONS: Live2dModelConfig[] = [
     label: '经典 2D',
     description: '保留原来的 yiselin 模型，适合轻量陪伴。',
     path: 'https://fastly.jsdelivr.net/gh/Eikanya/Live2d-model/%E5%B4%A9%E5%9D%8F%E5%AD%A6%E5%9B%AD2/yiselin/model.json',
-    scale: 0.72,
-    width: 220,
-    height: 340,
+    scale: 0.69,
+    frameWidth: 300,
+    frameHeight: 420,
     position: { x: -22, y: 4 },
   },
 ];
@@ -4918,7 +4922,11 @@ export default function App() {
   const [behaviorNudge, setBehaviorNudge] = useState('');
   const activeLive2dModel =
     LIVE2D_MODEL_OPTIONS.find((option) => option.id === selectedLive2dModelId) || LIVE2D_MODEL_OPTIONS[0];
-  const [live2dUiAnchor, setLive2dUiAnchor] = useState({ right: 20, top: 120, height: activeLive2dModel.height });
+  const [live2dUiAnchor, setLive2dUiAnchor] = useState({
+    right: 20,
+    top: 120,
+    height: activeLive2dModel.frameHeight || activeLive2dModel.height || 320,
+  });
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
@@ -5168,10 +5176,17 @@ export default function App() {
     const bindWidgetClick = () => {
       const container = document.querySelector('.live2d-wrapper') as HTMLElement | null;
       if (!container) return false;
+      const frameWidth = activeLive2dModel.frameWidth || activeLive2dModel.width;
+      const frameHeight = activeLive2dModel.frameHeight || activeLive2dModel.height;
 
       container.style.cursor = 'grab';
-      container.style.width = `${activeLive2dModel.width}px`;
-      container.style.height = `${activeLive2dModel.height}px`;
+      if (typeof frameWidth === 'number' && typeof frameHeight === 'number') {
+        container.style.width = `${frameWidth}px`;
+        container.style.height = `${frameHeight}px`;
+      } else {
+        container.style.removeProperty('width');
+        container.style.removeProperty('height');
+      }
       container.style.left = 'auto';
       container.style.right = `${LIVE2D_WIDGET_OFFSET_RIGHT}px`;
       container.style.bottom = `${LIVE2D_WIDGET_OFFSET_BOTTOM}px`;
@@ -5209,8 +5224,13 @@ export default function App() {
       const canvas = container.querySelector('canvas') as HTMLCanvasElement | null;
       if (canvas) {
         canvas.style.cursor = 'grab';
-        canvas.style.width = `${activeLive2dModel.width}px`;
-        canvas.style.height = `${activeLive2dModel.height}px`;
+        if (typeof frameWidth === 'number' && typeof frameHeight === 'number') {
+          canvas.style.width = `${frameWidth}px`;
+          canvas.style.height = `${frameHeight}px`;
+        } else {
+          canvas.style.removeProperty('width');
+          canvas.style.removeProperty('height');
+        }
       }
 
       setIsLive2dReady(true);
@@ -5221,6 +5241,32 @@ export default function App() {
       try {
         const { DLive2dOptions, DModel, DTips, wlLive2d } = await import('wl-live2d');
         if (disposed) return;
+        const modelOptions: {
+          path: string;
+          volume: number;
+          scale: number;
+          rotate: number;
+          backgroundColor: string;
+          motionPreload: null;
+          position: { x: number; y: number };
+          width?: number;
+          height?: number;
+        } = {
+          path: activeLive2dModel.path,
+          volume: 0.5,
+          scale: activeLive2dModel.scale,
+          rotate: 0,
+          backgroundColor: 'transparent',
+          motionPreload: null,
+          position: activeLive2dModel.position,
+        };
+
+        if (typeof activeLive2dModel.width === 'number') {
+          modelOptions.width = activeLive2dModel.width;
+        }
+        if (typeof activeLive2dModel.height === 'number') {
+          modelOptions.height = activeLive2dModel.height;
+        }
 
         const controller = wlLive2d(new DLive2dOptions({
           sayHello: false,
@@ -5234,17 +5280,7 @@ export default function App() {
           hitFrame: false,
           menus: [],
           models: [
-            new DModel({
-              path: activeLive2dModel.path,
-              volume: 0.5,
-              scale: activeLive2dModel.scale,
-              rotate: 0,
-              backgroundColor: 'transparent',
-              width: activeLive2dModel.width,
-              height: activeLive2dModel.height,
-              motionPreload: null,
-              position: activeLive2dModel.position,
-            }),
+            new DModel(modelOptions as any),
           ],
           tips: new DTips({
             minWidth: 180,
@@ -7427,7 +7463,6 @@ export default function App() {
     const isDragged = draggedLineTaskId === task.id;
     const isDragTarget = dragOverLineTaskId === task.id && draggedLineTaskId !== task.id;
     const dragZone = isDragTarget ? dragOverLineZone : null;
-    const nextActionText = getTaskNextActionText(task);
     return (
       <div
         key={`line-${task.id}`}
@@ -7464,7 +7499,7 @@ export default function App() {
           dragZone === 'before' && "task-line-shell-drop-before",
           dragZone === 'after' && "task-line-shell-drop-after",
           dragZone === 'overlap' && "task-line-shell-drop-overlap",
-          compactParallel ? "flex h-full min-h-[176px] flex-col" : "flex items-center gap-3"
+          compactParallel ? "flex h-full min-h-[98px] flex-col" : "flex items-center gap-3"
         )}
       >
         {dragZone && (
@@ -7474,94 +7509,61 @@ export default function App() {
         )}
         {compactParallel ? (
           <>
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex min-w-0 items-start gap-2">
-                <div className="task-line-drag-handle shrink-0 pt-0.5 text-slate-500">
-                  <GripVertical className="h-4 w-4" />
-                </div>
-                <div
-                  className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
-                  style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
-                />
-                <div className="min-w-0">
+            <div className="flex min-w-0 items-start gap-2">
+              <div className="task-line-drag-handle shrink-0 pt-0.5 text-slate-500">
+                <GripVertical className="h-4 w-4" />
+              </div>
+              <div
+                className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
+                style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTask(task)}
+                      className={cn(
+                        "block w-full text-left font-semibold leading-5 text-white transition-colors hover:text-indigo-200 break-words text-safe-wrap",
+                        tripleParallel ? "line-clamp-2 text-[13px]" : "line-clamp-2 text-sm"
+                      )}
+                    >
+                      {task.title || '未命名任务'}
+                    </button>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-400">
+                      <span>{getTaskCategoryLabel(task.category_key || 'misc')}</span>
+                      <span>{task.estimated_minutes}m</span>
+                      <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
+                    </div>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setSelectedTask(task)}
-                  className={cn(
-                      "text-left font-semibold leading-5 text-white transition-colors hover:text-indigo-200 break-words text-safe-wrap",
-                      tripleParallel ? "line-clamp-2 text-[13px]" : "line-clamp-2 text-sm"
+                    onClick={() => toggleTaskTracking(task)}
+                    disabled={!ready}
+                    className={cn(
+                      "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                      ready
+                        ? task.tracking_started_at
+                          ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                          : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
+                        : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
                     )}
                   >
-                    {task.title || '未命名任务'}
+                    {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                    <TaskRuntimeLabel task={task} mode="button" />
                   </button>
-                  <p className="mt-1 text-[10px] font-semibold text-slate-400">
-                    {getTaskCategoryLabel(task.category_key || 'misc')}
-                  </p>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                  {!dualParallel && (
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">
+                      {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+                    </span>
+                  )}
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">
+                    {getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h
+                  </span>
                 </div>
               </div>
-              <span className={cn(
-                "shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold",
-                ready
-                  ? "border-emerald-300/25 bg-emerald-500/12 text-emerald-100"
-                  : "border-white/10 bg-white/[0.04] text-slate-300"
-              )}>
-                <TaskRuntimeLabel task={task} mode="line" />
-              </span>
-            </div>
-
-            <div className="mt-3 min-h-[3.25rem]">
-              <p className={cn(
-                "break-words text-safe-wrap text-slate-300",
-                tripleParallel ? "line-clamp-2 text-[11px] leading-5" : "line-clamp-3 text-[12px] leading-5"
-              )}>
-                {nextActionText}
-              </p>
-            </div>
-
-            <div className={cn(
-              "mt-3 grid gap-2",
-              dualParallel ? "grid-cols-2" : tripleParallel ? "grid-cols-1" : "grid-cols-3"
-            )}>
-              <div className="task-metric-chip rounded-xl px-2.5 py-2">
-                <div className="task-metric-chip-label text-[10px]">预计</div>
-                <div className="task-metric-chip-value mt-1 text-[11px] font-semibold">{task.estimated_minutes}m</div>
-              </div>
-              <div className="task-metric-chip rounded-xl px-2.5 py-2">
-                <div className="task-metric-chip-label text-[10px]">负荷</div>
-                <div className="task-metric-chip-value mt-1 text-[11px] font-semibold">{getCognitiveLoadLabel(task.cognitive_load || 'low')}</div>
-              </div>
-              {!dualParallel && !tripleParallel && (
-                <div className="task-metric-chip rounded-xl px-2.5 py-2">
-                  <div className="task-metric-chip-label text-[10px]">协作</div>
-                  <div className="task-metric-chip-value mt-1 text-[11px] font-semibold">{getCollaborationLevelLabel(task.collaboration_level || 'low')}</div>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedTask(task)}
-                className="flex-1 rounded-full border border-white/12 px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/8 hover:text-white"
-              >
-                查看
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleTaskTracking(task)}
-                disabled={!ready}
-                className={cn(
-                  "inline-flex flex-1 items-center justify-center gap-1 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors",
-                  ready
-                    ? task.tracking_started_at
-                      ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
-                      : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
-                    : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
-                )}
-              >
-                {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                {task.tracking_started_at ? '暂停' : '开始'}
-              </button>
             </div>
           </>
         ) : (
@@ -7585,12 +7587,11 @@ export default function App() {
                   {task.title || '未命名任务'}
                 </button>
               </div>
-              <p className="mt-1 line-clamp-1 text-[11px] leading-5 text-slate-400 text-safe-wrap">
-                {nextActionText}
-              </p>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
                 <span>{task.estimated_minutes}m</span>
                 <span>{getTaskCategoryLabel(task.category_key || 'misc')}</span>
+                <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
+                <span>{getCollaborationLevelLabel(task.collaboration_level || 'low')}</span>
                 <span>{getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h</span>
               </div>
             </div>

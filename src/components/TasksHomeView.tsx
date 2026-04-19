@@ -110,7 +110,6 @@ type TasksHomeViewProps = {
 
 function TaskLineSurface({
   renderInlineEnergyBar,
-  currentPrimaryTask,
   currentPrimaryTasks,
   currentPrimaryIsParallel,
   setIsTaskListOpen,
@@ -120,12 +119,6 @@ function TaskLineSurface({
   setPrimaryTaskId,
   clearTaskDragState,
   renderTaskCard,
-  requestHourlyFocusCheckin,
-  isGeneratingFocusCheckin,
-  runningTasks,
-  focusCheckin,
-  focusCheckinError,
-  respondToFocusCheckin,
   homeLineTasks,
   homeLineRows,
   moveTaskToLine,
@@ -172,10 +165,7 @@ function TaskLineSurface({
           <div className="home-focus-shell">
             <div className="home-focus-meta">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">现在先做</p>
-                <h4 className="mt-1 text-[1.05rem] font-semibold leading-6 text-white text-safe-wrap">
-                  {currentPrimaryTask ? '当前主线' : '先拖一个任务进来'}
-                </h4>
+                <h4 className="text-[1.05rem] font-semibold leading-6 text-white text-safe-wrap">当前主线</h4>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -219,10 +209,6 @@ function TaskLineSurface({
               {currentPrimaryTasks.length > 0 ? (
                 currentPrimaryIsParallel ? (
                   <div className="current-primary-group-shell">
-                    <div className="current-primary-group-head">
-                      <span>并行主线</span>
-                      <strong>{currentPrimaryTasks.length} 项</strong>
-                    </div>
                     <div className={cn(
                       "current-primary-group-grid",
                       currentPrimaryTasks.length >= 3
@@ -234,7 +220,7 @@ function TaskLineSurface({
                       {currentPrimaryTasks.map((task) => (
                         <React.Fragment key={task.id}>
                           {renderTaskCard(task, {
-                            laneLabel: task.tracking_started_at ? '正在推进' : '主任务',
+                            laneLabel: '',
                             tone: 'focus',
                           })}
                         </React.Fragment>
@@ -242,74 +228,14 @@ function TaskLineSurface({
                     </div>
                   </div>
                 ) : renderTaskCard(currentPrimaryTasks[0], {
-                    laneLabel: currentPrimaryTask?.tracking_started_at ? '正在推进' : '主任务',
+                    laneLabel: '',
                     tone: 'focus',
                   })
               ) : (
-                <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
+                <div className="flex h-full min-h-[220px] items-center justify-center rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
                   拖一个任务到这里。
                 </div>
               )}
-            </div>
-
-            <div className="home-focus-ai-card rounded-[1.1rem] border border-white/10 bg-white/[0.03] px-4 py-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">AI 建议</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={requestHourlyFocusCheckin}
-                  disabled={isGeneratingFocusCheckin || runningTasks.length === 0}
-                  className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isGeneratingFocusCheckin ? '生成中...' : '现在校准'}
-                </button>
-              </div>
-              {focusCheckin?.summary && (
-                <p className="mt-3 text-[12px] leading-6 text-slate-300 text-safe-wrap">{focusCheckin.summary}</p>
-              )}
-              {(focusCheckin?.reason || focusCheckin?.reply_prompt) && (
-                <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/55 px-3 py-3">
-                  {focusCheckin?.reason && (
-                    <p className="text-[11px] leading-5 text-slate-300 text-safe-wrap">{focusCheckin.reason}</p>
-                  )}
-                  {focusCheckin?.reply_prompt && (
-                    <p className="mt-2 text-[11px] font-semibold text-rose-100 text-safe-wrap">{focusCheckin.reply_prompt}</p>
-                  )}
-                </div>
-              )}
-              {focusCheckinError && (
-                <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
-                  {focusCheckinError}
-                </div>
-              )}
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => respondToFocusCheckin('continue')}
-                  disabled={focusCheckin?.status !== 'pending'}
-                  className="rounded-full border border-emerald-300/30 bg-emerald-500/14 px-3 py-1.5 text-[11px] font-semibold text-emerald-100 transition-colors hover:bg-emerald-500/22 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  继续
-                </button>
-                <button
-                  type="button"
-                  onClick={() => respondToFocusCheckin('rest')}
-                  disabled={focusCheckin?.status !== 'pending'}
-                  className="rounded-full border border-sky-300/30 bg-sky-500/14 px-3 py-1.5 text-[11px] font-semibold text-sky-100 transition-colors hover:bg-sky-500/22 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  休息一下
-                </button>
-                <button
-                  type="button"
-                  onClick={() => respondToFocusCheckin('pause')}
-                  disabled={focusCheckin?.status !== 'pending'}
-                  className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  保持暂停
-                </button>
-              </div>
             </div>
           </div>
         </div>
