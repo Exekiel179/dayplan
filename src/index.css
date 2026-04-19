@@ -1746,6 +1746,7 @@ body {
 
 .home-map-surface-card {
   height: 100%;
+  min-height: calc(100vh - 13.4rem);
 }
 
 .home-map-focus-shell {
@@ -1774,8 +1775,11 @@ body {
 
 .home-map-quadrant-board {
   margin-top: 0.85rem;
-  width: min(100%, calc(100vh - 18rem));
+  flex: 1 1 0;
+  width: auto;
+  height: min(100%, calc(100vh - 18rem));
   min-height: min(34rem, calc(100vh - 18rem));
+  max-width: 100%;
   max-height: calc(100vh - 18rem);
   margin-inline: auto;
 }
@@ -2941,6 +2945,12 @@ select {
     height: auto;
     min-height: min(28rem, calc(100vh - 11.8rem));
     max-height: calc(100vh - 11.8rem);
+  }
+
+  .home-map-quadrant-board {
+    height: min(100%, calc(100vh - 18rem));
+    min-height: min(28rem, calc(100vh - 18rem));
+    max-height: calc(100vh - 18rem);
   }
 
   .elevator-map-panel {
@@ -5679,6 +5689,12 @@ select {
   .quadrant-board {
     min-height: min(24rem, calc(100vh - 11.4rem));
     max-height: calc(100vh - 11.4rem);
+  }
+
+  .home-map-quadrant-board {
+    height: min(100%, calc(100vh - 16.8rem));
+    min-height: min(24rem, calc(100vh - 16.8rem));
+    max-height: calc(100vh - 16.8rem);
   }
 
   .elevator-map-panel {

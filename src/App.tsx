@@ -157,8 +157,6 @@ const LIVE2D_MODEL_OPTIONS: Live2dModelConfig[] = [
     description: '保留原来的 yiselin 模型，适合轻量陪伴。',
     path: 'https://fastly.jsdelivr.net/gh/Eikanya/Live2d-model/%E5%B4%A9%E5%9D%8F%E5%AD%A6%E5%9B%AD2/yiselin/model.json',
     scale: 0.69,
-    frameWidth: 300,
-    frameHeight: 420,
     position: { x: -22, y: 4 },
   },
 ];
