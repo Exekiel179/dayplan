@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { DLive2dOptions, DModel, DTips, wlLive2d } from 'wl-live2d';
 import {
   Plus,
   X,
@@ -61,6 +60,7 @@ import {
 import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import TasksHomeView from './components/TasksHomeView';
 import PointerParticles from './PointerParticles';
 import {
   AdminPasswordResetResult,
@@ -94,6 +94,20 @@ import {
 
 type AppTheme = 'night' | 'day' | 'stardew' | 'starlit';
 type TaskSizeBucket = 'big' | 'medium' | 'small';
+type Live2dActionId =
+  | 'heart'
+  | 'star'
+  | 'blush'
+  | 'cry'
+  | 'angry'
+  | 'money'
+  | 'pet'
+  | 'gesture'
+  | 'greet'
+  | 'listen'
+  | 'think'
+  | 'phone'
+  | 'idle';
 type CalendarSubscriptionInfo = {
   token: string;
   url: string;
@@ -107,12 +121,207 @@ const THEME_OPTIONS: { id: AppTheme; label: string; shortLabel: string }[] = [
   { id: 'starlit', label: '静谧星空', shortLabel: '星' },
 ];
 
-const LIVE2D_YISELIN_MODEL_PATH =
-  'https://fastly.jsdelivr.net/gh/Eikanya/Live2d-model/%E5%B4%A9%E5%9D%8F%E5%AD%A6%E5%9B%AD2/yiselin/model.json';
+const LIVE2D_APPLE_FOX_MODEL_PATH = encodeURI('/live2d/苹果小狐狸/苹果小狐狸.model3.json');
+const LIVE2D_MODEL_SCALE = 0.95;
+const LIVE2D_MODEL_WIDTH = 311;
+const LIVE2D_MODEL_HEIGHT = 311;
+const LIVE2D_MODEL_POSITION = { x: -8, y: 10 };
+const LIVE2D_WIDGET_OFFSET_RIGHT = 12;
+const LIVE2D_WIDGET_OFFSET_BOTTOM = 12;
+const LIVE2D_BOOT_DELAY_MS = 1200;
+const GLOBAL_CLOCK_INTERVAL_MS = 30000;
+
+type Live2dActionConfig = {
+  expressionId?: Live2dActionId;
+  expressionIndex?: number;
+  useTapMotion?: boolean;
+  widgetKeyframes?: Keyframe[];
+  widgetDurationMs?: number;
+  widgetEasing?: string;
+};
+
+const createLive2dTransform = (x = 0, y = 0, rotate = 0, scale = 1) =>
+  `translate3d(${x}px, ${y}px, 0) rotate(${rotate}deg) scale(${scale})`;
+
+const LIVE2D_TAP_MOTION_GROUP = 'Tap';
+const LIVE2D_TAP_MOTION_INDEX = 0;
+const LIVE2D_FORCE_MOTION_PRIORITY = 3;
+const LIVE2D_AUTOPLAY_ACTIONS: Live2dActionId[] = [
+  'heart',
+  'star',
+  'blush',
+  'money',
+  'pet',
+  'gesture',
+  'greet',
+  'listen',
+  'think',
+  'phone',
+];
+
+const LIVE2D_ACTION_CONFIGS: Record<Live2dActionId, Live2dActionConfig> = {
+  heart: {
+    expressionId: 'heart',
+    expressionIndex: 0,
+    useTapMotion: true,
+    widgetDurationMs: 820,
+    widgetEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(0, -10, -1.5, 1.02), offset: 0.42 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  star: {
+    expressionId: 'star',
+    expressionIndex: 1,
+    useTapMotion: true,
+    widgetDurationMs: 880,
+    widgetEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(4, -12, 2, 1.03), offset: 0.35 },
+      { transform: createLive2dTransform(-3, -6, -1, 1.015), offset: 0.68 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  blush: {
+    expressionId: 'blush',
+    expressionIndex: 2,
+    widgetDurationMs: 760,
+    widgetEasing: 'ease-out',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(-7, -4, -3, 0.995), offset: 0.5 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  cry: {
+    expressionId: 'cry',
+    expressionIndex: 3,
+    widgetDurationMs: 920,
+    widgetEasing: 'ease-in-out',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(0, 8, 0, 0.992), offset: 0.45 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  angry: {
+    expressionId: 'angry',
+    expressionIndex: 4,
+    useTapMotion: true,
+    widgetDurationMs: 680,
+    widgetEasing: 'ease-out',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(8, -3, 2.5, 1.015), offset: 0.22 },
+      { transform: createLive2dTransform(-6, -1, -2, 1.01), offset: 0.52 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  money: {
+    expressionId: 'money',
+    expressionIndex: 5,
+    useTapMotion: true,
+    widgetDurationMs: 780,
+    widgetEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(0, -14, 0, 1.025), offset: 0.4 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  pet: {
+    expressionId: 'pet',
+    expressionIndex: 6,
+    widgetDurationMs: 860,
+    widgetEasing: 'ease-out',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(-3, -5, -1.5, 1.01), offset: 0.36 },
+      { transform: createLive2dTransform(2, -2, 1, 1.005), offset: 0.68 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  gesture: {
+    expressionId: 'gesture',
+    expressionIndex: 7,
+    useTapMotion: true,
+    widgetDurationMs: 860,
+    widgetEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(10, -6, 2, 1.02), offset: 0.34 },
+      { transform: createLive2dTransform(-8, -2, -2, 1.01), offset: 0.64 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  greet: {
+    expressionId: 'greet',
+    useTapMotion: true,
+    widgetDurationMs: 900,
+    widgetEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(12, -10, 4, 1.02), offset: 0.3 },
+      { transform: createLive2dTransform(-6, -3, -2, 1.01), offset: 0.62 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  listen: {
+    expressionId: 'listen',
+    widgetDurationMs: 840,
+    widgetEasing: 'ease-out',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(-14, -2, -4, 1.01), offset: 0.46 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  think: {
+    expressionId: 'think',
+    widgetDurationMs: 980,
+    widgetEasing: 'ease-in-out',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(-8, -4, -5, 1.005), offset: 0.34 },
+      { transform: createLive2dTransform(-4, -8, -8, 1.01), offset: 0.66 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  phone: {
+    expressionId: 'phone',
+    useTapMotion: true,
+    widgetDurationMs: 920,
+    widgetEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(8, -8, 3, 1.015), offset: 0.36 },
+      { transform: createLive2dTransform(2, -2, 1, 1.005), offset: 0.72 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+  idle: {
+    widgetDurationMs: 640,
+    widgetEasing: 'ease-out',
+    widgetKeyframes: [
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+      { transform: createLive2dTransform(0, -2, 0, 1.002), offset: 0.5 },
+      { transform: createLive2dTransform(0, 0, 0, 1) },
+    ],
+  },
+};
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+type Live2dController = {
+  destroy: () => void;
+  onModelLoaded: (callback: (model?: unknown) => void) => void;
+  onModelError: (callback: () => void) => void;
+};
 
 const AUTH_TOKEN_KEY = 'dayplan_auth_token';
 const THEME_STORAGE_KEY = 'dayplan_theme';
@@ -167,6 +376,11 @@ type AmbientController = {
   setVolume: (value: number) => void;
 };
 
+type DisconnectableAudioNode = {
+  stop?: () => void;
+  disconnect: () => void;
+};
+
 const AMBIENT_PRESETS: AmbientPreset[] = [
   {
     id: 'white_noise',
@@ -204,6 +418,47 @@ const AMBIENT_PRESETS: AmbientPreset[] = [
 
 function midiToFrequency(midi: number) {
   return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function clampAudioVolume(value: number, max: number, multiplier: number) {
+  return Math.max(0, Math.min(max, value * multiplier));
+}
+
+function stopAndDisconnectNodes(nodes: DisconnectableAudioNode[]) {
+  nodes.forEach((node) => {
+    if (typeof node.stop === 'function') {
+      try {
+        node.stop();
+      } catch {
+        // Ignore oscillators already stopped by scheduling.
+      }
+    }
+    node.disconnect();
+  });
+}
+
+function queueChordProgression(
+  progression: number[][],
+  activeTimeouts: number[],
+  playChord: (notes: number[]) => void
+) {
+  progression.forEach((notes, index) => {
+    activeTimeouts.push(window.setTimeout(() => playChord(notes), index * 3200));
+  });
+}
+
+function getAudioContextCtor() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return window.AudioContext
+    || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    || null;
+}
+
+function isAmbientPresetId(value: string): value is AmbientPresetId {
+  return AMBIENT_PRESETS.some((preset) => preset.id === value);
 }
 
 function createNoiseController(context: AudioContext, mode: 'white' | 'brown'): AmbientController {
@@ -297,7 +552,7 @@ function createNoiseController(context: AudioContext, mode: 'white' | 'brown'): 
     },
     setVolume(value: number) {
       output.gain.cancelScheduledValues(context.currentTime);
-      output.gain.setTargetAtTime(Math.max(0, Math.min(0.7, value * 0.34)), context.currentTime, 0.08);
+      output.gain.setTargetAtTime(clampAudioVolume(value, 0.7, 0.34), context.currentTime, 0.08);
     },
   };
 }
@@ -314,7 +569,7 @@ function createPostRockController(context: AudioContext): AmbientController {
     [47, 54, 59, 62],
   ];
   const activeTimeouts: number[] = [];
-  const activeNodes: Array<{ stop?: () => void; disconnect: () => void }> = [];
+  const activeNodes: DisconnectableAudioNode[] = [];
 
   const playChord = (notes: number[]) => {
     notes.forEach((note, noteIndex) => {
@@ -347,14 +602,10 @@ function createPostRockController(context: AudioContext): AmbientController {
     });
   };
 
-  progression.forEach((notes, index) => {
-    activeTimeouts.push(window.setTimeout(() => playChord(notes), index * 3200));
-  });
+  queueChordProgression(progression, activeTimeouts, playChord);
 
   const intervalId = window.setInterval(() => {
-    progression.forEach((notes, index) => {
-      activeTimeouts.push(window.setTimeout(() => playChord(notes), index * 3200));
-    });
+    queueChordProgression(progression, activeTimeouts, playChord);
   }, progression.length * 3200);
 
   let stopped = false;
@@ -364,21 +615,12 @@ function createPostRockController(context: AudioContext): AmbientController {
       stopped = true;
       window.clearInterval(intervalId);
       activeTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
-      activeNodes.forEach((node) => {
-        if (typeof node.stop === 'function') {
-          try {
-            node.stop();
-          } catch {
-            // Ignore oscillators already stopped by scheduling.
-          }
-        }
-        node.disconnect();
-      });
+      stopAndDisconnectNodes(activeNodes);
       output.disconnect();
     },
     setVolume(value: number) {
       output.gain.cancelScheduledValues(context.currentTime);
-      output.gain.setTargetAtTime(Math.max(0, Math.min(0.8, value * 0.28)), context.currentTime, 0.12);
+      output.gain.setTargetAtTime(clampAudioVolume(value, 0.8, 0.28), context.currentTime, 0.12);
     },
   };
 }
@@ -393,7 +635,7 @@ function createGamingMusicController(context: AudioContext): AmbientController {
   let pulseStep = 0;
   let bassStep = 0;
 
-  const activeNodes: Array<{ stop?: () => void; disconnect: () => void }> = [];
+  const activeNodes: DisconnectableAudioNode[] = [];
 
   const playLead = () => {
     const oscillator = context.createOscillator();
@@ -460,30 +702,29 @@ function createGamingMusicController(context: AudioContext): AmbientController {
       stopped = true;
       window.clearInterval(leadInterval);
       window.clearInterval(bassInterval);
-      activeNodes.forEach((node) => {
-        if (typeof node.stop === 'function') {
-          try {
-            node.stop();
-          } catch {
-            // Ignore oscillators already stopped by scheduling.
-          }
-        }
-        node.disconnect();
-      });
+      stopAndDisconnectNodes(activeNodes);
       output.disconnect();
     },
     setVolume(value: number) {
       output.gain.cancelScheduledValues(context.currentTime);
-      output.gain.setTargetAtTime(Math.max(0, Math.min(0.8, value * 0.24)), context.currentTime, 0.08);
+      output.gain.setTargetAtTime(clampAudioVolume(value, 0.8, 0.24), context.currentTime, 0.08);
     },
   };
 }
 
 function createAmbientController(context: AudioContext, presetId: AmbientPresetId) {
-  if (presetId === 'white_noise') return createNoiseController(context, 'white');
-  if (presetId === 'brown_noise') return createNoiseController(context, 'brown');
-  if (presetId === 'post_rock') return createPostRockController(context);
-  return createGamingMusicController(context);
+  switch (presetId) {
+    case 'white_noise':
+      return createNoiseController(context, 'white');
+    case 'brown_noise':
+      return createNoiseController(context, 'brown');
+    case 'post_rock':
+      return createPostRockController(context);
+    case 'gaming_music':
+      return createGamingMusicController(context);
+    default:
+      return createGamingMusicController(context);
+  }
 }
 
 function BackgroundAudioDock({ embedded = false }: { embedded?: boolean }) {
@@ -504,8 +745,8 @@ function BackgroundAudioDock({ embedded = false }: { embedded?: boolean }) {
       if (typeof payload?.volume === 'number') {
         setVolume(Math.max(0, Math.min(1, payload.volume)));
       }
-      if (typeof payload?.selectedPreset === 'string' && AMBIENT_PRESETS.some((preset) => preset.id === payload.selectedPreset)) {
-        setSelectedPreset(payload.selectedPreset as AmbientPresetId);
+      if (typeof payload?.selectedPreset === 'string' && isAmbientPresetId(payload.selectedPreset)) {
+        setSelectedPreset(payload.selectedPreset);
       }
     } catch {
       // Ignore malformed local preferences.
@@ -530,16 +771,16 @@ function BackgroundAudioDock({ embedded = false }: { embedded?: boolean }) {
 
   const currentPreset = AMBIENT_PRESETS.find((preset) => preset.id === selectedPreset) || AMBIENT_PRESETS[0];
 
-  const stopPlayback = () => {
+  function stopPlayback(): void {
     controllerRef.current?.stop();
     controllerRef.current = null;
     setIsPlaying(false);
-  };
+  }
 
-  const startPlayback = async (presetId: AmbientPresetId) => {
+  async function startPlayback(presetId: AmbientPresetId): Promise<void> {
     try {
       setAudioError('');
-      const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      const AudioContextCtor = getAudioContextCtor();
       if (!AudioContextCtor) {
         throw new Error('当前浏览器不支持 Web Audio。');
       }
@@ -560,22 +801,22 @@ function BackgroundAudioDock({ embedded = false }: { embedded?: boolean }) {
       setAudioError(error instanceof Error ? error.message : '背景音乐启动失败');
       setIsPlaying(false);
     }
-  };
+  }
 
-  const togglePlayback = async () => {
+  async function togglePlayback(): Promise<void> {
     if (isPlaying) {
       stopPlayback();
       return;
     }
     await startPlayback(selectedPreset);
-  };
+  }
 
-  const handlePresetClick = async (presetId: AmbientPresetId) => {
+  async function handlePresetClick(presetId: AmbientPresetId): Promise<void> {
     setSelectedPreset(presetId);
     if (isPlaying) {
       await startPlayback(presetId);
     }
-  };
+  }
 
   const panelContent = (
     <>
@@ -851,7 +1092,7 @@ const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
   },
 ];
 const DEFAULT_ABILITY_GAIN_PER_HOUR = 36;
-const BEHAVIOR_CHAT_PLACEHOLDER = '例如：我喝茶了 / 我刚散步回来 / 我午睡了 20 分钟';
+const BEHAVIOR_CHAT_PLACEHOLDER = '说说你的想法';
 const MAX_DAILY_CHAT_MESSAGES = 24;
 const RSS_SCOUT_COST = 88;
 const EXTERNAL_BEHAVIOR_PRESETS: ExternalBehaviorPreset[] = [
@@ -916,6 +1157,14 @@ const EXTERNAL_BEHAVIOR_PRESETS: ExternalBehaviorPreset[] = [
     reply: '已记录午睡恢复。精力会明显回升，接下来进入高价值任务更划算。',
   },
 ];
+const BEHAVIOR_PRESET_TO_LIVE2D_ACTION: Record<string, Live2dActionId> = {
+  tea: 'star',
+  coffee: 'heart',
+  water: 'pet',
+  walk: 'gesture',
+  meal: 'blush',
+  nap: 'star',
+};
 
 function createDefaultAbilityModuleSettings(): AbilityModuleSettings {
   return {
@@ -953,6 +1202,14 @@ function createDefaultFocusReminderSettings(): FocusReminderSettings {
   };
 }
 
+function createDefaultDailyStateReport(updatedAt = Date.now()): DailyStateReport {
+  return {
+    self_rating: 3,
+    sleep_hours: 7,
+    updated_at: updatedAt,
+  };
+}
+
 function createDefaultWellbeingSettings(): WellbeingSettings {
   return {
     daily_checkins: {},
@@ -965,6 +1222,50 @@ function createDefaultWellbeingSettings(): WellbeingSettings {
 
 function createLocalId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createTaskStep(text = ''): TaskStep {
+  return {
+    id: createLocalId('step'),
+    text,
+    completed: false,
+  };
+}
+
+function createDraftTask(x: number, y: number): Task {
+  const now = Date.now();
+  return {
+    id: createLocalId('task'),
+    title: '',
+    description: '',
+    x,
+    y,
+    status: 'pending',
+    timeline: 'temporary',
+    dependency_ids: [],
+    estimated_minutes: 60,
+    actual_minutes: 0,
+    deadline_at: null,
+    use_countdown_urgency: false,
+    long_term_cadence: 'daily',
+    long_term_interval_days: 3,
+    last_completed_at: null,
+    next_due_at: null,
+    archived_at: null,
+    completion_count: 0,
+    ability_gains: {},
+    stress_score: 3,
+    energy_delta: 0,
+    cognitive_load: 'low',
+    collaboration_level: 'low',
+    execution_mode: 'serial',
+    category_key: 'misc',
+    line_order: now,
+    tracking_started_at: null,
+    tracking_accumulated_ms: 0,
+    steps: [],
+    created_at: now,
+  };
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -1425,6 +1726,75 @@ function formatDurationFromMs(ms: number) {
   }
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
+
+function useLiveClock(intervalMs: number, enabled = true) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [enabled, intervalMs]);
+
+  return now;
+}
+
+function formatTaskRuntimeText(task: Task, now: number, mode: 'card' | 'line' | 'button' | 'plain') {
+  if (mode === 'button') {
+    return task.tracking_started_at ? formatDurationFromMs(getTrackedMs(task, now)) : '开始';
+  }
+
+  if (task.tracking_started_at) {
+    const prefix = mode === 'line' ? '计时 ' : mode === 'plain' ? '' : '计时中 ';
+    return `${prefix}${formatDurationFromMs(getTrackedMs(task, now))}`;
+  }
+
+  const actual = `${getDisplayedActualMinutes(task, now)}m`;
+  if (mode === 'plain') return actual;
+  return `实际 ${actual}`;
+}
+
+const TaskRuntimeLabel = React.memo(function TaskRuntimeLabel({
+  task,
+  mode,
+  className,
+}: {
+  task: Task;
+  mode: 'card' | 'line' | 'button' | 'plain';
+  className?: string;
+}) {
+  const now = useLiveClock(task.tracking_started_at ? 1000 : 60000, true);
+  return <span className={className}>{formatTaskRuntimeText(task, now, mode)}</span>;
+});
+
+const TaskRuntimeBreakdown = React.memo(function TaskRuntimeBreakdown({
+  task,
+  className,
+}: {
+  task: Task;
+  className?: string;
+}) {
+  const now = useLiveClock(task.tracking_started_at ? 1000 : 60000, true);
+  return (
+    <p className={className}>
+      已累计 {formatDurationFromMs(getTrackedMs(task, now))}，折算实际用时 {getDisplayedActualMinutes(task, now)} 分钟。
+    </p>
+  );
+});
+
+const TaskActualMinutesLabel = React.memo(function TaskActualMinutesLabel({
+  task,
+  className,
+}: {
+  task: Task;
+  className?: string;
+}) {
+  const now = useLiveClock(60000, true);
+  return <span className={className}>实际 {getDisplayedActualMinutes(task, now)}m</span>;
+});
 
 function getTaskEnergyBurnRate(task: Task, burnRateModifier = 1, concurrentTasksCount = 1) {
   let burn = 5 + (task.stress_score || 3) * 2;
@@ -2411,6 +2781,68 @@ async function requestTrendradarLatestNews(token: string, limit = 60) {
     fetched_at: typeof payload?.fetched_at === 'string' ? payload.fetched_at : '',
     fallback_reason: typeof payload?.fallback_reason === 'string' ? payload.fallback_reason : '',
     items,
+  };
+}
+
+async function requestAIBehaviorChat(
+  payload: {
+    message: string;
+    localInsight: string;
+    energyScore: number;
+    pressureScore: number;
+    primaryTask: {
+      title: string;
+      next_action: string;
+      cognitive_load: TaskCognitiveLoad;
+      collaboration_level: TaskCollaborationLevel;
+      execution_mode: TaskExecutionMode;
+      current_session_minutes: number;
+    } | null;
+    runningTasks: Array<{
+      title: string;
+      execution_mode: TaskExecutionMode;
+      current_session_minutes: number;
+    }>;
+    recentMessages: Array<Pick<WellbeingChatMessage, 'role' | 'text'>>;
+    behaviorEvent: {
+      type: string;
+      label: string;
+      instant_energy: number;
+      duration_minutes: number;
+      burn_rate_multiplier: number;
+    } | null;
+  },
+  token: string
+) {
+  const response = await fetch('/api/ai/behavior-chat', {
+    method: 'POST',
+    headers: withAuthHeaders(token, {
+      'Content-Type': 'application/json',
+    }),
+    body: JSON.stringify(payload),
+  });
+
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || 'BEHAVIOR_CHAT_FAILED');
+  }
+
+  const parsed = await response.json();
+  const suggestedMotion = typeof parsed?.suggested_motion === 'string'
+    ? parsed.suggested_motion.trim()
+    : '';
+
+  return {
+    reply: typeof parsed?.reply === 'string' ? parsed.reply.trim() : '',
+    suggested_motion: (
+      ['heart', 'star', 'blush', 'cry', 'angry', 'money', 'pet', 'gesture', 'greet', 'listen', 'think', 'phone', 'idle']
+        .includes(suggestedMotion)
+      ? suggestedMotion
+      : 'idle') as Live2dActionId,
   };
 }
 
@@ -4440,7 +4872,10 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'tasks' | 'world_news' | 'admin'>('tasks');
   const [newAbilityDimension, setNewAbilityDimension] = useState('');
   const [behaviorChatInput, setBehaviorChatInput] = useState('');
+  const [behaviorChatError, setBehaviorChatError] = useState('');
+  const [isBehaviorChatSending, setIsBehaviorChatSending] = useState(false);
   const [behaviorNudge, setBehaviorNudge] = useState('');
+  const [live2dUiAnchor, setLive2dUiAnchor] = useState({ right: 20, top: 120, height: LIVE2D_MODEL_HEIGHT });
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
@@ -4451,6 +4886,7 @@ export default function App() {
   const [isMotivationPanelOpen, setIsMotivationPanelOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDesignPanelOpen, setIsDesignPanelOpen] = useState(false);
+  const [shouldBootLive2d, setShouldBootLive2d] = useState(false);
   const [isLive2dReady, setIsLive2dReady] = useState(false);
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
   const [aiError, setAiError] = useState('');
@@ -4460,7 +4896,21 @@ export default function App() {
   const [storageError, setStorageError] = useState('');
   const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
   const [draggedLineTaskId, setDraggedLineTaskId] = useState<string | null>(null);
-  const live2dControllerRef = useRef<ReturnType<typeof wlLive2d> | null>(null);
+  const live2dControllerRef = useRef<Live2dController | null>(null);
+  const live2dModelRef = useRef<{
+    expression?: (id?: number | string) => Promise<boolean>;
+    motion?: (group: string, index?: number, priority?: number) => Promise<boolean>;
+    internalModel?: {
+      motionManager?: {
+        startMotion?: (group: string, index: number, priority?: number) => Promise<boolean> | boolean;
+        expressionManager?: {
+          setExpression?: (id: number | string) => Promise<boolean> | boolean;
+          resetExpression?: () => void;
+        };
+      };
+    };
+  } | null>(null);
+  const behaviorChatViewportRef = useRef<HTMLDivElement | null>(null);
   const [dragOverLineTaskId, setDragOverLineTaskId] = useState<string | null>(null);
   const [dragOverLineZone, setDragOverLineZone] = useState<'before' | 'after' | 'overlap' | null>(null);
   const [nowTs, setNowTs] = useState(Date.now());
@@ -4476,6 +4926,124 @@ export default function App() {
   const hasHydratedRef = useRef(false);
   const topBoardDragStateRef = useRef<{ startY: number; collapsed: boolean } | null>(null);
   const behaviorNudgeTimeoutRef = useRef<number | null>(null);
+  const live2dWidgetAnimationRef = useRef<Animation | null>(null);
+
+  const syncLive2dUiAnchor = (element?: HTMLElement | null) => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    const container = element || (document.querySelector('.live2d-wrapper') as HTMLElement | null);
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    setLive2dUiAnchor({
+      right: Math.max(12, window.innerWidth - rect.right),
+      top: Math.max(16, rect.top),
+      height: rect.height,
+    });
+  };
+
+  const showBehaviorNudge = (text: string, durationMs = 3600) => {
+    if (typeof window === 'undefined') {
+      setBehaviorNudge(text);
+      return;
+    }
+    if (behaviorNudgeTimeoutRef.current) {
+      window.clearTimeout(behaviorNudgeTimeoutRef.current);
+      behaviorNudgeTimeoutRef.current = null;
+    }
+    setBehaviorNudge(text);
+    behaviorNudgeTimeoutRef.current = window.setTimeout(() => {
+      setBehaviorNudge('');
+      behaviorNudgeTimeoutRef.current = null;
+    }, durationMs);
+  };
+
+  const playLive2dAction = async (actionId: Live2dActionId, nudgeText?: string) => {
+    const model = live2dModelRef.current;
+    const actionConfig = LIVE2D_ACTION_CONFIGS[actionId];
+    const live2dContainer =
+      typeof document !== 'undefined'
+        ? (document.querySelector('.live2d-wrapper') as HTMLElement | null)
+        : null;
+
+    live2dWidgetAnimationRef.current?.cancel();
+    if (live2dContainer && actionConfig?.widgetKeyframes?.length) {
+      live2dWidgetAnimationRef.current = live2dContainer.animate(actionConfig.widgetKeyframes, {
+        duration: actionConfig.widgetDurationMs ?? 820,
+        easing: actionConfig.widgetEasing ?? 'ease-out',
+        fill: 'none',
+      });
+    }
+
+    if (!model) {
+      if (nudgeText) {
+        showBehaviorNudge(nudgeText);
+      }
+      return {
+        modelReady: false,
+        motionTriggered: false,
+        expressionTriggered: false,
+      };
+    }
+
+    let motionTriggered = false;
+    let expressionTriggered = false;
+
+    try {
+      if (actionConfig?.useTapMotion) {
+        motionTriggered = Boolean(
+          await model.motion?.(
+            LIVE2D_TAP_MOTION_GROUP,
+            LIVE2D_TAP_MOTION_INDEX,
+            LIVE2D_FORCE_MOTION_PRIORITY
+          )
+        );
+        if (!motionTriggered) {
+          motionTriggered = Boolean(
+            await model.internalModel?.motionManager?.startMotion?.(
+              LIVE2D_TAP_MOTION_GROUP,
+              LIVE2D_TAP_MOTION_INDEX,
+              LIVE2D_FORCE_MOTION_PRIORITY
+            )
+          );
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 40));
+      }
+    } catch (error) {
+      console.debug('Live2D motion trigger skipped', error);
+    }
+
+    try {
+      if (actionId === 'idle' || !actionConfig?.expressionId) {
+        model.internalModel?.motionManager?.expressionManager?.resetExpression?.();
+        expressionTriggered = true;
+      } else if (typeof model.expression === 'function') {
+        expressionTriggered = Boolean(await model.expression(actionConfig.expressionId));
+        if (!expressionTriggered && typeof actionConfig.expressionIndex === 'number') {
+          expressionTriggered = Boolean(await model.expression(actionConfig.expressionIndex));
+        }
+      } else {
+        expressionTriggered = Boolean(
+          await model.internalModel?.motionManager?.expressionManager?.setExpression?.(actionConfig.expressionId)
+        );
+        if (!expressionTriggered && typeof actionConfig.expressionIndex === 'number') {
+          expressionTriggered = Boolean(
+            await model.internalModel?.motionManager?.expressionManager?.setExpression?.(actionConfig.expressionIndex)
+          );
+        }
+      }
+    } catch (error) {
+      console.debug('Live2D expression trigger skipped', error);
+    }
+
+    if (nudgeText) {
+      showBehaviorNudge(nudgeText);
+    }
+
+    return {
+      modelReady: true,
+      motionTriggered,
+      expressionTriggered,
+    };
+  };
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -4492,6 +5060,53 @@ export default function App() {
   }, [homeSurface]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !authToken) return;
+    const timer = window.setTimeout(() => {
+      setShouldBootLive2d(true);
+    }, LIVE2D_BOOT_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [authToken]);
+
+  useEffect(() => {
+    if (authToken && isBehaviorChatOpen) {
+      setShouldBootLive2d(true);
+    }
+  }, [authToken, isBehaviorChatOpen]);
+
+  useEffect(() => {
+    if (!authToken || !shouldBootLive2d || !isLive2dReady || currentView !== 'tasks') return;
+    if (typeof window === 'undefined') return;
+
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      const delayMs = 45000 + Math.floor(Math.random() * 35000);
+      timer = window.setTimeout(async () => {
+        if (cancelled || isBehaviorChatOpen) {
+          scheduleNext();
+          return;
+        }
+        const nextAction =
+          LIVE2D_AUTOPLAY_ACTIONS[Math.floor(Math.random() * LIVE2D_AUTOPLAY_ACTIONS.length)] || 'pet';
+        await playLive2dAction(nextAction);
+        scheduleNext();
+      }, delayMs);
+    };
+
+    scheduleNext();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [authToken, shouldBootLive2d, isLive2dReady, currentView, isBehaviorChatOpen]);
+
+  useEffect(() => {
+    if (!authToken || !shouldBootLive2d) return;
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     let disposed = false;
     let bindTimer: number | null = null;
@@ -4507,105 +5122,150 @@ export default function App() {
       if (!container) return false;
 
       container.style.cursor = 'grab';
-      container.onpointerdown = (event) => {
-        pointerStart = { x: event.clientX, y: event.clientY };
-        pointerMoved = false;
-      };
-      container.onpointermove = (event) => {
-        if (!pointerStart) return;
-        if (Math.abs(event.clientX - pointerStart.x) > 8 || Math.abs(event.clientY - pointerStart.y) > 8) {
-          pointerMoved = true;
-        }
-      };
-      container.onpointerup = () => {
-        if (!disposed && !pointerMoved) {
-          setIsBehaviorChatOpen((prev) => !prev);
-        }
-        pointerStart = null;
-        pointerMoved = false;
-      };
-      container.onpointercancel = () => {
-        pointerStart = null;
-        pointerMoved = false;
-      };
+      container.style.width = `${LIVE2D_MODEL_WIDTH}px`;
+      container.style.height = `${LIVE2D_MODEL_HEIGHT}px`;
+      container.style.left = 'auto';
+      container.style.right = `${LIVE2D_WIDGET_OFFSET_RIGHT}px`;
+      container.style.bottom = `${LIVE2D_WIDGET_OFFSET_BOTTOM}px`;
+      container.style.transformOrigin = 'right bottom';
+      container.style.transform = 'none';
+      syncLive2dUiAnchor(container);
+      if (container.dataset.codexBound !== 'true') {
+        container.dataset.codexBound = 'true';
+        container.addEventListener('pointerdown', (event) => {
+          pointerStart = { x: event.clientX, y: event.clientY };
+          pointerMoved = false;
+        });
+        container.addEventListener('pointermove', (event) => {
+          if (!pointerStart) return;
+          if (Math.abs(event.clientX - pointerStart.x) > 8 || Math.abs(event.clientY - pointerStart.y) > 8) {
+            pointerMoved = true;
+          }
+          syncLive2dUiAnchor(container);
+        });
+        container.addEventListener('pointerup', () => {
+          if (!disposed && !pointerMoved) {
+            setIsBehaviorChatOpen((prev) => !prev);
+          }
+          syncLive2dUiAnchor(container);
+          pointerStart = null;
+          pointerMoved = false;
+        });
+        container.addEventListener('pointercancel', () => {
+          syncLive2dUiAnchor(container);
+          pointerStart = null;
+          pointerMoved = false;
+        });
+      }
 
       const canvas = container.querySelector('canvas') as HTMLCanvasElement | null;
       if (canvas) {
         canvas.style.cursor = 'grab';
+        canvas.style.width = `${LIVE2D_MODEL_WIDTH}px`;
+        canvas.style.height = `${LIVE2D_MODEL_HEIGHT}px`;
       }
 
       setIsLive2dReady(true);
       return true;
     };
 
-    const controller = wlLive2d(new DLive2dOptions({
-      sayHello: false,
-      transitionTime: 320,
-      selector: 'body',
-      fixed: true,
-      dockedRight: true,
-      plugins: [],
-      drag: true,
-      homePath: '/',
-      hitFrame: false,
-      menus: [],
-      models: [
-        new DModel({
-          path: LIVE2D_YISELIN_MODEL_PATH,
-          volume: 0.5,
-          scale: 0.69,
-          rotate: 0,
-          backgroundColor: 'transparent',
-          width: null,
-          height: null,
-          motionPreload: null,
-          position: { x: -22, y: 4 },
-        }),
-      ],
-      tips: new DTips({
-        minWidth: 180,
-        minHeight: 72,
-        offsetX: 0,
-        offsetY: 0,
-        drag: false,
-        message: [],
-        duration: 2200,
-        interval: 600000,
-        talk: false,
-        talkInterval: 600000,
-        talkApis: [],
-        motionMessage: false,
-      }),
-    }));
+    const bootLive2d = async () => {
+      try {
+        const { DLive2dOptions, DModel, DTips, wlLive2d } = await import('wl-live2d');
+        if (disposed) return;
 
-    live2dControllerRef.current = controller;
-    controller.onModelLoaded(() => {
-      if (!disposed) {
-        bindWidgetClick();
-      }
-    });
-    controller.onModelError(() => {
-      if (!disposed) {
-        setIsLive2dReady(false);
-      }
-    });
+        const controller = wlLive2d(new DLive2dOptions({
+          sayHello: false,
+          transitionTime: 320,
+          selector: 'body',
+          fixed: true,
+          dockedRight: true,
+          plugins: [],
+          drag: true,
+          homePath: '/',
+          hitFrame: false,
+          menus: [],
+          models: [
+            new DModel({
+              path: LIVE2D_APPLE_FOX_MODEL_PATH,
+              volume: 0.5,
+              scale: LIVE2D_MODEL_SCALE,
+              rotate: 0,
+              backgroundColor: 'transparent',
+              width: LIVE2D_MODEL_WIDTH,
+              height: LIVE2D_MODEL_HEIGHT,
+              motionPreload: null,
+              position: LIVE2D_MODEL_POSITION,
+            }),
+          ],
+          tips: new DTips({
+            minWidth: 180,
+            minHeight: 72,
+            offsetX: 0,
+            offsetY: 0,
+            drag: false,
+            message: [],
+            duration: 2200,
+            interval: 600000,
+            talk: false,
+            talkInterval: 600000,
+            talkApis: [],
+            motionMessage: false,
+          }),
+        })) as Live2dController;
 
-    if (!bindWidgetClick()) {
-      bindTimer = window.setInterval(() => {
-        if (bindWidgetClick() && bindTimer) {
-          window.clearInterval(bindTimer);
-          bindTimer = null;
+        if (disposed) {
+          controller.destroy();
+          return;
         }
-      }, 600);
-    }
+
+        live2dControllerRef.current = controller;
+        controller.onModelLoaded((model) => {
+          if (!disposed) {
+            live2dModelRef.current = (model as typeof live2dModelRef.current) || null;
+            bindWidgetClick();
+            void playLive2dAction('pet');
+          }
+        });
+        controller.onModelError(() => {
+          if (!disposed) {
+            live2dModelRef.current = null;
+            setIsLive2dReady(false);
+          }
+        });
+
+        if (!bindWidgetClick()) {
+          bindTimer = window.setInterval(() => {
+            if (bindWidgetClick() && bindTimer) {
+              window.clearInterval(bindTimer);
+              bindTimer = null;
+            }
+          }, 600);
+        }
+      } catch (error) {
+        if (!disposed) {
+          console.error('Live2D lazy boot failed', error);
+          setIsLive2dReady(false);
+        }
+      }
+    };
+
+    void bootLive2d();
+
+    const handleResize = () => syncLive2dUiAnchor();
+    window.addEventListener('resize', handleResize);
 
     return () => {
       disposed = true;
       if (bindTimer) window.clearInterval(bindTimer);
+      window.removeEventListener('resize', handleResize);
+      live2dWidgetAnimationRef.current?.cancel();
+      live2dWidgetAnimationRef.current = null;
       live2dControllerRef.current?.destroy();
       live2dControllerRef.current = null;
+      live2dModelRef.current = null;
     };
-  }, []);
+  }, [authToken, shouldBootLive2d]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -4704,11 +5364,7 @@ export default function App() {
     recovered_energy: 0,
     updated_at: nowTs,
   };
-  const todayStateReport = wellbeing.daily_state_reports[todayKey] ?? {
-    self_rating: 3,
-    sleep_hours: 7,
-    updated_at: nowTs,
-  };
+  const todayStateReport = wellbeing.daily_state_reports[todayKey] ?? createDefaultDailyStateReport(nowTs);
   const completedTodayTasks = tasks.filter((task) => task.last_completed_at && getDayKey(task.last_completed_at) === todayKey);
   const completionBoost = completedTodayTasks.length * 6;
   const energyDeltaBoost = completedTodayTasks.reduce((sum, task) => sum + (task.energy_delta || 0) * 8, 0);
@@ -4739,6 +5395,15 @@ export default function App() {
     [...executableTasks].sort((a, b) => scoreTaskForMoment(b, energyScore, pressureScore, nowTs) - scoreTaskForMoment(a, energyScore, pressureScore, nowTs)),
     energyScore
   );
+
+  useEffect(() => {
+    const viewport = behaviorChatViewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTo({
+      top: viewport.scrollHeight,
+      behavior: todayChatMessages.length > 1 ? 'smooth' : 'auto',
+    });
+  }, [todayChatMessages.length, isBehaviorChatSending]);
   const wellbeingSuggestions = buildWellbeingSuggestions({
     pressureScore,
     energyScore,
@@ -4751,7 +5416,7 @@ export default function App() {
   const latestActiveBehavior = activeBehaviorEvents[activeBehaviorEvents.length - 1];
   const latestBehaviorMessage = latestActiveBehavior
     ? `${latestActiveBehavior.label}生效中，当前耗能系数 ${(behaviorBurnRateModifier * 100).toFixed(0)}%。`
-    : '还没有记录外部行为，可以直接在右侧聊天里说“我喝茶了”。';
+    : '你好呀';
 
   const baseAbilityScores = abilityDimensions.reduce<Record<string, number>>((acc, dim) => {
     acc[dim] = 0;
@@ -4845,6 +5510,15 @@ export default function App() {
   }
   const recommendedPrimaryTask = focusDeck[0] || rankedReadyTasks[0] || lowEnergyStandby[0] || blockedQueue[0] || null;
   const currentPrimaryTask = tasks.find((task) => task.id === primaryTaskId && !task.archived_at && task.status !== 'completed') || recommendedPrimaryTask;
+  const allLineTasks = sortTasksForLine(activeTasks, energyScore, pressureScore, nowTs);
+  const allLineRows = buildTaskLineRows(allLineTasks);
+  const currentPrimaryRow = currentPrimaryTask
+    ? allLineRows.find((row) => row.tasks.some((task) => task.id === currentPrimaryTask.id)) || null
+    : null;
+  const currentPrimaryTasks = currentPrimaryRow?.tasks?.length
+    ? currentPrimaryRow.tasks
+    : (currentPrimaryTask ? [currentPrimaryTask] : []);
+  const currentPrimaryIsParallel = Boolean(currentPrimaryRow?.mode === 'parallel' && currentPrimaryTasks.length > 1);
   const focusHeadline = runningTasks.length > 0
     ? '先把已经开始的任务收束到 1 到 2 项'
     : energyScore >= 65
@@ -4857,7 +5531,7 @@ export default function App() {
   const focusFillCount = Math.max(0, FOCUS_WIP_LIMIT - runningTasks.length);
   const simpleHomeTasks: Task[] = [];
   [
-    ...(currentPrimaryTask ? [currentPrimaryTask] : []),
+    ...currentPrimaryTasks,
     ...focusDeck,
     ...dailyMixTasks,
     ...lowEnergyStandby,
@@ -4994,7 +5668,7 @@ export default function App() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNowTs(Date.now());
-    }, 1000);
+    }, GLOBAL_CLOCK_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -5204,38 +5878,7 @@ export default function App() {
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
-    const newTask: Task = {
-      id: Math.random().toString(36).substr(2, 9),
-      title: '',
-      description: '',
-      x,
-      y,
-      status: 'pending',
-      timeline: 'temporary',
-      dependency_ids: [],
-      estimated_minutes: 60,
-      actual_minutes: 0,
-      deadline_at: null,
-      use_countdown_urgency: false,
-      long_term_cadence: 'daily',
-      long_term_interval_days: 3,
-      last_completed_at: null,
-      next_due_at: null,
-      archived_at: null,
-      completion_count: 0,
-      ability_gains: {},
-      stress_score: 3,
-      energy_delta: 0,
-      cognitive_load: 'low',
-      collaboration_level: 'low',
-      execution_mode: 'serial',
-      category_key: 'misc',
-      line_order: Date.now(),
-      tracking_started_at: null,
-      tracking_accumulated_ms: 0,
-      steps: [],
-      created_at: Date.now()
-    };
+    const newTask = createDraftTask(x, y);
 
     setSelectedTask(newTask);
     setIsPlacementMode(false);
@@ -5534,7 +6177,7 @@ export default function App() {
       daily_state_reports: {
         ...prev.daily_state_reports,
         [todayKey]: {
-          ...(prev.daily_state_reports[todayKey] || { self_rating: 3, sleep_hours: 7 }),
+          ...(prev.daily_state_reports[todayKey] || createDefaultDailyStateReport()),
           sleep_hours: nextValue,
           updated_at: Date.now(),
         },
@@ -5549,7 +6192,7 @@ export default function App() {
       daily_state_reports: {
         ...prev.daily_state_reports,
         [todayKey]: {
-          ...(prev.daily_state_reports[todayKey] || { self_rating: 3, sleep_hours: 7 }),
+          ...(prev.daily_state_reports[todayKey] || createDefaultDailyStateReport()),
           self_rating: nextValue,
           updated_at: Date.now(),
         },
@@ -5838,9 +6481,9 @@ export default function App() {
     endTaskDrag();
   };
 
-  const submitBehaviorChat = (rawInput?: string) => {
+  const submitBehaviorChat = async (rawInput?: string) => {
     const text = (rawInput ?? behaviorChatInput).trim();
-    if (!text) return;
+    if (!text || isBehaviorChatSending) return;
 
     const now = Date.now();
     const userMessage: WellbeingChatMessage = {
@@ -5867,19 +6510,20 @@ export default function App() {
       } satisfies ExternalBehaviorEvent
       : null;
     const targetTask = recommendedNowTasks[0]?.title || '';
-    const assistantText = behaviorEvent
+    const fallbackAssistantText = behaviorEvent
       ? `${preset.reply} 预计持续 ${durationMinutes} 分钟，当前额外恢复约 +${behaviorEvent.instant_energy}，耗能压到 ${Math.round(behaviorEvent.burn_rate_multiplier * 100)}%。${targetTask ? ` 现在适合先推进「${targetTask}」。` : ''}`
-      : `${targetTask ? `当前更建议先做「${targetTask}」。` : '当前没有合适的任务建议。'} 你可以直接告诉我外部行为，比如“我喝茶了”“我散步了”“我午睡了 20 分钟”。`;
-    const assistantMessage: WellbeingChatMessage = {
-      id: createLocalId('chat'),
-      role: 'assistant',
-      text: assistantText,
-      created_at: now + 1,
-      behavior_event_id: behaviorEvent?.id || null,
-    };
+      : `${targetTask ? `我在呢，先把「${targetTask}」往前推一点点。` : '你好呀，我在这儿。'} 说说你的想法。`;
+    const recentMessages = [...todayChatMessages.slice(-7), userMessage].map((message) => ({
+      role: message.role,
+      text: message.text,
+    }));
+
+    setBehaviorChatInput('');
+    setBehaviorChatError('');
+    setIsBehaviorChatSending(true);
 
     setWellbeing((prev) => {
-      const nextChatMessages = [...(prev.daily_chat_messages[todayKey] ?? []), userMessage, assistantMessage].slice(-MAX_DAILY_CHAT_MESSAGES);
+      const nextChatMessages = [...(prev.daily_chat_messages[todayKey] ?? []), userMessage].slice(-MAX_DAILY_CHAT_MESSAGES);
       const nextBehaviorEvents = behaviorEvent
         ? [...(prev.daily_behavior_events[todayKey] ?? []), behaviorEvent].slice(-18)
         : (prev.daily_behavior_events[todayKey] ?? []);
@@ -5896,7 +6540,87 @@ export default function App() {
         },
       };
     });
-    setBehaviorChatInput('');
+
+    let assistantText = fallbackAssistantText;
+    let suggestedMotion: Live2dActionId = behaviorEvent
+      ? (BEHAVIOR_PRESET_TO_LIVE2D_ACTION[behaviorEvent.type] || 'idle')
+      : 'pet';
+
+    try {
+      if (authToken) {
+        const result = await requestAIBehaviorChat({
+          message: text,
+          localInsight: fallbackAssistantText,
+          energyScore,
+          pressureScore,
+          primaryTask: currentPrimaryTask
+            ? {
+                title: currentPrimaryTask.title,
+                next_action: getTaskNextActionText(currentPrimaryTask),
+                cognitive_load: currentPrimaryTask.cognitive_load || 'low',
+                collaboration_level: currentPrimaryTask.collaboration_level || 'low',
+                execution_mode: currentPrimaryTask.execution_mode || 'serial',
+                current_session_minutes: currentPrimaryTask.tracking_started_at
+                  ? Math.floor((Date.now() - currentPrimaryTask.tracking_started_at) / 60000)
+                  : 0,
+              }
+            : null,
+          runningTasks: runningTasks.slice(0, 3).map((task) => ({
+            title: task.title,
+            execution_mode: task.execution_mode || 'serial',
+            current_session_minutes: task.tracking_started_at
+              ? Math.floor((Date.now() - task.tracking_started_at) / 60000)
+              : 0,
+          })),
+          recentMessages,
+          behaviorEvent: behaviorEvent
+            ? {
+                type: behaviorEvent.type,
+                label: behaviorEvent.label,
+                instant_energy: behaviorEvent.instant_energy,
+                duration_minutes: behaviorEvent.duration_minutes,
+                burn_rate_multiplier: behaviorEvent.burn_rate_multiplier,
+              }
+            : null,
+        }, authToken);
+
+          if (result.reply) {
+            assistantText = result.reply;
+          }
+          suggestedMotion = result.suggested_motion || suggestedMotion;
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+        clearAuth();
+        setLoginError('登录已过期，请重新登录。');
+        return;
+      }
+      console.error('Behavior chat AI failed, using local fallback.', error);
+      setBehaviorChatError('AI 暂时没接上，先用了本地回复。');
+    } finally {
+      setIsBehaviorChatSending(false);
+    }
+
+    const assistantMessage: WellbeingChatMessage = {
+      id: createLocalId('chat'),
+      role: 'assistant',
+      text: assistantText,
+      created_at: Date.now(),
+      behavior_event_id: behaviorEvent?.id || null,
+    };
+
+    setWellbeing((prev) => {
+      const nextChatMessages = [...(prev.daily_chat_messages[todayKey] ?? []), assistantMessage].slice(-MAX_DAILY_CHAT_MESSAGES);
+      return {
+        ...prev,
+        daily_chat_messages: {
+          ...prev.daily_chat_messages,
+          [todayKey]: nextChatMessages,
+        },
+      };
+    });
+    const previewNudge = assistantText.length > 28 ? `${assistantText.slice(0, 28)}...` : assistantText;
+    void playLive2dAction(suggestedMotion, previewNudge);
   };
 
   const removeAbilityDimension = (name: string) => {
@@ -5992,11 +6716,7 @@ export default function App() {
     try {
       const result = await requestAIPlan(task, authToken);
       const stepList = result.steps.length > 0 ? result.steps : ['拆解目标范围', '准备关键资源', '执行核心任务', '复盘并优化'];
-      const newSteps: TaskStep[] = stepList.map((s: string) => ({
-        id: Math.random().toString(36).substr(2, 9),
-        text: s,
-        completed: false
-      }));
+      const newSteps: TaskStep[] = stepList.map((stepText: string) => createTaskStep(stepText));
 
       const updatedTask = {
         ...task,
@@ -6153,10 +6873,10 @@ export default function App() {
     }
 
     const pool = [
-      focusCheckin?.summary,
-      focusCheckin?.reply_prompt,
-      latestAssistantChat?.text,
-      currentPrimaryTask ? `先盯住「${currentPrimaryTask.title}」。如果状态变了，直接告诉我。` : '状态变了就直接和我说一句，我会帮你修正精力。',
+      currentPrimaryTask ? `加油，先把「${currentPrimaryTask.title}」往前推一点点。` : '加油呀，今天也在慢慢变好。',
+      '别急，我陪你把主线稳住。',
+      '已经做得不错了，继续一点点就好。',
+      '状态变了就告诉我，我会陪你一起调。',
     ].filter((item): item is string => Boolean(item && item.trim()));
 
     if (pool.length === 0) return undefined;
@@ -6501,7 +7221,7 @@ export default function App() {
   const renderTaskCard = (
     task: Task,
     {
-      laneLabel,
+      laneLabel: _laneLabel,
       note,
       tone = 'today',
     }: {
@@ -6533,9 +7253,6 @@ export default function App() {
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            {laneLabel && (
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400 text-safe-wrap">{laneLabel}</p>
-            )}
             <button
               type="button"
               onClick={() => setSelectedTask(task)}
@@ -6544,12 +7261,6 @@ export default function App() {
               {task.title || '未命名任务'}
             </button>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-300 text-safe-wrap">{getTaskNextActionText(task)}</p>
-          </div>
-          <div className="mt-1 shrink-0">
-            <div
-              className="h-3 w-3 rounded-full shadow-[0_0_16px_currentColor]"
-              style={{ color: nodeColor, backgroundColor: nodeColor }}
-            />
           </div>
         </div>
 
@@ -6613,11 +7324,7 @@ export default function App() {
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-3">
-          <div className="text-[11px] text-slate-400">
-            {task.tracking_started_at
-              ? `计时中 ${formatDurationFromMs(getTrackedMs(task, nowTs))}`
-              : `实际 ${getDisplayedActualMinutes(task, nowTs)}m`}
-          </div>
+          <TaskRuntimeLabel task={task} mode="card" className="text-[11px] text-slate-400" />
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -6673,14 +7380,15 @@ export default function App() {
     const isDragTarget = dragOverLineTaskId === task.id && draggedLineTaskId !== task.id;
     const dragZone = isDragTarget ? dragOverLineZone : null;
     const nextActionText = getTaskNextActionText(task);
-    const timerText = task.tracking_started_at
-      ? `计时 ${formatDurationFromMs(getTrackedMs(task, nowTs))}`
-      : `实际 ${getDisplayedActualMinutes(task, nowTs)}m`;
-
     return (
       <div
         key={`line-${task.id}`}
         draggable
+        onClick={(event) => {
+          const target = event.target as HTMLElement | null;
+          if (target?.closest('button, a, input, textarea, select, label')) return;
+          setSelectedTask(task);
+        }}
         onDragStart={(event) => startTaskDrag(event, task.id)}
         onDragEnd={endTaskDrag}
         onDragOver={(event) => {
@@ -6700,7 +7408,7 @@ export default function App() {
         }}
         onDrop={(event) => handleTaskLineDrop(event, task, taskIds, laneMode)}
         className={cn(
-          "task-line-shell rounded-[1rem] border px-3 py-3 transition-colors hover:border-white/20",
+          "task-line-shell cursor-pointer rounded-[1rem] border px-3 py-3 transition-colors hover:border-white/20",
           toneClasses,
           emphasis === 'standby' && "task-line-shell-standby",
           isDragged && "task-line-shell-dragging",
@@ -6749,7 +7457,7 @@ export default function App() {
                   ? "border-emerald-300/25 bg-emerald-500/12 text-emerald-100"
                   : "border-white/10 bg-white/[0.04] text-slate-300"
               )}>
-                {timerText}
+                <TaskRuntimeLabel task={task} mode="line" />
               </span>
             </div>
 
@@ -6766,18 +7474,18 @@ export default function App() {
               "mt-3 grid gap-2",
               dualParallel ? "grid-cols-2" : tripleParallel ? "grid-cols-1" : "grid-cols-3"
             )}>
-              <div className="rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-2">
-                <div className="text-[10px] text-slate-500">预计</div>
-                <div className="mt-1 text-[11px] font-semibold text-slate-800">{task.estimated_minutes}m</div>
+              <div className="task-metric-chip rounded-xl px-2.5 py-2">
+                <div className="task-metric-chip-label text-[10px]">预计</div>
+                <div className="task-metric-chip-value mt-1 text-[11px] font-semibold">{task.estimated_minutes}m</div>
               </div>
-              <div className="rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-2">
-                <div className="text-[10px] text-slate-500">负荷</div>
-                <div className="mt-1 text-[11px] font-semibold text-slate-800">{getCognitiveLoadLabel(task.cognitive_load || 'low')}</div>
+              <div className="task-metric-chip rounded-xl px-2.5 py-2">
+                <div className="task-metric-chip-label text-[10px]">负荷</div>
+                <div className="task-metric-chip-value mt-1 text-[11px] font-semibold">{getCognitiveLoadLabel(task.cognitive_load || 'low')}</div>
               </div>
               {!dualParallel && !tripleParallel && (
-                <div className="rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-2">
-                  <div className="text-[10px] text-slate-500">协作</div>
-                  <div className="mt-1 text-[11px] font-semibold text-slate-800">{getCollaborationLevelLabel(task.collaboration_level || 'low')}</div>
+                <div className="task-metric-chip rounded-xl px-2.5 py-2">
+                  <div className="task-metric-chip-label text-[10px]">协作</div>
+                  <div className="task-metric-chip-value mt-1 text-[11px] font-semibold">{getCollaborationLevelLabel(task.collaboration_level || 'low')}</div>
                 </div>
               )}
             </div>
@@ -6853,7 +7561,7 @@ export default function App() {
                 )}
               >
                 {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                {task.tracking_started_at ? formatDurationFromMs(getTrackedMs(task, nowTs)) : '开始'}
+                <TaskRuntimeLabel task={task} mode="button" />
               </button>
             </div>
           </>
@@ -6861,6 +7569,39 @@ export default function App() {
       </div>
     );
   };
+
+  const renderDependencyLines = () => (
+    activeTasks.flatMap((task) =>
+      task.dependency_ids.map((dependencyId) => {
+        const fromTask = taskById.get(dependencyId);
+        if (!fromTask || fromTask.status === 'completed') return null;
+        const edgeReady = isDependencySatisfied(fromTask);
+        return (
+          <line
+            key={`${dependencyId}-${task.id}`}
+            x1={fromTask.x}
+            y1={getTaskRenderY(fromTask, nowTs)}
+            x2={task.x}
+            y2={getTaskRenderY(task, nowTs)}
+            stroke={edgeReady ? '#22c55e' : '#94a3b8'}
+            strokeOpacity={edgeReady ? 0.8 : 0.55}
+            strokeWidth={0.35}
+            markerEnd={edgeReady ? 'url(#dependency-arrow-ready)' : 'url(#dependency-arrow-blocked)'}
+          />
+        );
+      })
+    )
+  );
+
+  const renderTaskPoint = (task: Task) => (
+    <TaskPoint
+      key={task.id}
+      task={task}
+      nowTs={nowTs}
+      onOpen={() => setSelectedTask(task)}
+      onMove={updateTaskPosition}
+    />
+  );
 
   const renderMotivationScene = () => {
     if (activeMotivationMode === 'special:mokugyo') {
@@ -7044,10 +7785,10 @@ export default function App() {
               <button
                 onClick={() => setCurrentView('tasks')}
                 className={cn(
-                  "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all",
+                  "flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition-all",
                   currentView === 'tasks'
-                    ? "border border-rose-400/30 bg-rose-500/20 text-rose-50"
-                    : "border border-transparent bg-transparent text-slate-300 hover:bg-white/8"
+                    ? "border-[color:var(--brand-border)] bg-[color:var(--theme-chip-bg)] text-[color:var(--text-strong)] shadow-[0_10px_24px_rgba(2,8,18,0.08)]"
+                    : "border-transparent bg-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-muted)] hover:text-[color:var(--text-strong)]"
                 )}
               >
                 <LayoutGrid className="h-4 w-4" />
@@ -7056,10 +7797,10 @@ export default function App() {
               <button
                 onClick={() => setCurrentView('world_news')}
                 className={cn(
-                  "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all",
+                  "flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition-all",
                   currentView === 'world_news'
-                    ? "border border-rose-400/30 bg-rose-500/20 text-rose-50"
-                    : "border border-transparent bg-transparent text-slate-300 hover:bg-white/8"
+                    ? "border-[color:var(--brand-border)] bg-[color:var(--theme-chip-bg)] text-[color:var(--text-strong)] shadow-[0_10px_24px_rgba(2,8,18,0.08)]"
+                    : "border-transparent bg-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-muted)] hover:text-[color:var(--text-strong)]"
                 )}
               >
                 <Globe className="h-4 w-4" />
@@ -7564,7 +8305,7 @@ export default function App() {
                                   </button>
                                 </div>
                                 <div className="mt-1 flex items-center justify-between text-[10px] text-cyan-100/80">
-                                  <span>{formatDurationFromMs(getTrackedMs(task, nowTs))}</span>
+                                  <TaskRuntimeLabel task={task} mode="plain" />
                                   <span>{'\u8017\u80fd'} {getTaskLiveEnergyBurn(task, nowTs, behaviorBurnRateModifier).toFixed(1)}</span>
                                 </div>
                               </div>
@@ -7608,7 +8349,7 @@ export default function App() {
                                 </div>
                                 <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-300">
                                   <span>{'\u9884\u4f30'} {task.estimated_minutes}m</span>
-                                  <span>{'\u5b9e\u9645'} {getDisplayedActualMinutes(task, nowTs)}m</span>
+                                  <TaskActualMinutesLabel task={task} />
                                   <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
                                 </div>
                               </div>
@@ -8039,39 +8780,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {currentView === 'tasks' && (
-        <>
-          <button
-            type="button"
-            onClick={() => setHomeSurface('line')}
-            disabled={homeSurface === 'line'}
-            className={cn(
-              "surface-edge-button surface-edge-button-left",
-              homeSurface === 'line' ? "surface-edge-button-active" : "surface-edge-button-idle"
-            )}
-            aria-label="切换到任务线"
-          >
-            <span className="surface-edge-button-icon">
-              <ChevronLeft className="h-4.5 w-4.5" />
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setHomeSurface('map')}
-            disabled={homeSurface === 'map'}
-            className={cn(
-              "surface-edge-button surface-edge-button-right",
-              homeSurface === 'map' ? "surface-edge-button-active" : "surface-edge-button-idle"
-            )}
-            aria-label="切换到任务地图"
-          >
-            <span className="surface-edge-button-icon">
-              <ChevronRight className="h-4.5 w-4.5" />
-            </span>
-          </button>
-        </>
-      )}
-
       <main className="relative flex flex-1 overflow-hidden">
         <div className="custom-scrollbar flex-1 overflow-y-auto px-3 pb-4 sm:px-4 lg:px-5 sm:pb-6">
           <div className="mx-auto grid max-w-[1360px] gap-5 pt-4">
@@ -8099,213 +8807,48 @@ export default function App() {
 
               <section className="hidden" />
 
-                {homeSurface === 'line' && (
-              <section className="mx-4 mt-4 sm:mx-6 home-stage rounded-[1.9rem] border border-white/10 bg-[linear-gradient(160deg,rgba(6,17,29,0.96),rgba(9,25,37,0.88))] p-5 shadow-[0_26px_64px_rgba(2,8,18,0.34)] sm:p-6">
-                <div className="home-stage-header">
-                  <div className="min-w-0 flex-1">
-                    <p className="home-stage-kicker text-[10px] font-bold uppercase tracking-[0.24em] text-rose-200/70">任务线</p>
-                    <div className="home-line-title-row">
-                      <h3 className="text-[clamp(1.42rem,2.6vw,2.2rem)] font-semibold leading-tight text-white text-safe-wrap">
-                        任务线
-                      </h3>
-                      {renderInlineEnergyBar('line-title')}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="home-stage-body">
-                  <div className="home-focus-column">
-                    <div className="home-focus-shell">
-                      <div className="home-focus-meta">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">现在先做</p>
-                          <h4 className="mt-1 text-[1.05rem] font-semibold leading-6 text-white text-safe-wrap">
-                            {currentPrimaryTask ? '当前主线' : '先拖一个任务进来'}
-                          </h4>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setIsTaskListOpen(true)}
-                            className="home-open-list rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
-                          >
-                            打开清单
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setIsDesignPanelOpen(true)}
-                            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
-                          >
-                            AI设计
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleAddTask}
-                            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
-                          >
-                            新建任务
-                          </button>
-                        </div>
-                      </div>
-
-                      <div
-                        className="home-focus-card-wrap"
-                        onDragOver={(event) => {
-                          event.preventDefault();
-                          event.dataTransfer.dropEffect = 'move';
-                        }}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
-                          if (!droppedTaskId) return;
-                          setPrimaryTaskId(droppedTaskId);
-                          setDraggedLineTaskId(null);
-                          setDragOverLineTaskId(null);
-                          setDragOverLineZone(null);
-                        }}
-                      >
-                        {currentPrimaryTask ? (
-                          renderTaskCard(currentPrimaryTask, {
-                            laneLabel: currentPrimaryTask.tracking_started_at ? '正在推进' : '主任务',
-                            tone: 'focus',
-                          })
-                        ) : (
-                          <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
-                            拖一个任务到这里。
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="mt-3 rounded-[1.1rem] border border-white/10 bg-white/[0.03] px-4 py-4">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">AI 建议</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={requestHourlyFocusCheckin}
-                            disabled={isGeneratingFocusCheckin || runningTasks.length === 0}
-                            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isGeneratingFocusCheckin ? '生成中...' : '现在校准'}
-                          </button>
-                        </div>
-                        {focusCheckin?.summary && (
-                          <p className="mt-3 text-[12px] leading-6 text-slate-300 text-safe-wrap">{focusCheckin.summary}</p>
-                        )}
-                        {(focusCheckin?.reason || focusCheckin?.reply_prompt) && (
-                          <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/55 px-3 py-3">
-                            {focusCheckin?.reason && (
-                              <p className="text-[11px] leading-5 text-slate-300 text-safe-wrap">{focusCheckin.reason}</p>
-                            )}
-                            {focusCheckin?.reply_prompt && (
-                              <p className="mt-2 text-[11px] font-semibold text-rose-100 text-safe-wrap">{focusCheckin.reply_prompt}</p>
-                            )}
-                          </div>
-                        )}
-                        {focusCheckinError && (
-                          <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
-                            {focusCheckinError}
-                          </div>
-                        )}
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => respondToFocusCheckin('continue')}
-                            disabled={focusCheckin?.status !== 'pending'}
-                            className="rounded-full border border-emerald-300/30 bg-emerald-500/14 px-3 py-1.5 text-[11px] font-semibold text-emerald-100 transition-colors hover:bg-emerald-500/22 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            继续
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => respondToFocusCheckin('rest')}
-                            disabled={focusCheckin?.status !== 'pending'}
-                            className="rounded-full border border-sky-300/30 bg-sky-500/14 px-3 py-1.5 text-[11px] font-semibold text-sky-100 transition-colors hover:bg-sky-500/22 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            休息一下
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => respondToFocusCheckin('pause')}
-                            disabled={focusCheckin?.status !== 'pending'}
-                            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            保持暂停
-                          </button>
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-
-                  <div className="home-side-column">
-                    <section className="home-stack-card">
-                      <div className="home-stack-head">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">任务排布</p>
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-300">
-                          <span>{homeLineTasks.length} 项</span>
-                        </div>
-                      </div>
-                      <div className="home-stack-body custom-scrollbar space-y-3">
-                        {homeLineRows.length === 0 ? (
-                          <div className="rounded-[1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
-                            空
-                          </div>
-                        ) : (
-                          homeLineRows.map((row) => (
-                            <div
-                              key={row.id}
-                              onDragOver={(event) => {
-                                event.preventDefault();
-                                event.dataTransfer.dropEffect = 'move';
-                                setDragOverLineTaskId(null);
-                                setDragOverLineZone(null);
-                              }}
-                              onDrop={(event) => {
-                                event.preventDefault();
-                                const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
-                                if (!droppedTaskId) return;
-                                moveTaskToLine(droppedTaskId, row.tasks[0]?.id || null, homeLineTasks.map((item) => item.id), row.mode);
-                                setDraggedLineTaskId(null);
-                                setDragOverLineTaskId(null);
-                                setDragOverLineZone(null);
-                              }}
-                              className={cn(
-                                "rounded-[1rem] border px-3 py-3",
-                                row.mode === 'parallel'
-                                  ? "parallel-row-shell border-sky-200/40 bg-sky-500/[0.05]"
-                                  : "border-white/10 bg-white/[0.03]"
-                              )}
-                            >
-                              <div className={cn(
-                                "grid gap-3",
-                                row.mode === 'parallel'
-                                  ? row.tasks.length >= 3
-                                    ? "md:grid-cols-2 xl:grid-cols-3"
-                                    : row.tasks.length === 2
-                                      ? "md:grid-cols-2"
-                                      : "grid-cols-1"
-                                  : "grid-cols-1"
-                              )}>
-                                {row.tasks.map((task) => renderTaskLine(task, {
-                                  emphasis: row.mode === 'parallel' ? 'standby' : 'default',
-                                  laneMode: row.mode,
-                                  taskIds: homeLineTasks.map((item) => item.id),
-                                  rowTaskCount: row.tasks.length,
-                                }))}
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </section>
-                  </div>
-                </div>
-              </section>
-              )}
+              <TasksHomeView
+                homeSurface={homeSurface === 'map' ? 'map' : 'line'}
+                setHomeSurface={setHomeSurface}
+                renderInlineEnergyBar={renderInlineEnergyBar}
+                currentPrimaryTask={currentPrimaryTask}
+                currentPrimaryTasks={currentPrimaryTasks}
+                currentPrimaryIsParallel={currentPrimaryIsParallel}
+                setIsTaskListOpen={setIsTaskListOpen}
+                setIsDesignPanelOpen={setIsDesignPanelOpen}
+                handleAddTask={handleAddTask}
+                draggedLineTaskId={draggedLineTaskId}
+                setPrimaryTaskId={setPrimaryTaskId}
+                clearTaskDragState={endTaskDrag}
+                renderTaskCard={renderTaskCard}
+                requestHourlyFocusCheckin={requestHourlyFocusCheckin}
+                isGeneratingFocusCheckin={isGeneratingFocusCheckin}
+                runningTasks={runningTasks}
+                focusCheckin={focusCheckin}
+                focusCheckinError={focusCheckinError}
+                respondToFocusCheckin={respondToFocusCheckin}
+                homeLineTasks={homeLineTasks}
+                homeLineRows={homeLineRows}
+                moveTaskToLine={moveTaskToLine}
+                renderTaskLine={renderTaskLine}
+                setDragOverLineTaskId={setDragOverLineTaskId}
+                setDragOverLineZone={setDragOverLineZone}
+                energyMapTasks={energyMapTasks}
+                energyElevatorGroups={energyElevatorGroups}
+                dragOverLineTaskId={dragOverLineTaskId}
+                moveTaskToElevatorLevel={moveTaskToElevatorLevel}
+                endTaskDrag={endTaskDrag}
+                startTaskDrag={startTaskDrag}
+                setSelectedTask={setSelectedTask}
+                quadrantRef={quadrantRef}
+                handleQuadrantClick={handleQuadrantClick}
+                isPlacementMode={isPlacementMode}
+                mousePos={mousePos}
+                renderDependencyLines={renderDependencyLines}
+                renderTaskPoint={renderTaskPoint}
+                activeTasks={activeTasks}
+                archivedTasks={archivedTasks}
+              />
 
               <section className="hidden">
                 <div className="rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,18,31,0.94),rgba(8,19,31,0.86))] p-5 shadow-[0_20px_52px_rgba(2,8,18,0.28)]">
@@ -8517,222 +9060,6 @@ export default function App() {
                 </div>
               </section>
 
-              {homeSurface === 'map' && (
-              <section className="mx-4 mt-5 sm:mx-6 home-map-panel rounded-[1.9rem] border border-white/10 p-6 sm:p-7">
-                <div className="home-map-summary">
-                  <div className="home-map-copy">
-                    <div className="home-map-title-row">
-                      <h3 className="text-[clamp(1.2rem,2vw,1.7rem)] font-semibold text-white text-safe-wrap">任务地图</h3>
-                      {renderInlineEnergyBar('map-title')}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="home-map-layout">
-                  <section className="elevator-map-panel rounded-[1.6rem] border border-white/10">
-                    <div className="elevator-map-head">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">体力电梯图</p>
-                      </div>
-                      <span className="elevator-map-badge">{energyMapTasks.length} 项</span>
-                    </div>
-                    <div className="elevator-map-board">
-                      {energyElevatorGroups.map((group) => (
-                        <section key={group.level} className={cn("elevator-level", `elevator-level-${group.level}`)}>
-                          <div className="elevator-level-head">
-                            <strong>{group.label}</strong>
-                            <span>{group.hint}</span>
-                          </div>
-                          <div
-                            className="elevator-level-body"
-                            onDragOver={(event) => {
-                              event.preventDefault();
-                              event.dataTransfer.dropEffect = 'move';
-                            }}
-                            onDrop={(event) => {
-                              event.preventDefault();
-                              const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
-                              if (!droppedTaskId) return;
-                              moveTaskToElevatorLevel(
-                                droppedTaskId,
-                                group.level,
-                                group.tasks[group.tasks.length - 1]?.id || null,
-                                energyMapTasks.map((item) => item.id)
-                              );
-                              endTaskDrag();
-                            }}
-                          >
-                            {group.displayGroups.length === 0 ? (
-                              <div className="elevator-empty">这一层今天先空着</div>
-                            ) : group.displayGroups.map((displayGroup) => (
-                              <div
-                                key={`elevator-group-${displayGroup.key}`}
-                                className={cn("elevator-display-group", displayGroup.parallel && "elevator-display-group-parallel")}
-                              >
-                                {displayGroup.tasks.map((task) => (
-                                  <div
-                                    key={`elevator-${task.id}`}
-                                    onDragOver={(event) => {
-                                      event.preventDefault();
-                                      event.dataTransfer.dropEffect = 'move';
-                                      if (dragOverLineTaskId !== task.id) setDragOverLineTaskId(task.id);
-                                    }}
-                                    onDragLeave={() => {
-                                      if (dragOverLineTaskId === task.id) setDragOverLineTaskId(null);
-                                    }}
-                                    onDrop={(event) => {
-                                      event.preventDefault();
-                                      const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
-                                      if (!droppedTaskId) return;
-                                      moveTaskToElevatorLevel(
-                                        droppedTaskId,
-                                        group.level,
-                                        task.id,
-                                        energyMapTasks.map((item) => item.id)
-                                      );
-                                      endTaskDrag();
-                                    }}
-                                    className={cn(
-                                      "elevator-task-chip",
-                                      draggedLineTaskId === task.id && "elevator-task-chip-dragging",
-                                      dragOverLineTaskId === task.id && draggedLineTaskId !== task.id && "elevator-task-chip-drop"
-                                    )}
-                                  >
-                                    <div className="elevator-task-chip-top">
-                                      <div
-                                        className="elevator-task-drag"
-                                        draggable
-                                        onDragStart={(event) => startTaskDrag(event, task.id)}
-                                        onDragEnd={endTaskDrag}
-                                      >
-                                        <GripVertical className="h-3.5 w-3.5" />
-                                      </div>
-                                      <button
-                                        type="button"
-                                        draggable={false}
-                                        onPointerDown={(event) => event.stopPropagation()}
-                                        onClick={() => setSelectedTask(task)}
-                                        className="elevator-task-main"
-                                      >
-                                        <span className="elevator-task-title">{task.title || '未命名任务'}</span>
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ))}
-                          </div>
-                        </section>
-                      ))}
-                    </div>
-                  </section>
-
-                  <div
-                    ref={quadrantRef}
-                    onClick={handleQuadrantClick}
-                    className={cn(
-                      "quadrant-board relative quadrant-grid aspect-square w-full overflow-hidden rounded-[1.8rem] border border-white/10 transition-all duration-500",
-                      isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
-                    )}
-                  >
-                    <div className="pointer-events-none absolute inset-0 z-0 quadrant-tints">
-                      <div className="quadrant-tint quadrant-tint-nw" />
-                      <div className="quadrant-tint quadrant-tint-ne" />
-                      <div className="quadrant-tint quadrant-tint-sw" />
-                      <div className="quadrant-tint quadrant-tint-se" />
-                    </div>
-                    <div className="pointer-events-none absolute inset-0 z-[2]">
-                      <div className="quadrant-axis-line quadrant-axis-line-vertical absolute left-1/2 top-0 h-full w-px" />
-                      <div className="quadrant-axis-line quadrant-axis-line-horizontal absolute left-0 top-1/2 h-px w-full" />
-
-                      <div className="quadrant-caption quadrant-caption-nw" data-zone="quick">
-                        <strong>快清区</strong>
-                      </div>
-                      <div className="quadrant-caption quadrant-caption-ne" data-zone="focus">
-                        <strong>主战区</strong>
-                      </div>
-                      <div className="quadrant-caption quadrant-caption-sw" data-zone="release">
-                        <strong>回收区</strong>
-                      </div>
-                      <div className="quadrant-caption quadrant-caption-se" data-zone="build">
-                        <strong>积累区</strong>
-                      </div>
-                    </div>
-                    <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                      <defs>
-                        <marker id="dependency-arrow-blocked" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-                          <path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" />
-                        </marker>
-                        <marker id="dependency-arrow-ready" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-                          <path d="M0,0 L8,4 L0,8 z" fill="#22c55e" />
-                        </marker>
-                      </defs>
-                      {activeTasks.flatMap((task) =>
-                        task.dependency_ids.map((dependencyId) => {
-                          const fromTask = taskById.get(dependencyId);
-                          if (!fromTask) return null;
-                          if (fromTask.status === 'completed') return null;
-                          const edgeReady = isDependencySatisfied(fromTask);
-                          return (
-                            <line
-                              key={`${dependencyId}-${task.id}`}
-                              x1={fromTask.x}
-                              y1={getTaskRenderY(fromTask, nowTs)}
-                              x2={task.x}
-                              y2={getTaskRenderY(task, nowTs)}
-                              stroke={edgeReady ? '#22c55e' : '#94a3b8'}
-                              strokeOpacity={edgeReady ? 0.8 : 0.55}
-                              strokeWidth={0.35}
-                              markerEnd={edgeReady ? 'url(#dependency-arrow-ready)' : 'url(#dependency-arrow-blocked)'}
-                            />
-                          );
-                        })
-                      )}
-                    </svg>
-
-                    {isPlacementMode && mousePos && (
-                      <div
-                        className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
-                        style={{ left: `${mousePos.x}%`, top: `${mousePos.y}%` }}
-                      >
-                        <div className="w-8 h-8 rounded-2xl border-2 border-dashed border-teal-400 bg-teal-50/50 flex items-center justify-center animate-pulse">
-                          <Plus className="w-4 h-4 text-teal-400" />
-                        </div>
-                      </div>
-                    )}
-
-                    {activeTasks.map(task => (
-                      <TaskPoint
-                        key={task.id}
-                        task={task}
-                        nowTs={nowTs}
-                        onOpen={() => setSelectedTask(task)}
-                        onMove={updateTaskPosition}
-                      />
-                    ))}
-
-                    {activeTasks.length === 0 && archivedTasks.length === 0 && !isPlacementMode && (
-                      <div className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center p-5 sm:p-8">
-                        <div className="quadrant-empty max-w-md text-center">
-                          <p className="quadrant-empty-kicker">矩阵已清空</p>
-                          <h3 className="quadrant-empty-title">先把第一个任务放进四象限，再决定今天的路线</h3>
-                          <p className="quadrant-empty-copy">
-                            点一下坐标区就能落点。越靠右越重要，越靠上越紧急。
-                          </p>
-                          <button
-                            type="button"
-                            onClick={handleAddTask}
-                            className="pointer-events-auto mt-4 rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
-                          >
-                            新建第一个任务
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </section>
-              )}
             </div>
 
             <aside className="hidden">
@@ -8953,13 +9280,16 @@ export default function App() {
                               </div>
                             </div>
                             <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-semibold">
-                              <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
-                                实际 {getDisplayedActualMinutes(task, nowTs)}m
-                              </span>
+                              <TaskActualMinutesLabel
+                                task={task}
+                                className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100"
+                              />
                               {task.tracking_started_at && (
-                                <span className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100">
-                                  计时中 {formatDurationFromMs(getTrackedMs(task, nowTs))}
-                                </span>
+                                <TaskRuntimeLabel
+                                  task={task}
+                                  mode="card"
+                                  className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-100"
+                                />
                               )}
                             </div>
                             <div className="mt-5 flex items-center gap-4">
@@ -9198,9 +9528,10 @@ export default function App() {
                         <p className="mt-2 text-sm font-semibold text-white">
                           {selectedTask.tracking_started_at ? '计时进行中' : '当前未计时'}
                         </p>
-                        <p className="mt-1 text-[11px] leading-5 text-cyan-100/80">
-                          已累计 {formatDurationFromMs(getTrackedMs(selectedTask, nowTs))}，折算实际用时 {getDisplayedActualMinutes(selectedTask, nowTs)} 分钟。
-                        </p>
+                        <TaskRuntimeBreakdown
+                          task={selectedTask}
+                          className="mt-1 text-[11px] leading-5 text-cyan-100/80"
+                        />
                         <p className="mt-1 text-[11px] leading-5 text-cyan-100/80">
                           当前实时精力消耗速率 {getTaskEnergyBurnRate(selectedTask, behaviorBurnRateModifier)}/小时。
                         </p>
@@ -9637,11 +9968,7 @@ export default function App() {
                     ))}
                     <button
                       onClick={() => {
-                        const newStep: TaskStep = {
-                          id: Math.random().toString(36).substr(2, 9),
-                          text: '',
-                          completed: false
-                        };
+                        const newStep = createTaskStep();
                         setSelectedTask({ ...selectedTask, steps: [...selectedTask.steps, newStep] });
                       }}
                       className="w-full py-3 border border-dashed border-white/20 bg-white/[0.02] rounded-2xl text-sm text-slate-400 font-semibold flex items-center justify-center gap-2 hover:border-teal-500/50 hover:text-teal-300 hover:bg-teal-500/5 transition-all"
@@ -9707,21 +10034,26 @@ export default function App() {
 
       <PointerParticles />
 
-      <div className="fixed bottom-5 right-5 z-[60] flex flex-col items-end gap-2.5">
+      <div className="pointer-events-none fixed z-[96] flex flex-col items-end gap-2.5">
         <AnimatePresence>
           {isBehaviorChatOpen && (
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10, originX: 1, originY: 1 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="behavior-chat-shell flex h-[33rem] w-[21rem] min-w-0 flex-col p-3 cursor-auto"
+              style={{
+                position: 'fixed',
+                right: `${Math.max(16, live2dUiAnchor.right + (isLive2dReady ? Math.round(live2dUiAnchor.height * 0.72) : 0))}px`,
+                top: `${Math.max(16, live2dUiAnchor.top - 536)}px`,
+                zIndex: 96,
+              }}
+              className="behavior-chat-shell pointer-events-auto flex h-[33rem] w-[21rem] min-w-0 flex-col p-3 cursor-auto"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-50/85">小猫助手</p>
-                  <h4 className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
+                  <h4 className="flex items-center gap-2 text-sm font-semibold text-white">
                     <MessageSquare className="h-4 w-4 text-cyan-300" />
-                    聊聊现在的状态
+                    聊聊现在
                   </h4>
                 </div>
                 <button
@@ -9733,18 +10065,14 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="mt-2 flex items-center justify-between text-[11px] text-cyan-50/85">
-                <span className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1">{activeBehaviorEvents.length} 个当前效果</span>
-                <span className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1">精力 {todayInitialEnergy}</span>
-              </div>
-
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {EXTERNAL_BEHAVIOR_PRESETS.slice(0, 4).map((preset) => (
                   <button
                     key={`quick-behavior-${preset.id}`}
                     type="button"
                     onClick={() => submitBehaviorChat(`我${preset.label}了`)}
-                    className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] font-semibold text-slate-100 transition-colors hover:bg-white/[0.09]"
+                    disabled={isBehaviorChatSending}
+                    className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] font-semibold text-slate-100 transition-colors hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     {preset.label}
                   </button>
@@ -9752,38 +10080,60 @@ export default function App() {
               </div>
 
               <div className="behavior-dialog-panel mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950/55">
-                <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto px-3 py-3">
+                <div ref={behaviorChatViewportRef} className="custom-scrollbar flex-1 space-y-2 overflow-y-auto px-3 py-3">
                   {todayChatMessages.length === 0 ? (
                     <div className="behavior-chat-empty rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[13px] leading-6 text-slate-200">
-                      还没有记录。试试输入“我喝茶了”，系统会立刻把它转成精力。
+                      你好呀
                     </div>
                   ) : (
                     todayChatMessages.map((message) => (
                       <div
                         key={message.id}
-                        className={cn(
-                          "behavior-message-bubble max-w-[92%] rounded-2xl px-3 py-2 text-[13px] leading-6 shadow-[0_8px_24px_rgba(0,0,0,0.16)]",
-                          message.role === 'user'
-                            ? 'ml-auto border border-cyan-300/20 bg-cyan-500/16 text-cyan-50'
-                            : 'border border-white/10 bg-white/[0.04] text-slate-200'
-                        )}
+                        className={cn("behavior-message-row flex", message.role === 'user' ? 'justify-end' : 'justify-start')}
                       >
-                        <div className="whitespace-pre-wrap break-words">{message.text}</div>
+                        <div
+                          className={cn(
+                            "behavior-message-bubble max-w-[92%] rounded-2xl px-3 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.16)]",
+                            message.role === 'user' ? 'behavior-message-user' : 'behavior-message-assistant'
+                          )}
+                        >
+                          <div className="behavior-message-role">
+                            {message.role === 'user' ? '你' : '助手'}
+                          </div>
+                          <div className="behavior-message-text whitespace-pre-wrap break-words">{message.text}</div>
+                        </div>
                       </div>
                     ))
+                  )}
+                  {isBehaviorChatSending && (
+                    <div className="behavior-message-row flex justify-start">
+                      <div className="behavior-message-bubble behavior-message-assistant max-w-[92%] rounded-2xl px-3 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+                        <div className="behavior-message-role">助手</div>
+                        <div className="inline-flex items-center gap-2 text-[13px] text-cyan-100/90">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          正在想
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
 
                 <div className="border-t border-white/8 px-3 py-3">
+                  {behaviorChatError ? (
+                    <div className="mb-2 rounded-xl border border-amber-300/20 bg-amber-400/[0.08] px-3 py-2 text-[12px] text-amber-100">
+                      {behaviorChatError}
+                    </div>
+                  ) : null}
                   <div className="behavior-dialog-input flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
                     <input
                       type="text"
                       value={behaviorChatInput}
                       onChange={(e) => setBehaviorChatInput(e.target.value)}
+                      disabled={isBehaviorChatSending}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
-                          submitBehaviorChat();
+                          void submitBehaviorChat();
                         }
                       }}
                       placeholder={BEHAVIOR_CHAT_PLACEHOLDER}
@@ -9791,11 +10141,14 @@ export default function App() {
                     />
                     <button
                       type="button"
-                      onClick={() => submitBehaviorChat()}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-500/16 text-cyan-100 transition-colors hover:bg-cyan-500/24"
+                      disabled={isBehaviorChatSending}
+                      onClick={() => {
+                        void submitBehaviorChat();
+                      }}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-500/16 text-cyan-100 transition-colors hover:bg-cyan-500/24 disabled:cursor-not-allowed disabled:opacity-55"
                       aria-label="发送行为记录"
                     >
-                      <Send className="h-4 w-4" />
+                      {isBehaviorChatSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
@@ -9812,9 +10165,14 @@ export default function App() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.96 }}
               onClick={() => setIsBehaviorChatOpen(true)}
-              className="behavior-nudge self-end text-left"
+              style={{
+                position: 'fixed',
+                right: `${Math.max(16, live2dUiAnchor.right + (isLive2dReady ? Math.round(live2dUiAnchor.height * 0.34) : 0))}px`,
+                top: `${Math.max(16, live2dUiAnchor.top - 92)}px`,
+                zIndex: 96,
+              }}
+              className="behavior-nudge pointer-events-auto self-end text-left"
             >
-              <span className="behavior-nudge-label">小猫刚刚说</span>
               <span className="behavior-nudge-text">{behaviorNudge}</span>
             </motion.button>
           )}
@@ -9823,8 +10181,8 @@ export default function App() {
         {!isLive2dReady && (
           <button
             onClick={() => setIsBehaviorChatOpen((prev) => !prev)}
-            className="behavior-chat-trigger self-end"
-            title="打开行为助手"
+            className="behavior-chat-trigger pointer-events-auto self-end"
+            title="打开聊天"
           >
             <MessageSquare className="h-5 w-5" />
           </button>

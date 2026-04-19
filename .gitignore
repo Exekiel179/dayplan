@@ -8,3 +8,16 @@ coverage/
 !.env.example
 .data/
 artifacts/
+.mcp-shots/
+App_utf8.tsx
+pre_revert_App.tsx
+index_clean.css
+index_utf8.css
+pre_revert_index.css
+tmp_index.css
+BUGFIX_SUMMARY.md
+PROJECT_MEMORY.md
+verify_bugfix.md
+verify_frontend.py
+frontend_debug.png
+devserver.err

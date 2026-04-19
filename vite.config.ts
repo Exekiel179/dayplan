@@ -221,12 +221,62 @@ const SYSTEM_PROMPT = `你是一位高执行力任务规划助手。请严格返
 1. steps 至少 4 条。
 2. 每条步骤要具体、可执行。
 3. plan 使用中文并包含小标题。`;
+const BEHAVIOR_CHAT_SYSTEM_PROMPT = `你是任务管理页面里的 AI 小猫助手，负责把用户的自然语言状态转成温柔、简洁、可执行的中文回复。请严格返回 JSON，不要有任何额外文字。
+返回结构:
+{
+  "reply": "给用户的一段中文回复",
+  "suggested_motion": "heart 或 star 或 blush 或 cry 或 angry 或 money 或 pet 或 gesture 或 idle"
+}
+要求:
+1. reply 最多 3 句，优先给出当下最值得做的下一步。
+2. 如果输入里有恢复行为（如喝茶、散步、午睡），要自然吸收 localInsight。
+3. 如果用户明显疲惫或分心，优先帮助他降负荷。
+4. 如果当前有主任务，建议尽量落到主任务或正在计时的任务上。
+5. 所有输出使用中文。`;
 
 function buildPrompt(task: PlanTask) {
   return `帮我为这个任务制定一个详细执行计划。
 任务名称：${task.title}
 任务描述：${task.description || '无'}
 请按要求返回。`;
+}
+
+function buildBehaviorChatPrompt(payload: {
+  message?: string;
+  localInsight?: string;
+  energyScore?: number;
+  pressureScore?: number;
+  primaryTask?: {
+    title?: string;
+    next_action?: string;
+    current_session_minutes?: number;
+  } | null;
+  runningTasks?: Array<{ title?: string; execution_mode?: string; current_session_minutes?: number }>;
+  recentMessages?: Array<{ role?: string; text?: string }>;
+}) {
+  const primaryTask = payload.primaryTask;
+  const runningTasks = Array.isArray(payload.runningTasks) ? payload.runningTasks : [];
+  const recentMessages = Array.isArray(payload.recentMessages) ? payload.recentMessages : [];
+  return `请回复这位用户的最新一条消息，并兼顾精力管理与任务推进。
+
+用户最新输入：
+${payload.message || ''}
+
+本地规则给出的参考：
+${payload.localInsight || '无'}
+
+当前状态：
+- 精力：${Number.isFinite(Number(payload.energyScore)) ? Number(payload.energyScore) : 60}
+- 压力：${Number.isFinite(Number(payload.pressureScore)) ? Number(payload.pressureScore) : 50}
+
+主任务：
+${primaryTask ? `${primaryTask.title || '未命名任务'}｜${primaryTask.next_action || '未提供下一步'}｜${primaryTask.current_session_minutes || 0} 分钟` : '当前没有明确主任务。'}
+
+正在计时：
+${runningTasks.length > 0 ? runningTasks.slice(0, 3).map((task, index) => `${index + 1}. ${task.title || '未命名任务'}｜${task.execution_mode || 'serial'}｜${task.current_session_minutes || 0} 分钟`).join('\n') : '当前没有正在计时的任务。'}
+
+最近对话：
+${recentMessages.length > 0 ? recentMessages.slice(-8).map((item) => `${item.role === 'assistant' ? '助手' : '用户'}：${item.text || ''}`).join('\n') : '这是今天的第一轮对话。'}`;
 }
 
 function parsePlanPayload(raw: string) {
@@ -239,6 +289,20 @@ function parsePlanPayload(raw: string) {
     steps: Array.isArray(parsed.steps)
       ? parsed.steps.filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
       : []
+  };
+}
+
+function parseBehaviorChatPayload(raw: string) {
+  const trimmed = raw.trim();
+  const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+  const jsonText = jsonMatch?.[0] || trimmed;
+  const parsed = JSON.parse(jsonText);
+  const motion = typeof parsed.suggested_motion === 'string' ? parsed.suggested_motion.trim() : '';
+  return {
+    reply: typeof parsed.reply === 'string' ? parsed.reply.trim() : '',
+    suggested_motion: ['heart', 'star', 'blush', 'cry', 'angry', 'money', 'pet', 'gesture', 'idle'].includes(motion)
+      ? motion
+      : 'idle',
   };
 }
 
@@ -299,6 +363,66 @@ async function requestAiPlan(task: PlanTask, aiConfig: AiConfig) {
     return await requestPlanByChatCompletions(task, aiConfig);
   } catch {
     return requestPlanByGemini(task, aiConfig);
+  }
+}
+
+async function requestBehaviorChatByChatCompletions(payload: unknown, aiConfig: AiConfig) {
+  const response = await fetch(`${aiConfig.apiBase}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${aiConfig.apiKey}`
+    },
+    body: JSON.stringify({
+      model: aiConfig.model,
+      temperature: 0.45,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: BEHAVIOR_CHAT_SYSTEM_PROMPT },
+        { role: 'user', content: buildBehaviorChatPrompt((payload || {}) as Parameters<typeof buildBehaviorChatPrompt>[0]) }
+      ]
+    })
+  });
+
+  if (!response.ok) throw new Error(`chat completions failed: ${response.status}`);
+
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) throw new Error('chat completions returned empty content');
+  return parseBehaviorChatPayload(content);
+}
+
+async function requestBehaviorChatByGemini(payload: unknown, aiConfig: AiConfig) {
+  const response = await fetch(`${aiConfig.apiBase}/v1beta/models/${aiConfig.model}:generateContent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${aiConfig.apiKey}`,
+      'x-goog-api-key': aiConfig.apiKey
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `${BEHAVIOR_CHAT_SYSTEM_PROMPT}\n\n${buildBehaviorChatPrompt((payload || {}) as Parameters<typeof buildBehaviorChatPrompt>[0])}` }] }],
+      generationConfig: {
+        temperature: 0.45,
+        responseMimeType: 'application/json'
+      }
+    })
+  });
+
+  if (!response.ok) throw new Error(`generateContent failed: ${response.status}`);
+
+  const data = await response.json();
+  const content = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || '').join('\n');
+  if (typeof content !== 'string' || !content.trim()) throw new Error('generateContent returned empty content');
+  return parseBehaviorChatPayload(content);
+}
+
+async function requestAiBehaviorChat(payload: unknown, aiConfig: AiConfig) {
+  if (!aiConfig.apiKey) throw new Error('服务器未配置 AI_API_KEY');
+  try {
+    return await requestBehaviorChatByChatCompletions(payload, aiConfig);
+  } catch {
+    return requestBehaviorChatByGemini(payload, aiConfig);
   }
 }
 
@@ -632,6 +756,34 @@ function createApiMiddleware(aiConfig: AiConfig, authConfig: AuthConfig) {
         })
         .catch((error) => {
           const message = (error as Error).message || 'AI 生成失败';
+          const status = message.includes('AI_API_KEY') ? 503 : 502;
+          sendJson(res, status, { error: message });
+        });
+      return;
+    }
+
+    if (req.url?.startsWith('/api/ai/behavior-chat')) {
+      const session = requireAuth(req, res, authConfig);
+      if (!session) return;
+
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method not allowed' });
+        return;
+      }
+
+      readJsonBody(req)
+        .then(async (payload) => {
+          const body = (payload || {}) as { message?: string };
+          const message = typeof body.message === 'string' ? body.message.trim() : '';
+          if (!message) {
+            sendJson(res, 400, { error: '消息不能为空' });
+            return;
+          }
+          const result = await requestAiBehaviorChat(payload, aiConfig);
+          sendJson(res, 200, result);
+        })
+        .catch((error) => {
+          const message = (error as Error).message || 'AI 对话失败';
           const status = message.includes('AI_API_KEY') ? 503 : 502;
           sendJson(res, status, { error: message });
         });

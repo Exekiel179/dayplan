@@ -49,6 +49,7 @@ export default function PointerParticles() {
   const particlesRef = useRef<Particle[]>([]);
   const pointerRef = useRef({ x: 0, y: 0, mx: 0, my: 0 });
   const enabledRef = useRef(false);
+  const particleProfileRef = useRef<'off' | 'low' | 'high'>('high');
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -58,9 +59,28 @@ export default function PointerParticles() {
     if (!ctx) return;
 
     const media = window.matchMedia('(pointer: fine)');
+    const reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const hardwareThreads = navigator.hardwareConcurrency || 4;
+    const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 4;
+
+    const stopAnimation = () => {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
 
     const syncEnabled = () => {
-      enabledRef.current = media.matches;
+      if (!media.matches || reducedMotionMedia.matches) {
+        particleProfileRef.current = 'off';
+        enabledRef.current = false;
+        particlesRef.current = [];
+        stopAnimation();
+        return;
+      }
+
+      particleProfileRef.current = hardwareThreads <= 4 || deviceMemory <= 4 ? 'low' : 'high';
+      enabledRef.current = true;
     };
 
     const setCanvasDimensions = () => {
@@ -74,10 +94,54 @@ export default function PointerParticles() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
+    const getParticleBudget = () => {
+      if (particleProfileRef.current === 'high') {
+        return { moveCount: 8, clickCount: 56, maxParticles: 180, spread: 1.6 };
+      }
+
+      return { moveCount: 3, clickCount: 18, maxParticles: 72, spread: 1.1 };
+    };
+
+    const startAnimation = () => {
+      if (frameRef.current !== null || particlesRef.current.length === 0) return;
+
+      const animate = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const particles = particlesRef.current;
+        for (let index = 0; index < particles.length; index += 1) {
+          const particle = particles[index];
+          ctx.fillStyle = particle.color;
+          ctx.beginPath();
+          ctx.ellipse(particle.x, particle.y, particle.size * 1.2, particle.size * 0.82, Math.PI / 5, 0, Math.PI * 2);
+          ctx.fill();
+
+          particle.x += particle.spreadX * particle.size;
+          particle.y += particle.spreadY * particle.size + particle.speed * 0.12;
+          particle.size -= particle.decay;
+
+          if (particle.size <= 0.12) {
+            particles.splice(index, 1);
+            index -= 1;
+          }
+        }
+
+        if (particles.length === 0 || document.hidden) {
+          frameRef.current = null;
+          return;
+        }
+
+        frameRef.current = window.requestAnimationFrame(animate);
+      };
+
+      frameRef.current = window.requestAnimationFrame(animate);
+    };
+
     const createParticles = (
       event: MouseEvent,
       { count, speed, spread }: { count: number; speed: number; spread: number }
     ) => {
+      if (!enabledRef.current || particleProfileRef.current === 'off' || document.hidden) return;
       pointerRef.current = {
         x: event.clientX,
         y: event.clientY,
@@ -85,9 +149,22 @@ export default function PointerParticles() {
         my: event.movementY,
       };
 
-      for (let index = 0; index < count; index += 1) {
+      const budget = getParticleBudget();
+      const targetCount = Math.min(count, count <= budget.moveCount ? budget.moveCount : budget.clickCount);
+      const maxParticles = budget.maxParticles;
+
+      for (let index = 0; index < targetCount; index += 1) {
+        if (particlesRef.current.length >= maxParticles) {
+          particlesRef.current.shift();
+        }
         particlesRef.current.push(createParticle(pointerRef.current, spread, speed));
       }
+
+      if (particlesRef.current.length > maxParticles) {
+        particlesRef.current.splice(0, particlesRef.current.length - maxParticles);
+      }
+
+      startAnimation();
     };
 
     const getPointerVelocity = (event: MouseEvent) =>
@@ -95,62 +172,51 @@ export default function PointerParticles() {
 
     const handlePointerMove = (event: MouseEvent) => {
       if (!enabledRef.current) return;
+      const budget = getParticleBudget();
       createParticles(event, {
-        count: 8,
+        count: budget.moveCount,
         speed: Math.min(16, getPointerVelocity(event)),
-        spread: 1.6,
+        spread: budget.spread,
       });
     };
 
     const handleClick = (event: MouseEvent) => {
       if (!enabledRef.current) return;
+      const budget = getParticleBudget();
       createParticles(event, {
-        count: 56,
+        count: budget.clickCount,
         speed: 8 + Math.random() * 3,
         spread: 22 + Math.random() * 18,
       });
     };
 
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const particles = particlesRef.current;
-      for (let index = 0; index < particles.length; index += 1) {
-        const particle = particles[index];
-        ctx.fillStyle = particle.color;
-        ctx.beginPath();
-        ctx.ellipse(particle.x, particle.y, particle.size * 1.2, particle.size * 0.82, Math.PI / 5, 0, Math.PI * 2);
-        ctx.fill();
-
-        particle.x += particle.spreadX * particle.size;
-        particle.y += particle.spreadY * particle.size + particle.speed * 0.12;
-        particle.size -= particle.decay;
-
-        if (particle.size <= 0.12) {
-          particles.splice(index, 1);
-          index -= 1;
-        }
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        particlesRef.current = [];
+        stopAnimation();
+        return;
       }
 
-      frameRef.current = window.requestAnimationFrame(animate);
+      startAnimation();
     };
 
     syncEnabled();
     setCanvasDimensions();
     media.addEventListener?.('change', syncEnabled);
+    reducedMotionMedia.addEventListener?.('change', syncEnabled);
     window.addEventListener('resize', setCanvasDimensions);
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('click', handleClick);
-    frameRef.current = window.requestAnimationFrame(animate);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      if (frameRef.current !== null) {
-        window.cancelAnimationFrame(frameRef.current);
-      }
+      stopAnimation();
       media.removeEventListener?.('change', syncEnabled);
+      reducedMotionMedia.removeEventListener?.('change', syncEnabled);
       window.removeEventListener('resize', setCanvasDimensions);
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('click', handleClick);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 

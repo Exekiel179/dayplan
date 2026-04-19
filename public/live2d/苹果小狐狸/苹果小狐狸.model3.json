@@ -1,0 +1,101 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "苹果小狐狸.moc3",
+		"Textures": [
+			"苹果小狐狸.2048/texture_00.png",
+			"苹果小狐狸.2048/texture_01.png",
+			"苹果小狐狸.2048/texture_02.png",
+			"苹果小狐狸.2048/texture_03.png",
+			"苹果小狐狸.2048/texture_04.png",
+			"苹果小狐狸.2048/texture_05.png",
+			"苹果小狐狸.2048/texture_06.png",
+			"苹果小狐狸.2048/texture_07.png",
+			"苹果小狐狸.2048/texture_08.png",
+			"苹果小狐狸.2048/texture_09.png",
+			"苹果小狐狸.2048/texture_10.png",
+			"苹果小狐狸.2048/texture_11.png",
+			"苹果小狐狸.2048/texture_12.png"
+		],
+		"Physics": "苹果小狐狸.physics3.json",
+		"DisplayInfo": "苹果小狐狸.cdi3.json",
+		"Motions": {
+			"Idle": [
+				{
+					"File": "待机动画.motion3.json",
+					"FadeInTime": 0.8,
+					"FadeOutTime": 0.8
+				}
+			],
+			"Tap": [
+				{
+					"File": "待机动画.motion3.json",
+					"FadeInTime": 0.3,
+					"FadeOutTime": 0.6
+				}
+			]
+		},
+		"Expressions": [
+			{
+				"Name": "heart",
+				"File": "1爱心.exp3.json"
+			},
+			{
+				"Name": "star",
+				"File": "1星星.exp3.json"
+			},
+			{
+				"Name": "blush",
+				"File": "1脸红.exp3.json"
+			},
+			{
+				"Name": "cry",
+				"File": "1流泪.exp3.json"
+			},
+			{
+				"Name": "angry",
+				"File": "1生气.exp3.json"
+			},
+			{
+				"Name": "money",
+				"File": "1钱钱.exp3.json"
+			},
+			{
+				"Name": "pet",
+				"File": "宠物.exp3.json"
+			},
+			{
+				"Name": "gesture",
+				"File": "手势.exp3.json"
+			},
+			{
+				"Name": "greet",
+				"File": "招呼.exp3.json"
+			},
+			{
+				"Name": "listen",
+				"File": "侧耳.exp3.json"
+			},
+			{
+				"Name": "think",
+				"File": "思考.exp3.json"
+			},
+			{
+				"Name": "phone",
+				"File": "手机.exp3.json"
+			}
+		]
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

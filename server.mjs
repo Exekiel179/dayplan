@@ -141,6 +141,19 @@ const DAY_PLAN_SYSTEM_PROMPT = `你是一位擅长把自然语言整理成当日
 5. stress_score 只能是 1 到 5 的整数。
 6. schedule_markdown 使用中文，包含“主线”“顺手做”“低能时做”三个小标题。
 7. 如果用户提到会议、出门、回复消息、健身、休息，也要纳入当天安排。`;
+const BEHAVIOR_CHAT_SYSTEM_PROMPT = `你是任务管理页面里的 AI 小猫助手，负责把用户的自然语言状态转成温柔、简洁、可执行的中文回复。请严格返回 JSON，不要有任何额外文字。
+返回结构:
+{
+  "reply": "给用户的一段中文回复",
+  "suggested_motion": "heart 或 star 或 blush 或 cry 或 angry 或 money 或 pet 或 gesture 或 greet 或 listen 或 think 或 phone 或 idle"
+}
+要求:
+1. reply 最多 3 句，优先给出当下最值得做的下一步，不要写成长说明。
+2. 如果用户在描述外部行为（喝茶、散步、午睡等），要自然吸收 localInsight，不要机械复述数值。
+3. 如果用户表达疲惫、混乱、分心或钝感，优先帮他降负荷，允许建议短暂休息。
+4. 如果当前有主任务，尽量把建议落到主任务或正在计时的任务上。
+5. 语气像贴身助手，温和、有陪伴感，但不要油腻，不要使用表情包。
+6. suggested_motion 必须从给定枚举里选一个。`;
 const DEFAULT_TRENDRADAR_PLATFORMS = [
   { id: 'toutiao', name: '今日头条' },
   { id: 'baidu', name: '百度热搜' },
@@ -159,21 +172,63 @@ function normalizeUsername(username) {
   return username.trim().toLowerCase();
 }
 
+function pushExternalRootCandidate(candidates, value) {
+  if (!value || typeof value !== 'string') return;
+
+  const trimmed = value.trim();
+  if (!trimmed) return;
+
+  if (path.isAbsolute(trimmed)) {
+    candidates.push(path.normalize(trimmed));
+    return;
+  }
+
+  candidates.push(path.resolve(process.cwd(), trimmed));
+  candidates.push(path.resolve(__dirname, trimmed));
+}
+
+function resolveRequiredPath(candidate, requiredSegments) {
+  if (requiredSegments.length === 0) {
+    return candidate;
+  }
+
+  return path.join(candidate, ...requiredSegments);
+}
+
+function parseSeedUsersJson(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((user) => user && typeof user.username === 'string' && typeof user.password === 'string')
+      .map((user) => ({ username: user.username.trim(), password: user.password }))
+      .filter((user) => user.username.length > 0 && user.password.length > 0);
+  } catch {
+    console.warn('Invalid AUTH_USERS JSON; fallback to AUTH_USERNAME/AUTH_PASSWORD');
+    return [];
+  }
+}
+
+function getFallbackSeedUsers() {
+  const fallbackUsername = process.env.AUTH_USERNAME || 'admin';
+  const fallbackPassword = process.env.AUTH_PASSWORD || 'admin123456';
+  return [{ username: fallbackUsername, password: fallbackPassword }];
+}
+
+function parseNormalizedCsv(raw) {
+  return raw
+    .split(',')
+    .map((item) => normalizeUsername(item))
+    .filter(Boolean);
+}
+
 function buildExternalRootCandidates(rawRoot, projectName) {
   const candidates = [];
-  const pushCandidate = (value) => {
-    if (!value || typeof value !== 'string') return;
-    const trimmed = value.trim();
-    if (!trimmed) return;
-    if (path.isAbsolute(trimmed)) {
-      candidates.push(path.normalize(trimmed));
-      return;
-    }
-    candidates.push(path.resolve(process.cwd(), trimmed));
-    candidates.push(path.resolve(__dirname, trimmed));
-  };
 
-  pushCandidate(rawRoot);
+  pushExternalRootCandidate(candidates, rawRoot);
   candidates.push(path.resolve(__dirname, '..', projectName));
   candidates.push(path.resolve(process.cwd(), '..', projectName));
   candidates.push(path.resolve(process.cwd(), projectName));
@@ -184,7 +239,7 @@ function buildExternalRootCandidates(rawRoot, projectName) {
 function resolveExternalRoot(rawRoot, projectName, requiredSegments = []) {
   const candidates = buildExternalRootCandidates(rawRoot, projectName);
   for (const candidate of candidates) {
-    const requiredPath = requiredSegments.length > 0 ? path.join(candidate, ...requiredSegments) : candidate;
+    const requiredPath = resolveRequiredPath(candidate, requiredSegments);
     if (fs.existsSync(requiredPath)) {
       return candidate;
     }
@@ -211,34 +266,19 @@ function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
 function parseSeedUsersFromEnv() {
   const raw = process.env.AUTH_USERS;
   if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const users = parsed
-          .filter((u) => u && typeof u.username === 'string' && typeof u.password === 'string')
-          .map((u) => ({ username: u.username.trim(), password: u.password }))
-          .filter((u) => u.username.length > 0 && u.password.length > 0);
-        if (users.length > 0) {
-          return users;
-        }
-      }
-    } catch {
-      console.warn('Invalid AUTH_USERS JSON; fallback to AUTH_USERNAME/AUTH_PASSWORD');
+    const users = parseSeedUsersJson(raw);
+    if (users.length > 0) {
+      return users;
     }
   }
 
-  const fallbackUsername = process.env.AUTH_USERNAME || 'admin';
-  const fallbackPassword = process.env.AUTH_PASSWORD || 'admin123456';
-  return [{ username: fallbackUsername, password: fallbackPassword }];
+  return getFallbackSeedUsers();
 }
 
 function parseAdminUsersFromEnv(seedUsers) {
   const raw = process.env.AUTH_ADMIN_USERS;
   if (raw) {
-    const users = raw
-      .split(',')
-      .map((item) => normalizeUsername(item))
-      .filter(Boolean);
+    const users = parseNormalizedCsv(raw);
     if (users.length > 0) {
       return new Set(users);
     }
@@ -556,7 +596,74 @@ ${runningSummary}
 - 睡眠：${Number.isFinite(Number(sleepHours)) ? Number(sleepHours) : 7} 小时
 - 自评：${Number.isFinite(Number(selfRating)) ? Number(selfRating) : 3}/5
 
-请给出一句提醒、一条明确建议、简短原因，并要求用户回复。`;
+  请给出一句提醒、一条明确建议、简短原因，并要求用户回复。`;
+}
+
+function buildBehaviorChatPrompt({
+  message,
+  localInsight,
+  energyScore,
+  pressureScore,
+  primaryTask,
+  runningTasks,
+  recentMessages,
+  behaviorEvent,
+}) {
+  const primarySummary = primaryTask
+    ? [
+        `主任务：${primaryTask.title || '未命名任务'}`,
+        `下一步：${primaryTask.next_action || '未提供'}`,
+        `认知负荷：${primaryTask.cognitive_load || 'low'}`,
+        `协作强度：${primaryTask.collaboration_level || 'low'}`,
+        `执行方式：${primaryTask.execution_mode || 'serial'}`,
+        `本轮计时：${primaryTask.current_session_minutes || 0} 分钟`,
+      ].join('\n')
+    : '当前没有明确主任务。';
+  const runningSummary = Array.isArray(runningTasks) && runningTasks.length > 0
+    ? runningTasks
+        .slice(0, 3)
+        .map((task, index) => `${index + 1}. ${task.title || '未命名任务'}｜${task.execution_mode || 'serial'}｜${task.current_session_minutes || 0} 分钟`)
+        .join('\n')
+    : '当前没有正在计时的任务。';
+  const recentSummary = Array.isArray(recentMessages) && recentMessages.length > 0
+    ? recentMessages
+        .slice(-8)
+        .map((item) => `${item.role === 'user' ? '用户' : '助手'}：${typeof item.text === 'string' ? item.text.trim() : ''}`)
+        .filter(Boolean)
+        .join('\n')
+    : '这是今天的第一轮对话。';
+  const behaviorSummary = behaviorEvent
+    ? [
+        `识别到的行为：${behaviorEvent.label || behaviorEvent.type || '未命名行为'}`,
+        `即时精力变化：${Number(behaviorEvent.instant_energy) || 0}`,
+        `持续时长：${Number(behaviorEvent.duration_minutes) || 0} 分钟`,
+        `耗能倍率：${Number(behaviorEvent.burn_rate_multiplier) || 1}`,
+      ].join('\n')
+    : '这次输入没有识别到明确的外部行为。';
+
+  return `请回复这位用户的最新一条消息，并兼顾精力管理与任务推进。
+
+用户最新输入：
+${message}
+
+本地规则给出的参考：
+${localInsight || '无'}
+
+当前状态：
+- 精力：${Number.isFinite(Number(energyScore)) ? Number(energyScore) : 60}
+- 压力：${Number.isFinite(Number(pressureScore)) ? Number(pressureScore) : 50}
+
+主任务：
+${primarySummary}
+
+正在计时：
+${runningSummary}
+
+外部行为识别：
+${behaviorSummary}
+
+最近对话：
+${recentSummary}`;
 }
 
 function extractJsonText(raw) {
@@ -699,6 +806,32 @@ function parseFocusCheckinPayload(raw) {
     suggested_action: suggestedAction,
     reason: typeof parsed.reason === 'string' ? parsed.reason.trim() : '',
     reply_prompt: typeof parsed.reply_prompt === 'string' ? parsed.reply_prompt.trim() : '',
+  };
+}
+
+function parseBehaviorChatPayload(raw) {
+  const jsonText = extractJsonText(raw);
+  const parsed = JSON.parse(jsonText);
+  const suggestedMotion = typeof parsed.suggested_motion === 'string' ? parsed.suggested_motion.trim() : '';
+  const allowedMotions = new Set([
+    'heart',
+    'star',
+    'blush',
+    'cry',
+    'angry',
+    'money',
+    'pet',
+    'gesture',
+    'greet',
+    'listen',
+    'think',
+    'phone',
+    'idle',
+  ]);
+
+  return {
+    reply: typeof parsed.reply === 'string' ? parsed.reply.trim() : '',
+    suggested_motion: allowedMotions.has(suggestedMotion) ? suggestedMotion : 'idle',
   };
 }
 
@@ -1650,6 +1783,77 @@ async function requestAIFocusCheckin(params) {
   return requestFocusCheckinByGemini(params);
 }
 
+async function requestBehaviorChatByChatCompletions(params) {
+  const response = await fetch(`${AI_API_BASE}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      temperature: 0.45,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: BEHAVIOR_CHAT_SYSTEM_PROMPT },
+        { role: 'user', content: buildBehaviorChatPrompt(params) },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await parseErrorResponse(response);
+    throw new Error(`chat completions failed: ${response.status}${details ? ` ${details}` : ''}`);
+  }
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('chat completions returned empty content');
+  }
+  return parseBehaviorChatPayload(content);
+}
+
+async function requestBehaviorChatByGemini(params) {
+  const response = await fetch(`${AI_API_BASE}/v1beta/models/${AI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_API_KEY}`,
+      'x-goog-api-key': AI_API_KEY,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `${BEHAVIOR_CHAT_SYSTEM_PROMPT}\n\n${buildBehaviorChatPrompt(params)}` }] }],
+      generationConfig: {
+        temperature: 0.45,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await parseErrorResponse(response);
+    throw new Error(`generateContent failed: ${response.status}${details ? ` ${details}` : ''}`);
+  }
+  const data = await response.json();
+  const content = data?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('\n');
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('generateContent returned empty content');
+  }
+  return parseBehaviorChatPayload(content);
+}
+
+async function requestAIBehaviorChat(params) {
+  if (!AI_API_KEY) {
+    throw new Error('服务器未配置 AI_API_KEY');
+  }
+  if (shouldUseOpenAICompat()) {
+    return requestBehaviorChatByChatCompletions(params);
+  }
+  return requestBehaviorChatByGemini(params);
+}
+
 async function fetchTrendRadarLiveSnapshot({ limit = 60, platforms: rawPlatforms = '' } = {}) {
   const allPlatforms = await loadTrendRadarPlatforms();
   const targetPlatforms = filterTrendRadarPlatforms(allPlatforms, rawPlatforms);
@@ -2174,6 +2378,32 @@ app.post('/api/ai/focus-checkin', requireAuth, async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'AI 生成失败';
+    const status = message.includes('AI_API_KEY') ? 503 : 502;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/ai/behavior-chat', requireAuth, async (req, res) => {
+  try {
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (!message) {
+      res.status(400).json({ error: '消息不能为空' });
+      return;
+    }
+
+    const result = await requestAIBehaviorChat({
+      message,
+      localInsight: typeof req.body?.localInsight === 'string' ? req.body.localInsight.trim() : '',
+      energyScore: Number.isFinite(Number(req.body?.energyScore)) ? Number(req.body.energyScore) : 60,
+      pressureScore: Number.isFinite(Number(req.body?.pressureScore)) ? Number(req.body.pressureScore) : 50,
+      primaryTask: req.body?.primaryTask && typeof req.body.primaryTask === 'object' ? req.body.primaryTask : null,
+      runningTasks: Array.isArray(req.body?.runningTasks) ? req.body.runningTasks : [],
+      recentMessages: Array.isArray(req.body?.recentMessages) ? req.body.recentMessages : [],
+      behaviorEvent: req.body?.behaviorEvent && typeof req.body.behaviorEvent === 'object' ? req.body.behaviorEvent : null,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'AI 对话失败';
     const status = message.includes('AI_API_KEY') ? 503 : 502;
     res.status(status).json({ error: message });
   }
