@@ -1101,6 +1101,11 @@ body {
 .home-stage {
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 10.5rem);
+  max-height: calc(100dvh - 10.5rem);
+  min-height: 32rem;
   background:
     radial-gradient(24rem 18rem at 8% 8%, rgba(213, 98, 117, 0.12), transparent 72%),
     radial-gradient(20rem 14rem at 88% 12%, rgba(124, 145, 117, 0.14), transparent 70%),
@@ -1187,14 +1192,18 @@ body {
 
 .home-stage-body {
   display: grid;
+  flex: 1 1 auto;
   gap: 1rem;
   margin-top: 1.35rem;
   align-items: stretch;
   min-height: 0;
+  overflow: hidden;
+  grid-auto-rows: minmax(0, 1fr);
 }
 
 .home-focus-column {
   display: flex;
+  flex: 1 1 0;
   min-height: 0;
 }
 
@@ -1262,13 +1271,13 @@ body {
   z-index: 1;
   margin-top: 1rem;
   display: flex;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-height: 0;
 }
 
 .home-focus-card-wrap > * {
   width: 100%;
-  height: 100%;
+  flex: 1 1 auto;
 }
 
 .home-focus-ai-card {
@@ -1280,7 +1289,6 @@ body {
 .current-primary-group-shell {
   display: grid;
   gap: 0.9rem;
-  height: 100%;
 }
 
 .current-primary-group-head {
@@ -1307,8 +1315,6 @@ body {
 .current-primary-group-grid {
   display: grid;
   gap: 0.85rem;
-  height: 100%;
-  grid-auto-rows: minmax(0, 1fr);
 }
 
 .home-focus-footer {
@@ -1333,6 +1339,7 @@ body {
 
 .home-side-column {
   display: flex;
+  flex: 1 1 auto;
   min-height: 0;
 }
 
@@ -1343,6 +1350,7 @@ body {
   overflow: hidden;
   padding: 1rem;
   min-height: 0;
+  flex: 1 1 auto;
   border-radius: 1.35rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
@@ -1388,9 +1396,11 @@ body {
   position: relative;
   z-index: 1;
   display: grid;
+  align-content: start;
+  flex: 1 1 auto;
   gap: 0.65rem;
   margin-top: 0.85rem;
-  max-height: min(54vh, 30rem);
+  min-height: 0;
   overflow-y: auto;
   padding-right: 0.2rem;
 }
@@ -1429,10 +1439,6 @@ body {
   overflow: hidden;
   backdrop-filter: blur(8px);
   cursor: grab;
-}
-
-.task-line-shell-primary {
-  min-height: 100%;
 }
 
 .task-line-shell::before {
@@ -1749,7 +1755,9 @@ body {
 
 .home-focus-shell,
 .home-stack-card {
+  flex: 1 1 auto;
   height: 100%;
+  min-height: 0;
 }
 
 .home-map-surface-card {
@@ -1762,12 +1770,13 @@ body {
   flex-direction: column;
   flex: 1 1 0;
   min-height: 0;
+  gap: 0;
 }
 
 .home-map-single-column {
-  margin-top: 1.35rem;
   display: flex;
-  min-height: calc(100vh - 13.4rem);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .home-map-board {
@@ -1782,7 +1791,7 @@ body {
 }
 
 .home-map-quadrant-board {
-  margin-top: 0.85rem;
+  margin-top: 0;
   flex: 1 1 0;
   width: auto;
   height: min(100%, calc(100vh - 18rem));
@@ -2385,19 +2394,19 @@ select {
 }
 
 .quadrant-tint-nw {
-  background: var(--quad-nw);
+  background: radial-gradient(circle at 28% 28%, rgba(223, 101, 125, 0.16), transparent 74%);
 }
 
 .quadrant-tint-ne {
-  background: var(--quad-ne);
+  background: radial-gradient(circle at 72% 24%, rgba(223, 101, 125, 0.2), transparent 72%);
 }
 
 .quadrant-tint-sw {
-  background: var(--quad-sw);
+  background: radial-gradient(circle at 28% 72%, rgba(223, 101, 125, 0.1), transparent 74%);
 }
 
 .quadrant-tint-se {
-  background: var(--quad-se);
+  background: radial-gradient(circle at 72% 72%, rgba(223, 101, 125, 0.14), transparent 72%);
 }
 
 .quadrant-board {
@@ -2407,12 +2416,11 @@ select {
   height: 100%;
   min-height: min(36rem, calc(100vh - 11rem));
   max-height: calc(100vh - 11rem);
+  border-radius: 1.35rem;
   background:
-    radial-gradient(circle at 50% 8%, rgba(255, 255, 255, 0.05), transparent 28%),
+    radial-gradient(circle at 50% 8%, rgba(223, 101, 125, 0.08), transparent 28%),
     linear-gradient(180deg, color-mix(in srgb, var(--grid-bg) 94%, transparent), color-mix(in srgb, var(--grid-bg) 100%, transparent));
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
-    0 22px 48px rgba(2, 8, 18, 0.14);
+  box-shadow: none;
 }
 
 .elevator-map-panel {
@@ -2649,8 +2657,8 @@ select {
 }
 
 .quadrant-caption[data-zone="quick"] {
-  border-color: color-mix(in srgb, #d89a45 42%, var(--surface-border));
-  background: linear-gradient(180deg, color-mix(in srgb, #d89a45 18%, var(--surface-soft)), color-mix(in srgb, #d89a45 8%, var(--surface-soft)));
+  border-color: color-mix(in srgb, #df657d 42%, var(--surface-border));
+  background: linear-gradient(180deg, color-mix(in srgb, #df657d 16%, var(--surface-soft)), color-mix(in srgb, #df657d 8%, var(--surface-soft)));
 }
 
 .quadrant-caption[data-zone="focus"] {
@@ -2659,13 +2667,13 @@ select {
 }
 
 .quadrant-caption[data-zone="release"] {
-  border-color: color-mix(in srgb, #8fa0b8 42%, var(--surface-border));
-  background: linear-gradient(180deg, color-mix(in srgb, #8fa0b8 14%, var(--surface-soft)), color-mix(in srgb, #8fa0b8 6%, var(--surface-soft)));
+  border-color: color-mix(in srgb, #df657d 36%, var(--surface-border));
+  background: linear-gradient(180deg, color-mix(in srgb, #df657d 12%, var(--surface-soft)), color-mix(in srgb, #df657d 5%, var(--surface-soft)));
 }
 
 .quadrant-caption[data-zone="build"] {
-  border-color: color-mix(in srgb, #57a874 42%, var(--surface-border));
-  background: linear-gradient(180deg, color-mix(in srgb, #57a874 17%, var(--surface-soft)), color-mix(in srgb, #57a874 8%, var(--surface-soft)));
+  border-color: color-mix(in srgb, #df657d 40%, var(--surface-border));
+  background: linear-gradient(180deg, color-mix(in srgb, #df657d 15%, var(--surface-soft)), color-mix(in srgb, #df657d 7%, var(--surface-soft)));
 }
 
 .quadrant-caption strong {
@@ -2705,13 +2713,9 @@ select {
 }
 
 .task-point-shell {
-  background:
-    radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--task-point-zone, transparent) 90%, transparent), transparent 66%),
-    linear-gradient(180deg, color-mix(in srgb, var(--task-point-zone, transparent) 24%, var(--task-point-shell-bg)), var(--task-point-shell-bg));
-  border-color: color-mix(in srgb, var(--task-point-zone-strong, var(--task-point-shell-border)) 55%, var(--task-point-shell-border)) !important;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--task-point-zone, transparent) 34%, white 18%),
-    0 10px 24px color-mix(in srgb, var(--task-point-zone, transparent) 24%, rgba(0, 0, 0, 0.34));
+  background: rgba(72, 29, 42, 0.96);
+  border-color: rgba(255, 232, 237, 0.16) !important;
+  box-shadow: none;
 }
 
 .task-point-shell-simple {
@@ -2720,56 +2724,35 @@ select {
   isolation: isolate;
 }
 
-.task-point-progress-donut {
+.task-point-block-fill {
   position: absolute;
-  inset: 0.16rem;
-  border-radius: 999px;
+  inset: 0;
+  border-radius: inherit;
   background:
-    conic-gradient(var(--task-point-node, var(--task-point-zone-strong)) var(--task-point-progress, 0%), rgba(255, 255, 255, 0.12) 0),
-    linear-gradient(180deg, color-mix(in srgb, var(--task-point-zone, transparent) 18%, var(--task-point-shell-bg)), var(--task-point-shell-bg));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 10px 22px color-mix(in srgb, var(--task-point-zone, transparent) 14%, rgba(0, 0, 0, 0.18));
+    linear-gradient(135deg, rgba(247, 184, 199, 0.92) 0%, rgba(223, 101, 125, 0.95) 54%, rgba(169, 56, 84, 0.98) 100%);
 }
 
-.task-point-progress-donut::after {
-  content: "";
+.task-point-block-progress {
   position: absolute;
-  inset: 0.22rem;
-  border-radius: inherit;
-  background: color-mix(in srgb, var(--task-point-label-bg) 88%, white 12%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-
-.task-point-inner {
-  position: relative;
+  left: 0.28rem;
+  right: 0.28rem;
+  bottom: 0.24rem;
+  height: 0.18rem;
+  border-radius: 0.25rem;
+  background: rgba(89, 21, 41, 0.22);
+  overflow: hidden;
   z-index: 1;
-  width: 1.54rem;
-  height: 1.54rem;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.46);
-  box-shadow: 0 8px 18px rgba(18, 29, 27, 0.1);
-}
-
-.task-point-core-dot {
-  width: 0.82rem;
-  height: 0.82rem;
-  border-radius: 999px;
-  box-shadow:
-    0 0 0 5px rgba(255, 255, 255, 0.82),
-    0 0 0 6px color-mix(in srgb, var(--task-point-node, var(--task-point-zone-strong)) 28%, transparent);
-}
-
-.task-point-glow {
-  position: absolute;
-  inset: -0.12rem;
-  border-radius: inherit;
-  background: radial-gradient(circle, color-mix(in srgb, var(--task-point-node, var(--task-point-zone-strong)) 18%, transparent), transparent 72%);
-  opacity: 0.75;
-  z-index: 0;
   pointer-events: none;
+}
+
+.task-point-block-progress::before {
+  content: "";
+  display: block;
+  width: var(--task-point-progress, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: rgba(255, 241, 245, 0.86);
+  box-shadow: none;
 }
 
 .task-point-label {
@@ -2801,10 +2784,11 @@ select {
 
 .task-point-dot {
   display: inline-block;
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 999px;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+  width: 0.58rem;
+  height: 0.58rem;
+  border-radius: 0.18rem;
+  background: linear-gradient(135deg, rgba(247, 184, 199, 0.92), rgba(223, 101, 125, 0.96));
+  box-shadow: none;
 }
 
 .task-point-mini-score {
@@ -3899,10 +3883,7 @@ select {
 }
 
 [data-theme="day"] .quadrant-board {
-  box-shadow:
-    inset 0 0 0 1px rgba(197, 210, 223, 0.56),
-    inset 0 20px 42px rgba(255, 255, 255, 0.28),
-    0 22px 42px rgba(114, 128, 151, 0.1);
+  box-shadow: none;
 }
 
 [data-theme="day"] .quadrant-caption {

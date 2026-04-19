@@ -10,6 +10,7 @@ export type TaskCognitiveLoad = 'low' | 'high';
 export type TaskCollaborationLevel = 'low' | 'high';
 export type TaskExecutionMode = 'serial' | 'parallel';
 export type TaskCategoryKey = 'research' | 'development' | 'learning' | 'misc';
+export type TaskEffortScore = 1 | 2 | 3 | 4 | 5;
 
 export interface Task {
   id: string;
@@ -33,6 +34,7 @@ export interface Task {
   ability_gains?: Record<string, number>;
   stress_score?: number;
   energy_delta?: number;
+  effort_score?: TaskEffortScore;
   cognitive_load?: TaskCognitiveLoad;
   collaboration_level?: TaskCollaborationLevel;
   execution_mode?: TaskExecutionMode;
@@ -105,6 +107,7 @@ export interface AIDayTaskDraft {
   estimated_minutes: number;
   energy_delta: number;
   stress_score: number;
+  effort_score?: TaskEffortScore;
   cognitive_load: TaskCognitiveLoad;
   collaboration_level: TaskCollaborationLevel;
   category_key: TaskCategoryKey;

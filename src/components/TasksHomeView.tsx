@@ -82,10 +82,8 @@ type TasksHomeViewProps = {
       laneMode?: TaskExecutionMode;
       taskIds?: string[];
       rowTaskCount?: number;
-      surface?: 'line' | 'primary';
     }
   ) => React.ReactNode;
-  mergeTaskIntoParallel: (taskId: string, targetTaskId: string, taskIds: string[]) => void;
   setDragOverLineTaskId: React.Dispatch<React.SetStateAction<string | null>>;
   setDragOverLineZone: React.Dispatch<React.SetStateAction<DragZone>>;
   energyMapTasks: Task[];
@@ -120,11 +118,11 @@ function TaskLineSurface({
   draggedLineTaskId,
   setPrimaryTaskId,
   clearTaskDragState,
+  renderTaskCard,
   homeLineTasks,
   homeLineRows,
   moveTaskToLine,
   renderTaskLine,
-  mergeTaskIntoParallel,
   setDragOverLineTaskId,
   setDragOverLineZone,
 }: Omit<
@@ -148,6 +146,7 @@ function TaskLineSurface({
   | 'archivedTasks'
 >) {
   const homeLineTaskIds = homeLineTasks.map((item) => item.id);
+  const compactPrimaryParallel = currentPrimaryIsParallel && currentPrimaryTasks.length >= 3;
 
   return (
     <section className="mx-4 mt-4 sm:mx-6 home-stage rounded-[1.9rem] border border-white/10 bg-[linear-gradient(160deg,rgba(6,17,29,0.96),rgba(9,25,37,0.88))] p-5 shadow-[0_26px_64px_rgba(2,8,18,0.34)] sm:p-6">
@@ -204,13 +203,7 @@ function TaskLineSurface({
                 event.preventDefault();
                 const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
                 if (!droppedTaskId) return;
-                const primaryAnchorTaskId = currentPrimaryTasks[0]?.id;
-                if (primaryAnchorTaskId && droppedTaskId !== primaryAnchorTaskId) {
-                  mergeTaskIntoParallel(droppedTaskId, primaryAnchorTaskId, homeLineTaskIds);
-                  setPrimaryTaskId(primaryAnchorTaskId);
-                } else {
-                  setPrimaryTaskId(droppedTaskId);
-                }
+                setPrimaryTaskId(droppedTaskId);
                 clearTaskDragState();
               }}
             >
@@ -227,21 +220,24 @@ function TaskLineSurface({
                     )}>
                       {currentPrimaryTasks.map((task) => (
                         <React.Fragment key={task.id}>
-                          {renderTaskLine(task, {
-                            laneMode: 'parallel',
-                            taskIds: homeLineTaskIds,
-                            rowTaskCount: currentPrimaryTasks.length,
-                            surface: 'primary',
-                          })}
+                          {compactPrimaryParallel
+                            ? renderTaskLine(task, {
+                                emphasis: 'standby',
+                                laneMode: 'parallel',
+                                taskIds: homeLineTaskIds,
+                                rowTaskCount: currentPrimaryTasks.length,
+                              })
+                            : renderTaskCard(task, {
+                                laneLabel: '',
+                                tone: 'focus',
+                              })}
                         </React.Fragment>
                       ))}
                     </div>
                   </div>
-                ) : renderTaskLine(currentPrimaryTasks[0], {
-                    laneMode: 'serial',
-                    taskIds: homeLineTaskIds,
-                    rowTaskCount: 1,
-                    surface: 'primary',
+                ) : renderTaskCard(currentPrimaryTasks[0], {
+                    laneLabel: '',
+                    tone: 'focus',
                   })
               ) : (
                 <div className="flex h-full min-h-[220px] items-center justify-center rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
@@ -281,7 +277,13 @@ function TaskLineSurface({
                       event.preventDefault();
                       const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
                       if (!droppedTaskId) return;
-                      moveTaskToLine(droppedTaskId, row.tasks[0]?.id || null, homeLineTaskIds, row.mode);
+                      const droppingBackIntoSameParallelRow = row.mode === 'parallel' && row.tasks.some((task) => task.id === droppedTaskId);
+                      moveTaskToLine(
+                        droppedTaskId,
+                        row.tasks[0]?.id || null,
+                        homeLineTaskIds,
+                        droppingBackIntoSameParallelRow ? 'serial' : row.mode
+                      );
                       clearTaskDragState();
                     }}
                     className={cn(
@@ -320,7 +322,6 @@ function TaskLineSurface({
 }
 
 function TaskMapSurface({
-  renderInlineEnergyBar,
   quadrantRef,
   handleQuadrantClick,
   isPlacementMode,
@@ -352,106 +353,88 @@ function TaskMapSurface({
   | 'homeLineRows'
   | 'moveTaskToLine'
   | 'renderTaskLine'
-  | 'mergeTaskIntoParallel'
   | 'setDragOverLineZone'
 >) {
   return (
     <section className="mx-4 mt-4 sm:mx-6 home-stage rounded-[1.9rem] border border-white/10 bg-[linear-gradient(160deg,rgba(6,17,29,0.96),rgba(9,25,37,0.88))] p-5 shadow-[0_26px_64px_rgba(2,8,18,0.34)] sm:p-6">
-      <div className="home-stage-header">
-        <div className="home-stage-title-wrap min-w-0">
-          <div className="home-line-title-row">
-            <h3 className="text-[clamp(1.42rem,2.6vw,2.2rem)] font-semibold leading-tight text-white text-safe-wrap">
-              任务地图
-            </h3>
-            {renderInlineEnergyBar('map-title')}
-          </div>
-        </div>
-      </div>
-
       <div className="home-map-single-column">
-        <section className="home-focus-shell home-map-surface-card home-map-focus-shell">
-            <div className="home-stack-head">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">四象限地图</p>
-              </div>
-              <span>{activeTasks.length} 点</span>
+        <section className="home-map-focus-shell">
+          <div
+            ref={quadrantRef}
+            onClick={handleQuadrantClick}
+            className={cn(
+              "quadrant-board home-map-quadrant-board relative quadrant-grid aspect-square w-full overflow-hidden transition-all duration-500",
+              isPlacementMode ? "cursor-crosshair bg-rose-50/10 ring-4 ring-inset ring-rose-500/20" : "cursor-default"
+            )}
+          >
+            <div className="pointer-events-none absolute inset-0 z-0 quadrant-tints">
+              <div className="quadrant-tint quadrant-tint-nw" />
+              <div className="quadrant-tint quadrant-tint-ne" />
+              <div className="quadrant-tint quadrant-tint-sw" />
+              <div className="quadrant-tint quadrant-tint-se" />
             </div>
-            <div
-              ref={quadrantRef}
-              onClick={handleQuadrantClick}
-              className={cn(
-                "quadrant-board home-map-quadrant-board relative quadrant-grid aspect-square w-full overflow-hidden rounded-[1.8rem] border border-white/10 transition-all duration-500",
-                isPlacementMode ? "cursor-crosshair bg-teal-50/30 ring-4 ring-inset ring-teal-500/20" : "cursor-default"
-              )}
-            >
-              <div className="pointer-events-none absolute inset-0 z-0 quadrant-tints">
-                <div className="quadrant-tint quadrant-tint-nw" />
-                <div className="quadrant-tint quadrant-tint-ne" />
-                <div className="quadrant-tint quadrant-tint-sw" />
-                <div className="quadrant-tint quadrant-tint-se" />
+            <div className="pointer-events-none absolute inset-0 z-[2]">
+              <div className="quadrant-axis-line quadrant-axis-line-vertical absolute left-1/2 top-0 h-full w-px" />
+              <div className="quadrant-axis-line quadrant-axis-line-horizontal absolute left-0 top-1/2 h-px w-full" />
+
+              <div className="quadrant-caption quadrant-caption-nw" data-zone="quick">
+                <strong>快清区</strong>
               </div>
-              <div className="pointer-events-none absolute inset-0 z-[2]">
-                <div className="quadrant-axis-line quadrant-axis-line-vertical absolute left-1/2 top-0 h-full w-px" />
-                <div className="quadrant-axis-line quadrant-axis-line-horizontal absolute left-0 top-1/2 h-px w-full" />
-
-                <div className="quadrant-caption quadrant-caption-nw" data-zone="quick">
-                  <strong>快清区</strong>
-                </div>
-                <div className="quadrant-caption quadrant-caption-ne" data-zone="focus">
-                  <strong>主战区</strong>
-                </div>
-                <div className="quadrant-caption quadrant-caption-sw" data-zone="release">
-                  <strong>回收区</strong>
-                </div>
-                <div className="quadrant-caption quadrant-caption-se" data-zone="build">
-                  <strong>积累区</strong>
-                </div>
+              <div className="quadrant-caption quadrant-caption-ne" data-zone="focus">
+                <strong>主战区</strong>
               </div>
-
-              <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                <defs>
-                  <marker id="dependency-arrow-blocked" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-                    <path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" />
-                  </marker>
-                  <marker id="dependency-arrow-ready" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-                    <path d="M0,0 L8,4 L0,8 z" fill="#22c55e" />
-                  </marker>
-                </defs>
-                {renderDependencyLines()}
-              </svg>
-
-              {isPlacementMode && mousePos && (
-                <div
-                  className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
-                  style={{ left: `${mousePos.x}%`, top: `${mousePos.y}%` }}
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-2xl border-2 border-dashed border-teal-400 bg-teal-50/50 animate-pulse">
-                    <Plus className="h-4 w-4 text-teal-400" />
-                  </div>
-                </div>
-              )}
-
-              {activeTasks.map((task) => renderTaskPoint(task))}
-
-              {activeTasks.length === 0 && archivedTasks.length === 0 && !isPlacementMode && (
-                <div className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center p-5 sm:p-8">
-                  <div className="quadrant-empty max-w-md text-center">
-                    <p className="quadrant-empty-kicker">矩阵已清空</p>
-                    <h3 className="quadrant-empty-title">先把第一个任务放进四象限，再决定今天的路线</h3>
-                    <p className="quadrant-empty-copy">
-                      点一下坐标区就能落点。越靠右越重要，越靠上越紧急。
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleAddTask}
-                      className="pointer-events-auto mt-4 rounded-xl border border-teal-300/30 bg-teal-500/15 px-4 py-2 text-sm font-bold text-teal-100 transition-colors hover:bg-teal-500/25"
-                    >
-                      新建第一个任务
-                    </button>
-                  </div>
-                </div>
-              )}
+              <div className="quadrant-caption quadrant-caption-sw" data-zone="release">
+                <strong>回收区</strong>
+              </div>
+              <div className="quadrant-caption quadrant-caption-se" data-zone="build">
+                <strong>积累区</strong>
+              </div>
             </div>
+
+            <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <defs>
+                <marker id="dependency-arrow-blocked" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" />
+                </marker>
+                <marker id="dependency-arrow-ready" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L8,4 L0,8 z" fill="#22c55e" />
+                </marker>
+              </defs>
+              {renderDependencyLines()}
+            </svg>
+
+            {isPlacementMode && mousePos && (
+              <div
+                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
+                style={{ left: `${mousePos.x}%`, top: `${mousePos.y}%` }}
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-2xl border-2 border-dashed border-rose-400 bg-rose-100/20 animate-pulse">
+                  <Plus className="h-4 w-4 text-rose-300" />
+                </div>
+              </div>
+            )}
+
+            {activeTasks.map((task) => renderTaskPoint(task))}
+
+            {activeTasks.length === 0 && archivedTasks.length === 0 && !isPlacementMode && (
+              <div className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center p-5 sm:p-8">
+                <div className="quadrant-empty max-w-md text-center">
+                  <p className="quadrant-empty-kicker">矩阵已清空</p>
+                  <h3 className="quadrant-empty-title">先把第一个任务放进四象限，再决定今天的路线</h3>
+                  <p className="quadrant-empty-copy">
+                    点一下坐标区就能落点。越靠右越重要，越靠上越紧急。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAddTask}
+                    className="pointer-events-auto mt-4 rounded-xl border border-rose-300/30 bg-rose-500/15 px-4 py-2 text-sm font-bold text-rose-100 transition-colors hover:bg-rose-500/25"
+                  >
+                    新建第一个任务
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </section>
       </div>
     </section>

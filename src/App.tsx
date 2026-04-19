@@ -80,6 +80,7 @@ import {
   TaskCollaborationLevel,
   TaskCategoryKey,
   TaskCognitiveLoad,
+  TaskEffortScore,
   TaskExecutionMode,
   TaskStep,
   TaskTimeline,
@@ -369,6 +370,9 @@ const MOTIVATION_SETTLE_INTERVAL_MS = 5000;
 const FOCUS_WIP_LIMIT = 2;
 const DEFAULT_FOCUS_REMINDER_INTERVAL = 35;
 const AI_FOCUS_CHECKIN_INTERVAL_MS = 60 * 60 * 1000;
+const TASK_EFFORT_MIN = 1;
+const TASK_EFFORT_MAX = 5;
+const DEFAULT_TASK_EFFORT: TaskEffortScore = 3;
 const DAILY_MIX_LIMITS: Record<TaskSizeBucket, number> = {
   big: 1,
   medium: 3,
@@ -381,19 +385,12 @@ const ENERGY_DELTA_OPTIONS = [
   { value: 1, label: '有成就感' },
   { value: 2, label: '恢复状态' },
 ] as const;
-const COGNITIVE_LOAD_OPTIONS: { value: TaskCognitiveLoad; label: string }[] = [
-  { value: 'low', label: '认知负荷低' },
-  { value: 'high', label: '认知负荷高' },
-];
-const COLLABORATION_LEVEL_OPTIONS: { value: TaskCollaborationLevel; label: string }[] = [
-  { value: 'low', label: '协作程度低' },
-  { value: 'high', label: '协作程度高' },
-];
-const TASK_CATEGORY_OPTIONS: { value: TaskCategoryKey; label: string; shortLabel: string }[] = [
-  { value: 'research', label: '科研', shortLabel: '研' },
-  { value: 'development', label: '开发', shortLabel: '开' },
-  { value: 'learning', label: '学习', shortLabel: '学' },
-  { value: 'misc', label: '杂项', shortLabel: '杂' },
+const TASK_EFFORT_MARKS: { value: TaskEffortScore; label: string }[] = [
+  { value: 1, label: '轻' },
+  { value: 2, label: '低' },
+  { value: 3, label: '中' },
+  { value: 4, label: '高' },
+  { value: 5, label: '满' },
 ];
 
 type AmbientPresetId = 'white_noise' | 'brown_noise' | 'post_rock' | 'gaming_music';
@@ -1007,14 +1004,9 @@ const EMPTY_DIMENSION_GUIDE = [
     description: '任务完成后会回一点状态，还是会把你彻底榨干，会直接影响今日精力估算。',
   },
   {
-    title: '认知负荷',
-    value: '默认 认知低',
-    description: '高认知任务会被优先安排进精力更充足的时段，避免在低状态硬啃。',
-  },
-  {
-    title: '协作化程度',
-    value: '默认 协作低',
-    description: '高协作任务会被系统集中进沟通窗口，减少来回切换和消息打断。',
+    title: '任务消耗',
+    value: '默认 3/5',
+    description: '数值越高，系统越会把它放到状态更好的时段里，低状态时优先让路给轻任务。',
   },
 ] as const;
 type AbilityModuleOption = {
@@ -1292,6 +1284,7 @@ function createDraftTask(x: number, y: number): Task {
     ability_gains: {},
     stress_score: 3,
     energy_delta: 0,
+    effort_score: DEFAULT_TASK_EFFORT,
     cognitive_load: 'low',
     collaboration_level: 'low',
     execution_mode: 'serial',
@@ -1343,6 +1336,16 @@ function normalizeEnergyDelta(value: unknown) {
   return clamp(Math.round(numeric), -2, 2);
 }
 
+function normalizeEffortScore(value: unknown, cognitiveLoad?: unknown): TaskEffortScore {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return clamp(Math.round(numeric), TASK_EFFORT_MIN, TASK_EFFORT_MAX) as TaskEffortScore;
+  }
+  if (cognitiveLoad === 'high') return 4;
+  if (cognitiveLoad === 'low') return 2;
+  return DEFAULT_TASK_EFFORT;
+}
+
 function normalizeCognitiveLoad(value: unknown): TaskCognitiveLoad {
   return value === 'high' ? 'high' : 'low';
 }
@@ -1358,6 +1361,15 @@ function normalizeExecutionMode(value: unknown): TaskExecutionMode {
 function normalizeTaskCategory(value: unknown): TaskCategoryKey {
   if (value === 'research' || value === 'development' || value === 'learning') return value;
   return 'misc';
+}
+
+function getTaskEffortScore(task: Pick<Task, 'effort_score' | 'cognitive_load'> | { effort_score?: number; cognitive_load?: TaskCognitiveLoad }) {
+  return normalizeEffortScore(task.effort_score, task.cognitive_load);
+}
+
+function getTaskEffortLabel(task: Pick<Task, 'effort_score' | 'cognitive_load'> | { effort_score?: number; cognitive_load?: TaskCognitiveLoad }) {
+  const score = getTaskEffortScore(task);
+  return `消耗 ${score}/5`;
 }
 
 function normalizeTrackingAccumulatedMs(value: unknown) {
@@ -1635,6 +1647,7 @@ function normalizeAIDayTaskDraft(value: unknown): AIDayTaskDraft | null {
     estimated_minutes: clamp(Math.round(Number(raw.estimated_minutes) || 30), 10, 180),
     energy_delta: clamp(Math.round(Number(raw.energy_delta) || 0), -2, 2),
     stress_score: clamp(Math.round(Number(raw.stress_score) || 3), 1, 5),
+    effort_score: normalizeEffortScore(raw.effort_score, raw.cognitive_load),
     cognitive_load: raw.cognitive_load === 'high' ? 'high' : 'low',
     collaboration_level: raw.collaboration_level === 'high' ? 'high' : 'low',
     category_key: normalizeTaskCategory(raw.category_key),
@@ -1833,13 +1846,13 @@ const TaskActualMinutesLabel = React.memo(function TaskActualMinutesLabel({
 });
 
 function getTaskEnergyBurnRate(task: Task, burnRateModifier = 1, concurrentTasksCount = 1) {
+  const effortScore = getTaskEffortScore(task);
   let burn = 5 + (task.stress_score || 3) * 2;
-  if (task.cognitive_load === 'high') burn += 6;
-  if (task.collaboration_level === 'high') burn -= 1.5;
+  burn += (effortScore - DEFAULT_TASK_EFFORT) * 3;
   if (task.use_countdown_urgency && task.deadline_at) burn += 2;
 
   const coordinationPenalty = task.execution_mode === 'parallel'
-    ? (task.collaboration_level === 'high' ? 0.14 : 0.38)
+    ? 0.38
     : 0.8;
   const multitaskingPenalty = 1 + Math.max(0, concurrentTasksCount - 1) * coordinationPenalty;
 
@@ -1913,20 +1926,8 @@ function getEnergyDeltaLabel(value: number) {
   return ENERGY_DELTA_OPTIONS.find((option) => option.value === value)?.label || '中性';
 }
 
-function getCognitiveLoadLabel(value: TaskCognitiveLoad) {
-  return value === 'high' ? '认知高' : '认知低';
-}
-
-function getCollaborationLevelLabel(value: TaskCollaborationLevel) {
-  return value === 'high' ? '协作高' : '协作低';
-}
-
 function getExecutionModeLabel(value: TaskExecutionMode) {
   return value === 'parallel' ? '并行' : '串行';
-}
-
-function getTaskCategoryLabel(value: TaskCategoryKey) {
-  return TASK_CATEGORY_OPTIONS.find((option) => option.value === value)?.label || '杂项';
 }
 
 function getTaskUrgencyScore(task: Task, now: number) {
@@ -1940,16 +1941,15 @@ function getTaskUrgencyScore(task: Task, now: number) {
 }
 
 function scoreTaskForMoment(task: Task, energyScore: number, pressureScore: number, now: number) {
+  const effortScore = getTaskEffortScore(task);
   let score = task.x * 0.7 + getTaskUrgencyScore(task, now) * 0.55;
 
   if (energyScore <= 40) {
-    score += task.cognitive_load === 'low' ? 18 : -16;
-    score += task.collaboration_level === 'low' ? 8 : -4;
+    score += (3 - effortScore) * 12;
   } else if (energyScore >= 70) {
-    score += task.cognitive_load === 'high' ? 14 : 4;
-    score += task.collaboration_level === 'high' ? 6 : 2;
+    score += (effortScore - 2) * 8;
   } else {
-    score += task.cognitive_load === 'low' ? 6 : 10;
+    score += effortScore >= 4 ? 8 : effortScore <= 2 ? 6 : 10;
   }
 
   if (pressureScore >= 70) {
@@ -1970,18 +1970,19 @@ function scoreTaskForMoment(task: Task, energyScore: number, pressureScore: numb
 }
 
 function buildRecommendationReason(task: Task, energyScore: number, now: number) {
+  const effortScore = getTaskEffortScore(task);
   const reasons: string[] = [];
   if (task.tracking_started_at) {
     reasons.push('你已经在做这项任务，继续推进最能减少切换损耗');
   }
-  if (energyScore <= 40 && task.cognitive_load === 'low') {
+  if (energyScore <= 40 && effortScore <= 2) {
     reasons.push('当前精力下更容易启动');
   }
-  if (energyScore >= 70 && task.cognitive_load === 'high') {
+  if (energyScore >= 70 && effortScore >= 4) {
     reasons.push('适合在高状态时集中攻坚');
   }
-  if (task.collaboration_level === 'high') {
-    reasons.push(task.execution_mode === 'parallel' ? '这项更像等待 AI 或对话回合，可并行挂着推进' : '需要沟通对齐，最好主动推进');
+  if (task.execution_mode === 'parallel') {
+    reasons.push('这项适合挂在旁边推进，不必独占整个专注块');
   }
   if (task.timeline === 'temporary' && task.deadline_at) {
     if (task.deadline_at <= now) {
@@ -1998,7 +1999,7 @@ function buildRecommendationReason(task: Task, energyScore: number, now: number)
 
 function buildBundleSuggestions(tasks: Task[], energyScore: number) {
   const bundles: { title: string; description: string }[] = [];
-  const lowLoadBatch = tasks.filter((task) => task.cognitive_load === 'low' && task.collaboration_level === 'low').slice(0, 3);
+  const lowLoadBatch = tasks.filter((task) => getTaskEffortScore(task) <= 2).slice(0, 3);
   if (lowLoadBatch.length >= 2) {
     bundles.push({
       title: '轻量任务可连续清空',
@@ -2006,26 +2007,18 @@ function buildBundleSuggestions(tasks: Task[], energyScore: number) {
     });
   }
 
-  const collaborationBatch = tasks.filter((task) => task.collaboration_level === 'high').slice(0, 3);
-  if (collaborationBatch.length >= 2) {
-    bundles.push({
-      title: '协作任务可集中沟通',
-      description: `${collaborationBatch.map((task) => task.title || '未命名任务').join('、')} 适合放在同一段消息回复、同步会或确认窗口中处理。`,
-    });
-  }
-
-  const deepWorkBatch = tasks.filter((task) => task.cognitive_load === 'high' && task.collaboration_level === 'low').slice(0, 2);
+  const deepWorkBatch = tasks.filter((task) => getTaskEffortScore(task) >= 4).slice(0, 2);
   if (deepWorkBatch.length >= 2 && energyScore >= 55) {
     bundles.push({
       title: '深度任务适合同一专注块',
-      description: `${deepWorkBatch.map((task) => task.title || '未命名任务').join('、')} 适合串成一个 60 到 90 分钟深度工作块，中途不要穿插协作型事务。`,
+      description: `${deepWorkBatch.map((task) => task.title || '未命名任务').join('、')} 适合串成一个 60 到 90 分钟深度工作块，中途尽量别插入轻碎任务。`,
     });
   }
 
   if (bundles.length === 0) {
     bundles.push({
       title: '暂不建议打包',
-      description: '当前任务类型比较分散，建议按优先级逐个推进，避免把高认知和高协作任务混在一起。',
+      description: '当前任务消耗跨度比较散，建议按优先级逐个推进，不要把重任务和轻任务硬塞进同一块时间里。',
     });
   }
 
@@ -2100,10 +2093,11 @@ function getTaskNextActionText(task: Task) {
 function getTaskSizeBucket(task: Task): TaskSizeBucket {
   const estimatedMinutes = Math.max(0, task.estimated_minutes || 0);
   const stressScore = task.stress_score || 3;
+  const effortScore = getTaskEffortScore(task);
 
   if (
     estimatedMinutes >= 90
-    || (estimatedMinutes >= 60 && task.cognitive_load === 'high')
+    || (estimatedMinutes >= 60 && effortScore >= 4)
     || stressScore >= 5
   ) {
     return 'big';
@@ -2111,8 +2105,7 @@ function getTaskSizeBucket(task: Task): TaskSizeBucket {
 
   if (
     estimatedMinutes >= 35
-    || task.cognitive_load === 'high'
-    || task.collaboration_level === 'high'
+    || effortScore >= 4
     || stressScore >= 4
   ) {
     return 'medium';
@@ -2164,15 +2157,17 @@ function buildTaskLineRows(tasks: Task[]) {
       rows.push({
         id: `serial-${parallelBuffer[0].id}`,
         mode: 'serial',
-        tasks: [parallelBuffer[0]],
-      });
-    } else {
-      rows.push({
-        id: `parallel-${parallelBuffer.map((task) => task.id).join('-')}`,
-        mode: 'parallel',
         tasks: parallelBuffer,
       });
+      parallelBuffer = [];
+      return;
     }
+
+    rows.push({
+      id: `parallel-${parallelBuffer.map((task) => task.id).join('-')}`,
+      mode: 'parallel',
+      tasks: parallelBuffer,
+    });
     parallelBuffer = [];
   };
 
@@ -2246,6 +2241,7 @@ function normalizeTask(rawTask: Task): Task {
   const completionCount = Number.isFinite(completionCountRaw) ? Math.max(0, Math.floor(completionCountRaw)) : 0;
   const longTermInterval = Number(partial.long_term_interval_days ?? 3);
   const normalizedLongTermInterval = Number.isFinite(longTermInterval) ? clamp(Math.round(longTermInterval), 2, 365) : 3;
+  const normalizedEffortScore = normalizeEffortScore(partial.effort_score, partial.cognitive_load);
 
   return {
     ...(partial as Task),
@@ -2270,7 +2266,8 @@ function normalizeTask(rawTask: Task): Task {
     ability_gains: normalizeAbilityGains(partial.ability_gains),
     stress_score: normalizeStressScore(partial.stress_score),
     energy_delta: normalizeEnergyDelta(partial.energy_delta),
-    cognitive_load: normalizeCognitiveLoad(partial.cognitive_load),
+    effort_score: normalizedEffortScore,
+    cognitive_load: normalizedEffortScore >= 4 ? 'high' : 'low',
     collaboration_level: normalizeCollaborationLevel(partial.collaboration_level),
     execution_mode: normalizeExecutionMode(partial.execution_mode),
     category_key: normalizeTaskCategory(partial.category_key),
@@ -2443,8 +2440,8 @@ const TASK_QUADRANT_ZONE_META: Record<TaskQuadrantZone, {
     badge: '快清',
     label: '快清区',
     hint: '紧急但不重要',
-    tint: 'rgba(224, 166, 81, 0.24)',
-    strong: '#de9c3d',
+    tint: 'rgba(223, 101, 125, 0.18)',
+    strong: '#df657d',
   },
   focus: {
     badge: '主战',
@@ -2457,15 +2454,15 @@ const TASK_QUADRANT_ZONE_META: Record<TaskQuadrantZone, {
     badge: '回收',
     label: '回收区',
     hint: '不急也不重要',
-    tint: 'rgba(133, 147, 171, 0.2)',
-    strong: '#91a1b8',
+    tint: 'rgba(223, 101, 125, 0.14)',
+    strong: '#d95f78',
   },
   build: {
     badge: '积累',
     label: '积累区',
     hint: '重要但不紧急',
-    tint: 'rgba(95, 170, 125, 0.22)',
-    strong: '#4fa876',
+    tint: 'rgba(223, 101, 125, 0.2)',
+    strong: '#d95f78',
   },
 };
 
@@ -2483,16 +2480,16 @@ function getTaskQuadrantZone(task: Task, now: number): TaskQuadrantZone {
 type EnergyMapLane = 'deep' | 'hybrid' | 'light';
 
 function getTaskEnergyLane(task: Task): EnergyMapLane {
-  if (task.collaboration_level === 'high' || task.execution_mode === 'parallel') return 'hybrid';
-  if (task.cognitive_load === 'high' || (task.stress_score || 3) >= 4) return 'deep';
+  if (task.execution_mode === 'parallel') return 'hybrid';
+  if (getTaskEffortScore(task) >= 4 || (task.stress_score || 3) >= 4) return 'deep';
   return 'light';
 }
 
 type EnergyElevatorLevel = 'sprint' | 'steady' | 'easy';
 
 function getEnergyElevatorLevel(task: Task): EnergyElevatorLevel {
-  if (task.cognitive_load === 'high' || (task.stress_score || 3) >= 4) return 'sprint';
-  if (task.collaboration_level === 'high' || task.execution_mode === 'parallel') return 'steady';
+  if (getTaskEffortScore(task) >= 4 || (task.stress_score || 3) >= 4) return 'sprint';
+  if (task.execution_mode === 'parallel' || getTaskEffortScore(task) === 3) return 'steady';
   return 'easy';
 }
 
@@ -2500,12 +2497,9 @@ function getDimensionColor(task: Task) {
   const importance = task.x;
   const urgency = 100 - task.y;
   const intensity = Math.max(0, Math.min(1, (importance + urgency) / 200));
-  const lightness = 68 - intensity * 20;
-
-  if (importance >= 60 && urgency >= 60) return `hsl(350 86% ${lightness}%)`;
-  if (importance >= 60 && urgency < 60) return `hsl(155 72% ${lightness}%)`;
-  if (importance < 60 && urgency >= 60) return `hsl(38 90% ${lightness}%)`;
-  return `hsl(200 85% ${lightness}%)`;
+  const saturation = 74 + intensity * 12;
+  const lightness = 66 - intensity * 14;
+  return `hsl(346 ${saturation}% ${lightness}%)`;
 }
 
 function withAuthHeaders(token: string, headers: Record<string, string> = {}) {
@@ -4953,7 +4947,6 @@ export default function App() {
   const [storageError, setStorageError] = useState('');
   const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
   const [draggedLineTaskId, setDraggedLineTaskId] = useState<string | null>(null);
-  const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]);
   const live2dControllerRef = useRef<Live2dController | null>(null);
   const live2dModelRef = useRef<{
     expression?: (id?: number | string) => Promise<boolean>;
@@ -4985,7 +4978,6 @@ export default function App() {
   const topBoardDragStateRef = useRef<{ startY: number; collapsed: boolean } | null>(null);
   const behaviorNudgeTimeoutRef = useRef<number | null>(null);
   const live2dWidgetAnimationRef = useRef<Animation | null>(null);
-  const dragClickSuppressTaskIdRef = useRef<string | null>(null);
 
   const syncLive2dUiAnchor = (element?: HTMLElement | null) => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -5580,7 +5572,7 @@ export default function App() {
   const dailyMixTasks = [...dailyMix.big, ...dailyMix.medium, ...dailyMix.small];
   const dailyMixTaskIds = new Set(dailyMixTasks.map((task) => task.id));
   const lowEnergyStandby = rankedReadyTasks
-    .filter((task) => !runningTaskIds.has(task.id) && !dailyMixTaskIds.has(task.id) && task.cognitive_load === 'low' && task.collaboration_level === 'low')
+    .filter((task) => !runningTaskIds.has(task.id) && !dailyMixTaskIds.has(task.id) && getTaskEffortScore(task) <= 2)
     .slice(0, 4);
   const lowEnergyTaskIds = new Set(lowEnergyStandby.map((task) => task.id));
   const blockedQueue = blockedTasks
@@ -5611,22 +5603,6 @@ export default function App() {
     ? currentPrimaryRow.tasks
     : (currentPrimaryTask ? [currentPrimaryTask] : []);
   const currentPrimaryIsParallel = Boolean(currentPrimaryRow?.mode === 'parallel' && currentPrimaryTasks.length > 1);
-
-  useEffect(() => {
-    if (currentPrimaryTasks.length === 0) return;
-    setExpandedTaskIds((prev) => {
-      const next = new Set(prev);
-      let changed = false;
-      currentPrimaryTasks.forEach((task) => {
-        if (!next.has(task.id)) {
-          next.add(task.id);
-          changed = true;
-        }
-      });
-      return changed ? Array.from(next) : prev;
-    });
-  }, [currentPrimaryTasks.map((task) => task.id).join('|')]);
-
   const focusHeadline = runningTasks.length > 0
     ? '先把已经开始的任务收束到 1 到 2 项'
     : energyScore >= 65
@@ -5663,8 +5639,8 @@ export default function App() {
   const energyElevatorOrder: EnergyElevatorLevel[] = ['sprint', 'steady', 'easy'];
   const energyElevatorMeta: Record<EnergyElevatorLevel, { label: string; hint: string }> = {
     easy: { label: '轻推层', hint: '低负荷，随时能做' },
-    steady: { label: '巡航层', hint: '协作/等待时推进' },
-    sprint: { label: '冲刺层', hint: '高认知，留给状态最好的时候' },
+    steady: { label: '巡航层', hint: '中等消耗，适合持续推进' },
+    sprint: { label: '冲刺层', hint: '高消耗，留给状态最好的时候' },
   };
   const energyElevatorGroups = energyElevatorOrder.map((level) => ({
     level,
@@ -5737,7 +5713,7 @@ export default function App() {
       detail: energyScore >= 70
         ? '高能窗口，优先重任务或深度推进。'
         : energyScore <= 40
-          ? '低能窗口，优先低认知和低协作。'
+          ? '低能窗口，优先低消耗的小动作。'
           : '稳定窗口，适合把今天的主任务往前推。',
     },
     {
@@ -6348,35 +6324,41 @@ export default function App() {
     const insertIndex = targetTaskId ? orderedIds.indexOf(targetTaskId) : orderedIds.length;
     const nextIds = [...orderedIds];
     nextIds.splice(insertIndex >= 0 ? insertIndex : nextIds.length, 0, taskId);
+    const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const projectedTasks = nextIds
+      .map((id, index) => {
+        const task = taskById.get(id);
+        if (!task) return null;
+        return {
+          ...task,
+          execution_mode: id === taskId ? targetMode : (task.execution_mode || 'serial'),
+          line_order: index + 1,
+        };
+      })
+      .filter((task): task is Task => Boolean(task));
+    const normalizedModeByTaskId = new Map<string, TaskExecutionMode>();
+    buildTaskLineRows(projectedTasks).forEach((row) => {
+      row.tasks.forEach((rowTask) => normalizedModeByTaskId.set(rowTask.id, row.mode));
+    });
 
     setTasks((prev) => {
-      const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
       return prev.map((task) => {
-        if (task.id === taskId) {
-          return {
-            ...task,
-            execution_mode: targetMode,
-            line_order: rankMap.get(taskId) || task.line_order,
-          };
-        }
-
-        if (rankMap.has(task.id)) {
-          return {
-            ...task,
-            line_order: rankMap.get(task.id),
-          };
-        }
-
-        return task;
+        if (!rankMap.has(task.id)) return task;
+        return {
+          ...task,
+          execution_mode: normalizedModeByTaskId.get(task.id) || task.execution_mode || 'serial',
+          line_order: rankMap.get(task.id) || task.line_order,
+        };
       });
     });
 
     setSelectedTask((prev) => (
-      prev?.id === taskId
+      prev && rankMap.has(prev.id)
         ? {
             ...prev,
-            execution_mode: targetMode,
-            line_order: nextIds.indexOf(taskId) + 1,
+            execution_mode: normalizedModeByTaskId.get(prev.id) || prev.execution_mode || 'serial',
+            line_order: rankMap.get(prev.id) || prev.line_order,
           }
         : prev
     ));
@@ -6393,35 +6375,41 @@ export default function App() {
     const targetIndex = orderedIds.indexOf(targetTaskId);
     const nextIds = [...orderedIds];
     nextIds.splice(targetIndex >= 0 ? targetIndex + (placement === 'after' ? 1 : 0) : nextIds.length, 0, taskId);
+    const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const projectedTasks = nextIds
+      .map((id, index) => {
+        const task = taskById.get(id);
+        if (!task) return null;
+        return {
+          ...task,
+          execution_mode: id === taskId ? targetMode : (task.execution_mode || 'serial'),
+          line_order: index + 1,
+        };
+      })
+      .filter((task): task is Task => Boolean(task));
+    const normalizedModeByTaskId = new Map<string, TaskExecutionMode>();
+    buildTaskLineRows(projectedTasks).forEach((row) => {
+      row.tasks.forEach((rowTask) => normalizedModeByTaskId.set(rowTask.id, row.mode));
+    });
 
     setTasks((prev) => {
-      const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
       return prev.map((task) => {
-        if (task.id === taskId) {
-          return {
-            ...task,
-            execution_mode: targetMode,
-            line_order: rankMap.get(taskId) || task.line_order,
-          };
-        }
-
-        if (rankMap.has(task.id)) {
-          return {
-            ...task,
-            line_order: rankMap.get(task.id),
-          };
-        }
-
-        return task;
+        if (!rankMap.has(task.id)) return task;
+        return {
+          ...task,
+          execution_mode: normalizedModeByTaskId.get(task.id) || task.execution_mode || 'serial',
+          line_order: rankMap.get(task.id) || task.line_order,
+        };
       });
     });
 
     setSelectedTask((prev) => (
-      prev?.id === taskId
+      prev && rankMap.has(prev.id)
         ? {
             ...prev,
-            execution_mode: targetMode,
-            line_order: nextIds.indexOf(taskId) + 1,
+            execution_mode: normalizedModeByTaskId.get(prev.id) || prev.execution_mode || 'serial',
+            line_order: rankMap.get(prev.id) || prev.line_order,
           }
         : prev
     ));
@@ -6431,6 +6419,7 @@ export default function App() {
     if (targetLevel === 'sprint') {
       return {
         ...task,
+        effort_score: 5 as TaskEffortScore,
         cognitive_load: 'high' as TaskCognitiveLoad,
         stress_score: Math.max(4, task.stress_score || 3),
       };
@@ -6439,16 +6428,16 @@ export default function App() {
     if (targetLevel === 'steady') {
       return {
         ...task,
+        effort_score: 3 as TaskEffortScore,
         cognitive_load: 'low' as TaskCognitiveLoad,
-        collaboration_level: 'high' as TaskCollaborationLevel,
         stress_score: Math.min(3, task.stress_score || 3),
       };
     }
 
     return {
       ...task,
+      effort_score: 1 as TaskEffortScore,
       cognitive_load: 'low' as TaskCognitiveLoad,
-      collaboration_level: 'low' as TaskCollaborationLevel,
       execution_mode: 'serial' as TaskExecutionMode,
       stress_score: Math.min(3, task.stress_score || 3),
     };
@@ -6525,7 +6514,6 @@ export default function App() {
   const startTaskDrag = (event: React.DragEvent<HTMLElement>, taskId: string) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', taskId);
-    dragClickSuppressTaskIdRef.current = taskId;
     setDraggedLineTaskId(taskId);
     setDragOverLineTaskId(taskId);
   };
@@ -6534,13 +6522,6 @@ export default function App() {
     setDraggedLineTaskId(null);
     setDragOverLineTaskId(null);
     setDragOverLineZone(null);
-    if (typeof window === 'undefined') {
-      dragClickSuppressTaskIdRef.current = null;
-      return;
-    }
-    window.setTimeout(() => {
-      dragClickSuppressTaskIdRef.current = null;
-    }, 0);
   };
 
   const mergeTaskIntoParallel = (taskId: string, targetTaskId: string, taskIds: string[]) => {
@@ -6555,25 +6536,44 @@ export default function App() {
         .sort((a, b) => nextIds.indexOf(a.id) - nextIds.indexOf(b.id))
     ).find((row) => row.tasks.some((task) => task.id === targetTaskId));
     const idsToParallelize = new Set([taskId, targetTaskId, ...(targetRow?.mode === 'parallel' ? targetRow.tasks.map((task) => task.id) : [])]);
+    const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const projectedTasks = nextIds
+      .map((id, index) => {
+        const task = taskById.get(id);
+        if (!task) return null;
+        return {
+          ...task,
+          execution_mode: idsToParallelize.has(id) ? 'parallel' : (task.execution_mode || 'serial'),
+          line_order: index + 1,
+        };
+      })
+      .filter((task): task is Task => Boolean(task));
+    const normalizedModeByTaskId = new Map<string, TaskExecutionMode>();
+    buildTaskLineRows(projectedTasks).forEach((row) => {
+      row.tasks.forEach((rowTask) => normalizedModeByTaskId.set(rowTask.id, row.mode));
+    });
 
     setTasks((prev) => {
-      const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
       return prev.map((task) => {
-        if (!rankMap.has(task.id) && !idsToParallelize.has(task.id)) return task;
+        if (!rankMap.has(task.id)) return task;
         return {
           ...task,
           line_order: rankMap.get(task.id) || task.line_order,
-          execution_mode: idsToParallelize.has(task.id) ? 'parallel' : task.execution_mode,
+          execution_mode: normalizedModeByTaskId.get(task.id) || task.execution_mode || 'serial',
         };
       });
     });
 
     setSelectedTask((prev) => (
-      prev && idsToParallelize.has(prev.id)
-        ? { ...prev, execution_mode: 'parallel', line_order: nextIds.indexOf(prev.id) + 1 || prev.line_order }
+      prev && rankMap.has(prev.id)
+        ? {
+            ...prev,
+            execution_mode: normalizedModeByTaskId.get(prev.id) || prev.execution_mode || 'serial',
+            line_order: rankMap.get(prev.id) || prev.line_order,
+          }
         : prev
     ));
-    setExpandedTaskIds((prev) => Array.from(new Set([...prev, ...Array.from(idsToParallelize)])));
   };
 
   const handleTaskLineDrop = (
@@ -6583,6 +6583,7 @@ export default function App() {
     laneMode: TaskExecutionMode
   ) => {
     event.preventDefault();
+    event.stopPropagation();
     const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
     if (!droppedTaskId || droppedTaskId === task.id) return;
 
@@ -7067,14 +7068,15 @@ export default function App() {
     }
     const now = Date.now();
     const createdTasks = aiDayPlan.tasks.map((draft, index) => {
-      const baseX = draft.cognitive_load === 'high' ? 72 : 58;
+      const effortScore = normalizeEffortScore(draft.effort_score, draft.cognitive_load);
+      const baseX = effortScore >= 4 ? 72 : effortScore <= 2 ? 58 : 64;
       const urgencyOffset = draft.timeline === 'temporary' ? draft.stress_score * 11 : 18;
       const y = clamp(96 - urgencyOffset - index * 7, 8, 92);
       return normalizeTask({
         id: createLocalId('ai-task'),
         title: draft.title,
         description: draft.description,
-        x: clamp(baseX + (draft.collaboration_level === 'high' ? 10 : 0), 10, 95),
+        x: clamp(baseX, 10, 95),
         y,
         status: 'pending',
         timeline: draft.timeline,
@@ -7092,10 +7094,11 @@ export default function App() {
         ability_gains: {},
         stress_score: draft.stress_score,
         energy_delta: draft.energy_delta,
-        cognitive_load: draft.cognitive_load,
-        collaboration_level: draft.collaboration_level,
-        execution_mode: draft.collaboration_level === 'high' ? 'parallel' : 'serial',
-        category_key: draft.category_key,
+        effort_score: effortScore,
+        cognitive_load: effortScore >= 4 ? 'high' : 'low',
+        collaboration_level: 'low',
+        execution_mode: 'serial',
+        category_key: 'misc',
         line_order: now + index,
         tracking_started_at: null,
         tracking_accumulated_ms: 0,
@@ -7386,13 +7389,7 @@ export default function App() {
             估 {task.estimated_minutes}m
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
-            {getCognitiveLoadLabel(task.cognitive_load || 'low')}
-          </span>
-          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
-            {getCollaborationLevelLabel(task.collaboration_level || 'low')}
-          </span>
-          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
-            {getTaskCategoryLabel(task.category_key || 'misc')}
+            {getTaskEffortLabel(task)}
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
             {getEnergyDeltaLabel(task.energy_delta || 0)}
@@ -7479,41 +7476,24 @@ export default function App() {
       laneMode = 'serial',
       taskIds = [],
       rowTaskCount = 1,
-      surface = 'line',
     }: {
       emphasis?: 'default' | 'standby';
       laneMode?: TaskExecutionMode;
       taskIds?: string[];
       rowTaskCount?: number;
-      surface?: 'line' | 'primary';
     } = {}
   ) => {
     const ready = isTaskReady(task) && isLongTermDue(task, nowTs);
-    const isExpanded = expandedTaskIds.includes(task.id);
-    const isPrimarySurface = surface === 'primary';
-    const compactParallel = laneMode === 'parallel' && !isExpanded;
+    const compactParallel = laneMode === 'parallel';
     const tripleParallel = compactParallel && rowTaskCount >= 3;
     const dualParallel = compactParallel && rowTaskCount === 2;
-    const timelineAccent = getTimelineAccent(task.timeline);
-    const nodeColor = getDimensionColor(task);
-    const progress = Math.round(getTaskProgress(task) * 100);
-    const firstLine = ready ? buildRecommendationReason(task, energyScore, nowTs) : getTaskBlockingLabel(task);
-    const taskBurnRate = getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1));
-    const canUngroupParallel = laneMode === 'parallel' && rowTaskCount > 1;
+    const ultraCompactParallel = tripleParallel;
     const toneClasses = emphasis === 'standby'
       ? 'border-stone-300/20 bg-stone-500/[0.06]'
       : 'border-white/10 bg-white/[0.03]';
     const isDragged = draggedLineTaskId === task.id;
     const isDragTarget = dragOverLineTaskId === task.id && draggedLineTaskId !== task.id;
     const dragZone = isDragTarget ? dragOverLineZone : null;
-    const toggleExpanded = () => {
-      setExpandedTaskIds((prev) => (
-        prev.includes(task.id)
-          ? prev.filter((id) => id !== task.id)
-          : [...prev, task.id]
-      ));
-    };
-
     return (
       <div
         key={`line-${task.id}`}
@@ -7521,8 +7501,7 @@ export default function App() {
         onClick={(event) => {
           const target = event.target as HTMLElement | null;
           if (target?.closest('button, a, input, textarea, select, label')) return;
-          if (dragClickSuppressTaskIdRef.current === task.id) return;
-          toggleExpanded();
+          setSelectedTask(task);
         }}
         onDragStart={(event) => startTaskDrag(event, task.id)}
         onDragEnd={endTaskDrag}
@@ -7551,12 +7530,11 @@ export default function App() {
           dragZone === 'before' && "task-line-shell-drop-before",
           dragZone === 'after' && "task-line-shell-drop-after",
           dragZone === 'overlap' && "task-line-shell-drop-overlap",
-          isPrimarySurface && "task-line-shell-primary h-full min-h-[17.25rem]",
-          isExpanded
-            ? "flex h-full flex-col px-4 py-4"
-            : compactParallel
-              ? "flex h-full min-h-[98px] flex-col px-3 py-3"
-              : "flex items-center gap-3 px-3 py-3"
+          compactParallel
+            ? ultraCompactParallel
+              ? "flex min-h-[72px] flex-col gap-2 px-2.5 py-2"
+              : "flex h-full min-h-[98px] flex-col px-3 py-3"
+            : "flex items-center gap-3 px-3 py-3"
         )}
       >
         {dragZone && (
@@ -7564,228 +7542,104 @@ export default function App() {
             {dragZone === 'before' ? '识别：上方' : dragZone === 'after' ? '识别：下方' : '识别：重叠并行'}
           </div>
         )}
-        {canUngroupParallel && (
-          <button
-            type="button"
-            aria-label="解除并行"
-            onClick={(event) => {
-              event.stopPropagation();
-              setTaskExecutionMode([task.id], 'serial');
-            }}
-            className="task-line-ungroup absolute right-3 top-3 z-[3] inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/15 text-slate-300 transition-colors hover:border-white/20 hover:text-white"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        )}
-        {isExpanded ? (
+        {compactParallel ? (
           <>
-            <div className="flex items-start gap-3">
-              <div className="task-line-drag-handle shrink-0 pt-1 text-slate-500">
-                <GripVertical className="h-4 w-4" />
-              </div>
-              <div
-                className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
-                style={{ color: nodeColor, backgroundColor: nodeColor }}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-3 pr-8">
-                  <div className="min-w-0">
-                    <h4 className="text-left text-[1rem] font-semibold leading-6 text-white text-safe-wrap">
-                      {task.title || '未命名任务'}
-                    </h4>
-                    <p className="mt-2 text-sm leading-6 text-slate-300 text-safe-wrap">
-                      {getTaskNextActionText(task)}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleTaskTracking(task);
-                    }}
-                    disabled={!ready}
-                    className={cn(
-                      "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                      ready
-                        ? task.tracking_started_at
-                          ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
-                          : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
-                        : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
-                    )}
-                  >
-                    {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                    <TaskRuntimeLabel task={task} mode="button" />
-                  </button>
+            {ultraCompactParallel ? (
+              <div className="flex min-w-0 items-start gap-2">
+                <div className="task-line-drag-handle shrink-0 pt-0.5 text-slate-600">
+                  <GripVertical className="h-3.5 w-3.5" />
                 </div>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
-              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
-                估 {task.estimated_minutes}m
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
-                {getCognitiveLoadLabel(task.cognitive_load || 'low')}
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
-                {getCollaborationLevelLabel(task.collaboration_level || 'low')}
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
-                {getTaskCategoryLabel(task.category_key || 'misc')}
-              </span>
-              <span className={cn("rounded-full border px-2 py-1", timelineAccent.badge)}>
-                {task.timeline === 'long_term' ? '长期' : '临时'}
-              </span>
-            </div>
-
-            <p className="mt-3 text-[11px] leading-5 text-slate-400 text-safe-wrap">{firstLine}</p>
-
-            {(task.timeline === 'temporary' && task.deadline_at) || (task.timeline === 'long_term' && task.next_due_at) ? (
-              <div
-                className={cn(
-                  "mt-3 rounded-2xl border px-3 py-2 text-[11px] font-semibold",
-                  task.timeline === 'temporary'
-                    ? (task.deadline_at || 0) <= nowTs
-                      ? 'border-indigo-300/40 bg-indigo-500/18 text-indigo-100'
-                      : 'border-amber-400/35 bg-amber-500/18 text-amber-100'
-                    : (task.next_due_at && isLongTermDue(task, nowTs))
-                      ? 'border-indigo-400/35 bg-indigo-500/18 text-indigo-100'
-                      : 'border-slate-400/35 bg-slate-500/18 text-slate-100'
-                )}
-              >
-                {task.timeline === 'temporary'
-                  ? `${getCountdownText(task.deadline_at || nowTs, nowTs)} · 截止 ${formatDateTime(task.deadline_at)}`
-                  : (task.next_due_at && isLongTermDue(task, nowTs))
-                    ? '当前周期可执行'
-                    : `下个周期 ${formatDateTime(task.next_due_at)}`}
-              </div>
-            ) : null}
-
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <div className="rounded-[1rem] border border-white/10 bg-white/[0.04] px-3 py-3">
-                <div className="text-[12px] leading-5 text-slate-400">预计</div>
-                <div className="mt-1 text-[1.05rem] font-semibold text-white">{task.estimated_minutes}m</div>
-              </div>
-              <div className="rounded-[1rem] border border-white/10 bg-white/[0.04] px-3 py-3">
-                <div className="text-[12px] leading-5 text-slate-400">负荷</div>
-                <div className="mt-1 text-[1.05rem] font-semibold text-white">
-                  {getCognitiveLoadLabel(task.cognitive_load || 'low')}
-                </div>
-              </div>
-              <div className="rounded-[1rem] border border-white/10 bg-white/[0.04] px-3 py-3">
-                <div className="text-[12px] leading-5 text-slate-400">协作</div>
-                <div className="mt-1 text-[1.05rem] font-semibold text-white">
-                  {getCollaborationLevelLabel(task.collaboration_level || 'low')}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 flex items-center gap-3">
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
                 <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: `${progress}%`,
-                    background: `linear-gradient(90deg, ${nodeColor}, color-mix(in srgb, ${nodeColor} 72%, white))`,
-                  }}
+                  className="mt-1 h-2 w-2 shrink-0 rounded-full shadow-[0_0_8px_currentColor]"
+                  style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
                 />
-              </div>
-              <span className="text-[10px] font-bold text-slate-400">
-                {task.steps.length > 0 ? `${task.steps.filter((step) => step.completed).length}/${task.steps.length}` : '待拆解'}
-              </span>
-            </div>
-
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <TaskRuntimeLabel task={task} mode="card" className="text-[11px] text-slate-400" />
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedTask(task);
-                  }}
-                  className="rounded-full border border-white/12 px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/8 hover:text-white"
-                >
-                  查看
-                </button>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleTaskTracking(task);
-                  }}
-                  disabled={!ready}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors",
-                    ready
-                      ? task.tracking_started_at
-                        ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
-                        : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
-                      : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
-                  )}
-                >
-                  {task.tracking_started_at ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                  {task.tracking_started_at ? '暂停' : '开始'}
-                </button>
-              </div>
-            </div>
-          </>
-        ) : compactParallel ? (
-          <>
-            <div className="flex min-w-0 items-start gap-2">
-              <div className="task-line-drag-handle shrink-0 pt-0.5 text-slate-500">
-                <GripVertical className="h-4 w-4" />
-              </div>
-              <div
-                className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
-                style={{ color: nodeColor, backgroundColor: nodeColor }}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div
-                      className={cn(
-                        "block w-full text-left font-semibold leading-5 text-white break-words text-safe-wrap",
-                        tripleParallel ? "line-clamp-2 text-[13px]" : "line-clamp-2 text-sm"
-                      )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTask(task)}
+                      className="min-w-0 flex-1 truncate text-left text-[12px] font-semibold leading-4 text-white transition-colors hover:text-indigo-200"
+                      title={task.title || '未命名任务'}
                     >
                       {task.title || '未命名任务'}
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-400">
-                      <span>{getTaskCategoryLabel(task.category_key || 'misc')}</span>
-                      <span>{task.estimated_minutes}m</span>
-                      <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
-                    </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleTaskTracking(task)}
+                      disabled={!ready}
+                      className={cn(
+                        "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition-colors",
+                        ready
+                          ? task.tracking_started_at
+                            ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                            : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
+                          : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
+                      )}
+                      aria-label={task.tracking_started_at ? '暂停任务' : '开始任务'}
+                    >
+                      {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleTaskTracking(task)}
-                    disabled={!ready}
-                    className={cn(
-                      "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                      ready
-                        ? task.tracking_started_at
-                          ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
-                          : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
-                        : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
-                    )}
-                  >
-                    {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                    <TaskRuntimeLabel task={task} mode="button" />
-                  </button>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
-                  {!dualParallel && (
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">
-                      {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
+                    <span className="rounded-full border border-white/8 bg-white/[0.03] px-1.5 py-0.5">
+                      {task.estimated_minutes}m
                     </span>
-                  )}
-                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">
-                    {taskBurnRate.toFixed(1)}/h
-                  </span>
+                    <span className="rounded-full border border-white/8 bg-white/[0.03] px-1.5 py-0.5">
+                      {getTaskEffortLabel(task)}
+                    </span>
+                    <TaskRuntimeLabel task={task} mode="plain" className="text-[10px] text-slate-500" />
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex min-w-0 items-start gap-2">
+                <div className="task-line-drag-handle shrink-0 pt-0.5 text-slate-500">
+                  <GripVertical className="h-4 w-4" />
+                </div>
+                <div
+                  className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
+                  style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTask(task)}
+                        className="block w-full text-left text-sm font-semibold leading-5 text-white transition-colors hover:text-indigo-200 break-words text-safe-wrap line-clamp-2"
+                      >
+                        {task.title || '未命名任务'}
+                      </button>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-400">
+                        <span>{task.estimated_minutes}m</span>
+                        <span>{getTaskEffortLabel(task)}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleTaskTracking(task)}
+                      disabled={!ready}
+                      className={cn(
+                        "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                        ready
+                          ? task.tracking_started_at
+                            ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                            : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
+                          : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
+                      )}
+                    >
+                      {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                      <TaskRuntimeLabel task={task} mode="button" />
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">
+                      {getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -7795,21 +7649,23 @@ export default function App() {
             <div className="task-line-dot-wrap shrink-0">
               <div
                 className="h-2.5 w-2.5 rounded-full shadow-[0_0_10px_currentColor]"
-                style={{ color: nodeColor, backgroundColor: nodeColor }}
+                style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
               />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <div className="line-clamp-2 text-left text-sm font-semibold leading-5 text-white text-safe-wrap">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTask(task)}
+                  className="line-clamp-2 text-left text-sm font-semibold leading-5 text-white transition-colors hover:text-indigo-200 text-safe-wrap"
+                >
                   {task.title || '未命名任务'}
-                </div>
+                </button>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
                 <span>{task.estimated_minutes}m</span>
-                <span>{getTaskCategoryLabel(task.category_key || 'misc')}</span>
-                <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
-                <span>{getCollaborationLevelLabel(task.collaboration_level || 'low')}</span>
-                <span>{taskBurnRate.toFixed(1)}/h</span>
+                <span>{getTaskEffortLabel(task)}</span>
+                <span>{getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h</span>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
@@ -8646,7 +8502,7 @@ export default function App() {
                                 <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-300">
                                   <span>{'\u9884\u4f30'} {task.estimated_minutes}m</span>
                                   <TaskActualMinutesLabel task={task} />
-                                  <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
+                                  <span>{getTaskEffortLabel(task)}</span>
                                 </div>
                               </div>
                             ))}
@@ -8749,10 +8605,7 @@ export default function App() {
                                 </div>
                                 <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-semibold">
                                   <span className="rounded-md border border-sky-400/25 bg-sky-500/10 px-1.5 py-0.5 text-sky-100">
-                                    {getCognitiveLoadLabel(task.cognitive_load || 'low')}
-                                  </span>
-                                  <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-1.5 py-0.5 text-violet-100">
-                                    {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+                                    {getTaskEffortLabel(task)}
                                   </span>
                                 </div>
                                 <p className="mt-1 text-[11px] leading-5 text-slate-300 line-clamp-2">
@@ -9127,7 +8980,6 @@ export default function App() {
                 homeLineRows={homeLineRows}
                 moveTaskToLine={moveTaskToLine}
                 renderTaskLine={renderTaskLine}
-                mergeTaskIntoParallel={mergeTaskIntoParallel}
                 setDragOverLineTaskId={setDragOverLineTaskId}
                 setDragOverLineZone={setDragOverLineZone}
                 energyMapTasks={energyMapTasks}
@@ -9192,7 +9044,7 @@ export default function App() {
                   <div className="mt-4 grid gap-3">
                     {lowEnergyStandby.length === 0 ? (
                       <div className="rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
-                        当前没有低认知、低协作的任务。可以补两三个 10 到 20 分钟的小动作备用。
+                        当前没有低消耗任务。可以补两三个 10 到 20 分钟的小动作备用。
                       </div>
                     ) : (
                       lowEnergyStandby.map((task) =>
@@ -9899,54 +9751,47 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                    <div className="rounded-xl border border-sky-300/20 bg-sky-500/10 p-3">
-                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-sky-100">认知负荷</h4>
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        {COGNITIVE_LOAD_OPTIONS.map((option) => (
-                          <button
-                            key={`cognitive-${option.value}`}
-                            type="button"
-                            onClick={() => setSelectedTask({ ...selectedTask, cognitive_load: option.value })}
-                            className={cn(
-                              "rounded-xl border px-3 py-2 text-xs font-bold transition-all",
-                              (selectedTask.cognitive_load || 'low') === option.value
-                                ? "border-sky-300/60 bg-sky-500/30 text-white"
-                                : "border-sky-200/20 bg-slate-950/60 text-sky-100/75 hover:bg-slate-900"
-                            )}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-[11px] leading-5 text-sky-100/80">
-                        高认知任务更适合在精力充足时进入深度工作块。
-                      </p>
+                  <div className="rounded-xl border border-sky-300/20 bg-sky-500/10 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-sky-100">任务消耗</h4>
+                      <span className="rounded-full border border-sky-300/30 bg-sky-500/15 px-2 py-1 text-[11px] font-bold text-sky-50">
+                        {getTaskEffortLabel(selectedTask)}
+                      </span>
                     </div>
-
-                    <div className="rounded-xl border border-violet-300/20 bg-violet-500/10 p-3">
-                      <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-violet-100">协作化程度</h4>
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        {COLLABORATION_LEVEL_OPTIONS.map((option) => (
-                          <button
-                            key={`collaboration-${option.value}`}
-                            type="button"
-                            onClick={() => setSelectedTask({ ...selectedTask, collaboration_level: option.value })}
-                            className={cn(
-                              "rounded-xl border px-3 py-2 text-xs font-bold transition-all",
-                              (selectedTask.collaboration_level || 'low') === option.value
-                                ? "border-violet-300/60 bg-violet-500/30 text-white"
-                                : "border-violet-200/20 bg-slate-950/60 text-violet-100/75 hover:bg-slate-900"
-                            )}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-[11px] leading-5 text-violet-100/80">
-                        高协作任务会被建议集中到同一段沟通时间里处理。
-                      </p>
+                    <input
+                      type="range"
+                      min={TASK_EFFORT_MIN}
+                      max={TASK_EFFORT_MAX}
+                      step={1}
+                      value={getTaskEffortScore(selectedTask)}
+                      onChange={(e) => {
+                        const effortScore = normalizeEffortScore(e.target.value);
+                        setSelectedTask({
+                          ...selectedTask,
+                          effort_score: effortScore,
+                          cognitive_load: effortScore >= 4 ? 'high' : 'low',
+                        });
+                      }}
+                      className="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-sky-950/70 accent-sky-400"
+                    />
+                    <div className="mt-3 grid grid-cols-5 gap-2 text-center text-[10px] font-semibold text-sky-100/70">
+                      {TASK_EFFORT_MARKS.map((mark) => (
+                        <span
+                          key={`effort-${mark.value}`}
+                          className={cn(
+                            "rounded-lg border px-1.5 py-1 transition-colors",
+                            getTaskEffortScore(selectedTask) === mark.value
+                              ? "border-sky-300/50 bg-sky-500/25 text-white"
+                              : "border-sky-200/10 bg-slate-950/30"
+                          )}
+                        >
+                          {mark.label}
+                        </span>
+                      ))}
                     </div>
+                    <p className="mt-2 text-[11px] leading-5 text-sky-100/80">
+                      数值越高，越适合留给状态好的时段；低数值更适合碎片时间快速推进。
+                    </p>
                   </div>
 
                   <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
@@ -9970,30 +9815,6 @@ export default function App() {
                     </div>
                     <p className="mt-2 text-[11px] leading-5 text-slate-400">
                       串行表示这件事会独占注意力；并行更适合等待 AI、回复或外部反馈时穿插推进。
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
-                    <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-slate-200">任务类别</h4>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      {TASK_CATEGORY_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => setSelectedTask({ ...selectedTask, category_key: option.value })}
-                          className={cn(
-                            "rounded-xl border px-3 py-2 text-xs font-bold transition-all",
-                            (selectedTask.category_key || 'misc') === option.value
-                              ? "border-white/50 bg-white/18 text-white"
-                              : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
-                          )}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-[11px] leading-5 text-slate-400">
-                      用类别把任务分回你的真实工作结构：科研、开发、学习、杂项。
                     </p>
                   </div>
 
@@ -10537,7 +10358,6 @@ function TaskPoint({
   const [isDragging, setIsDragging] = useState(false);
   const pointRef = useRef<HTMLDivElement>(null);
   const timelineAccent = getTimelineAccent(task.timeline);
-  const nodeColor = getDimensionColor(task);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -10614,25 +10434,20 @@ function TaskPoint({
           isDragging && "scale-110 z-50"
         )}
       >
-        {/* Progress Ring / Circle Backdrop */}
+        {/* Rose block marker */}
         <div
           className={cn(
-            "task-point-shell task-point-shell-simple w-11 h-11 rounded-full overflow-hidden relative transition-all duration-300 border",
-            timelineAccent.ring
+            "task-point-shell task-point-shell-simple relative h-10 w-10 overflow-hidden rounded-[0.7rem] border transition-all duration-300"
           )}
           data-zone={quadrantZone}
           style={{
             ['--task-point-zone' as string]: quadrantMeta.tint,
             ['--task-point-zone-strong' as string]: quadrantMeta.strong,
             ['--task-point-progress' as string]: `${Math.max(8, progress)}%`,
-            ['--task-point-node' as string]: nodeColor,
           } as React.CSSProperties}
         >
-          <div className="task-point-progress-donut" />
-          <div className="task-point-inner">
-            <div className="task-point-core-dot" style={{ backgroundColor: nodeColor }} />
-          </div>
-          <div className="task-point-glow" />
+          <div className="task-point-block-fill" />
+          <div className="task-point-block-progress" />
         </div>
 
         {/* Always-visible label */}
@@ -10646,7 +10461,7 @@ function TaskPoint({
             } as React.CSSProperties}
           >
             <div className="flex items-start gap-2">
-              <span className="task-point-dot mt-1 shrink-0" style={{ backgroundColor: nodeColor }} />
+              <span className="task-point-dot mt-1 shrink-0" />
               <span className="task-point-title line-clamp-2 text-[11px] font-semibold leading-4">{task.title || '未命名'}</span>
             </div>
             <div className="mt-1.5 flex items-center gap-1">
