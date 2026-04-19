@@ -2160,11 +2160,19 @@ function buildTaskLineRows(tasks: Task[]) {
 
   const flushParallelBuffer = () => {
     if (parallelBuffer.length === 0) return;
-    rows.push({
-      id: `parallel-${parallelBuffer.map((task) => task.id).join('-')}`,
-      mode: 'parallel',
-      tasks: parallelBuffer,
-    });
+    if (parallelBuffer.length === 1) {
+      rows.push({
+        id: `serial-${parallelBuffer[0].id}`,
+        mode: 'serial',
+        tasks: [parallelBuffer[0]],
+      });
+    } else {
+      rows.push({
+        id: `parallel-${parallelBuffer.map((task) => task.id).join('-')}`,
+        mode: 'parallel',
+        tasks: parallelBuffer,
+      });
+    }
     parallelBuffer = [];
   };
 
@@ -4945,6 +4953,7 @@ export default function App() {
   const [storageError, setStorageError] = useState('');
   const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
   const [draggedLineTaskId, setDraggedLineTaskId] = useState<string | null>(null);
+  const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]);
   const live2dControllerRef = useRef<Live2dController | null>(null);
   const live2dModelRef = useRef<{
     expression?: (id?: number | string) => Promise<boolean>;
@@ -4976,6 +4985,7 @@ export default function App() {
   const topBoardDragStateRef = useRef<{ startY: number; collapsed: boolean } | null>(null);
   const behaviorNudgeTimeoutRef = useRef<number | null>(null);
   const live2dWidgetAnimationRef = useRef<Animation | null>(null);
+  const dragClickSuppressTaskIdRef = useRef<string | null>(null);
 
   const syncLive2dUiAnchor = (element?: HTMLElement | null) => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -5601,6 +5611,22 @@ export default function App() {
     ? currentPrimaryRow.tasks
     : (currentPrimaryTask ? [currentPrimaryTask] : []);
   const currentPrimaryIsParallel = Boolean(currentPrimaryRow?.mode === 'parallel' && currentPrimaryTasks.length > 1);
+
+  useEffect(() => {
+    if (currentPrimaryTasks.length === 0) return;
+    setExpandedTaskIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      currentPrimaryTasks.forEach((task) => {
+        if (!next.has(task.id)) {
+          next.add(task.id);
+          changed = true;
+        }
+      });
+      return changed ? Array.from(next) : prev;
+    });
+  }, [currentPrimaryTasks.map((task) => task.id).join('|')]);
+
   const focusHeadline = runningTasks.length > 0
     ? '先把已经开始的任务收束到 1 到 2 项'
     : energyScore >= 65
@@ -6499,6 +6525,7 @@ export default function App() {
   const startTaskDrag = (event: React.DragEvent<HTMLElement>, taskId: string) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', taskId);
+    dragClickSuppressTaskIdRef.current = taskId;
     setDraggedLineTaskId(taskId);
     setDragOverLineTaskId(taskId);
   };
@@ -6507,6 +6534,13 @@ export default function App() {
     setDraggedLineTaskId(null);
     setDragOverLineTaskId(null);
     setDragOverLineZone(null);
+    if (typeof window === 'undefined') {
+      dragClickSuppressTaskIdRef.current = null;
+      return;
+    }
+    window.setTimeout(() => {
+      dragClickSuppressTaskIdRef.current = null;
+    }, 0);
   };
 
   const mergeTaskIntoParallel = (taskId: string, targetTaskId: string, taskIds: string[]) => {
@@ -6539,6 +6573,7 @@ export default function App() {
         ? { ...prev, execution_mode: 'parallel', line_order: nextIds.indexOf(prev.id) + 1 || prev.line_order }
         : prev
     ));
+    setExpandedTaskIds((prev) => Array.from(new Set([...prev, ...Array.from(idsToParallelize)])));
   };
 
   const handleTaskLineDrop = (
@@ -7444,23 +7479,41 @@ export default function App() {
       laneMode = 'serial',
       taskIds = [],
       rowTaskCount = 1,
+      surface = 'line',
     }: {
       emphasis?: 'default' | 'standby';
       laneMode?: TaskExecutionMode;
       taskIds?: string[];
       rowTaskCount?: number;
+      surface?: 'line' | 'primary';
     } = {}
   ) => {
     const ready = isTaskReady(task) && isLongTermDue(task, nowTs);
-    const compactParallel = laneMode === 'parallel';
+    const isExpanded = expandedTaskIds.includes(task.id);
+    const isPrimarySurface = surface === 'primary';
+    const compactParallel = laneMode === 'parallel' && !isExpanded;
     const tripleParallel = compactParallel && rowTaskCount >= 3;
     const dualParallel = compactParallel && rowTaskCount === 2;
+    const timelineAccent = getTimelineAccent(task.timeline);
+    const nodeColor = getDimensionColor(task);
+    const progress = Math.round(getTaskProgress(task) * 100);
+    const firstLine = ready ? buildRecommendationReason(task, energyScore, nowTs) : getTaskBlockingLabel(task);
+    const taskBurnRate = getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1));
+    const canUngroupParallel = laneMode === 'parallel' && rowTaskCount > 1;
     const toneClasses = emphasis === 'standby'
       ? 'border-stone-300/20 bg-stone-500/[0.06]'
       : 'border-white/10 bg-white/[0.03]';
     const isDragged = draggedLineTaskId === task.id;
     const isDragTarget = dragOverLineTaskId === task.id && draggedLineTaskId !== task.id;
     const dragZone = isDragTarget ? dragOverLineZone : null;
+    const toggleExpanded = () => {
+      setExpandedTaskIds((prev) => (
+        prev.includes(task.id)
+          ? prev.filter((id) => id !== task.id)
+          : [...prev, task.id]
+      ));
+    };
+
     return (
       <div
         key={`line-${task.id}`}
@@ -7468,7 +7521,8 @@ export default function App() {
         onClick={(event) => {
           const target = event.target as HTMLElement | null;
           if (target?.closest('button, a, input, textarea, select, label')) return;
-          setSelectedTask(task);
+          if (dragClickSuppressTaskIdRef.current === task.id) return;
+          toggleExpanded();
         }}
         onDragStart={(event) => startTaskDrag(event, task.id)}
         onDragEnd={endTaskDrag}
@@ -7489,7 +7543,7 @@ export default function App() {
         }}
         onDrop={(event) => handleTaskLineDrop(event, task, taskIds, laneMode)}
         className={cn(
-          "task-line-shell cursor-pointer rounded-[1rem] border px-3 py-3 transition-colors hover:border-white/20",
+          "task-line-shell cursor-pointer rounded-[1rem] border transition-colors hover:border-white/20",
           toneClasses,
           emphasis === 'standby' && "task-line-shell-standby",
           isDragged && "task-line-shell-dragging",
@@ -7497,7 +7551,12 @@ export default function App() {
           dragZone === 'before' && "task-line-shell-drop-before",
           dragZone === 'after' && "task-line-shell-drop-after",
           dragZone === 'overlap' && "task-line-shell-drop-overlap",
-          compactParallel ? "flex h-full min-h-[98px] flex-col" : "flex items-center gap-3"
+          isPrimarySurface && "task-line-shell-primary h-full min-h-[17.25rem]",
+          isExpanded
+            ? "flex h-full flex-col px-4 py-4"
+            : compactParallel
+              ? "flex h-full min-h-[98px] flex-col px-3 py-3"
+              : "flex items-center gap-3 px-3 py-3"
         )}
       >
         {dragZone && (
@@ -7505,7 +7564,173 @@ export default function App() {
             {dragZone === 'before' ? '识别：上方' : dragZone === 'after' ? '识别：下方' : '识别：重叠并行'}
           </div>
         )}
-        {compactParallel ? (
+        {canUngroupParallel && (
+          <button
+            type="button"
+            aria-label="解除并行"
+            onClick={(event) => {
+              event.stopPropagation();
+              setTaskExecutionMode([task.id], 'serial');
+            }}
+            className="task-line-ungroup absolute right-3 top-3 z-[3] inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/15 text-slate-300 transition-colors hover:border-white/20 hover:text-white"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {isExpanded ? (
+          <>
+            <div className="flex items-start gap-3">
+              <div className="task-line-drag-handle shrink-0 pt-1 text-slate-500">
+                <GripVertical className="h-4 w-4" />
+              </div>
+              <div
+                className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
+                style={{ color: nodeColor, backgroundColor: nodeColor }}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3 pr-8">
+                  <div className="min-w-0">
+                    <h4 className="text-left text-[1rem] font-semibold leading-6 text-white text-safe-wrap">
+                      {task.title || '未命名任务'}
+                    </h4>
+                    <p className="mt-2 text-sm leading-6 text-slate-300 text-safe-wrap">
+                      {getTaskNextActionText(task)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleTaskTracking(task);
+                    }}
+                    disabled={!ready}
+                    className={cn(
+                      "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                      ready
+                        ? task.tracking_started_at
+                          ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                          : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
+                        : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
+                    )}
+                  >
+                    {task.tracking_started_at ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                    <TaskRuntimeLabel task={task} mode="button" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+                估 {task.estimated_minutes}m
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+                {getCognitiveLoadLabel(task.cognitive_load || 'low')}
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+                {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200">
+                {getTaskCategoryLabel(task.category_key || 'misc')}
+              </span>
+              <span className={cn("rounded-full border px-2 py-1", timelineAccent.badge)}>
+                {task.timeline === 'long_term' ? '长期' : '临时'}
+              </span>
+            </div>
+
+            <p className="mt-3 text-[11px] leading-5 text-slate-400 text-safe-wrap">{firstLine}</p>
+
+            {(task.timeline === 'temporary' && task.deadline_at) || (task.timeline === 'long_term' && task.next_due_at) ? (
+              <div
+                className={cn(
+                  "mt-3 rounded-2xl border px-3 py-2 text-[11px] font-semibold",
+                  task.timeline === 'temporary'
+                    ? (task.deadline_at || 0) <= nowTs
+                      ? 'border-indigo-300/40 bg-indigo-500/18 text-indigo-100'
+                      : 'border-amber-400/35 bg-amber-500/18 text-amber-100'
+                    : (task.next_due_at && isLongTermDue(task, nowTs))
+                      ? 'border-indigo-400/35 bg-indigo-500/18 text-indigo-100'
+                      : 'border-slate-400/35 bg-slate-500/18 text-slate-100'
+                )}
+              >
+                {task.timeline === 'temporary'
+                  ? `${getCountdownText(task.deadline_at || nowTs, nowTs)} · 截止 ${formatDateTime(task.deadline_at)}`
+                  : (task.next_due_at && isLongTermDue(task, nowTs))
+                    ? '当前周期可执行'
+                    : `下个周期 ${formatDateTime(task.next_due_at)}`}
+              </div>
+            ) : null}
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-[1rem] border border-white/10 bg-white/[0.04] px-3 py-3">
+                <div className="text-[12px] leading-5 text-slate-400">预计</div>
+                <div className="mt-1 text-[1.05rem] font-semibold text-white">{task.estimated_minutes}m</div>
+              </div>
+              <div className="rounded-[1rem] border border-white/10 bg-white/[0.04] px-3 py-3">
+                <div className="text-[12px] leading-5 text-slate-400">负荷</div>
+                <div className="mt-1 text-[1.05rem] font-semibold text-white">
+                  {getCognitiveLoadLabel(task.cognitive_load || 'low')}
+                </div>
+              </div>
+              <div className="rounded-[1rem] border border-white/10 bg-white/[0.04] px-3 py-3">
+                <div className="text-[12px] leading-5 text-slate-400">协作</div>
+                <div className="mt-1 text-[1.05rem] font-semibold text-white">
+                  {getCollaborationLevelLabel(task.collaboration_level || 'low')}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${progress}%`,
+                    background: `linear-gradient(90deg, ${nodeColor}, color-mix(in srgb, ${nodeColor} 72%, white))`,
+                  }}
+                />
+              </div>
+              <span className="text-[10px] font-bold text-slate-400">
+                {task.steps.length > 0 ? `${task.steps.filter((step) => step.completed).length}/${task.steps.length}` : '待拆解'}
+              </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <TaskRuntimeLabel task={task} mode="card" className="text-[11px] text-slate-400" />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedTask(task);
+                  }}
+                  className="rounded-full border border-white/12 px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/8 hover:text-white"
+                >
+                  查看
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleTaskTracking(task);
+                  }}
+                  disabled={!ready}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                    ready
+                      ? task.tracking_started_at
+                        ? "border-indigo-300/35 bg-indigo-500/18 text-indigo-100 hover:bg-indigo-500/25"
+                        : "border-indigo-300/30 bg-indigo-500/16 text-indigo-100 hover:bg-indigo-500/25"
+                      : "cursor-not-allowed border-white/8 bg-white/[0.04] text-slate-500"
+                  )}
+                >
+                  {task.tracking_started_at ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                  {task.tracking_started_at ? '暂停' : '开始'}
+                </button>
+              </div>
+            </div>
+          </>
+        ) : compactParallel ? (
           <>
             <div className="flex min-w-0 items-start gap-2">
               <div className="task-line-drag-handle shrink-0 pt-0.5 text-slate-500">
@@ -7513,21 +7738,19 @@ export default function App() {
               </div>
               <div
                 className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
-                style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+                style={{ color: nodeColor, backgroundColor: nodeColor }}
               />
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedTask(task)}
+                    <div
                       className={cn(
-                        "block w-full text-left font-semibold leading-5 text-white transition-colors hover:text-indigo-200 break-words text-safe-wrap",
+                        "block w-full text-left font-semibold leading-5 text-white break-words text-safe-wrap",
                         tripleParallel ? "line-clamp-2 text-[13px]" : "line-clamp-2 text-sm"
                       )}
                     >
                       {task.title || '未命名任务'}
-                    </button>
+                    </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-400">
                       <span>{getTaskCategoryLabel(task.category_key || 'misc')}</span>
                       <span>{task.estimated_minutes}m</span>
@@ -7558,7 +7781,7 @@ export default function App() {
                     </span>
                   )}
                   <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">
-                    {getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h
+                    {taskBurnRate.toFixed(1)}/h
                   </span>
                 </div>
               </div>
@@ -7572,25 +7795,21 @@ export default function App() {
             <div className="task-line-dot-wrap shrink-0">
               <div
                 className="h-2.5 w-2.5 rounded-full shadow-[0_0_10px_currentColor]"
-                style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
+                style={{ color: nodeColor, backgroundColor: nodeColor }}
               />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedTask(task)}
-                  className="line-clamp-2 text-left text-sm font-semibold leading-5 text-white transition-colors hover:text-indigo-200 text-safe-wrap"
-                >
+                <div className="line-clamp-2 text-left text-sm font-semibold leading-5 text-white text-safe-wrap">
                   {task.title || '未命名任务'}
-                </button>
+                </div>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
                 <span>{task.estimated_minutes}m</span>
                 <span>{getTaskCategoryLabel(task.category_key || 'misc')}</span>
                 <span>{getCognitiveLoadLabel(task.cognitive_load || 'low')}</span>
                 <span>{getCollaborationLevelLabel(task.collaboration_level || 'low')}</span>
-                <span>{getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h</span>
+                <span>{taskBurnRate.toFixed(1)}/h</span>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
@@ -8908,6 +9127,7 @@ export default function App() {
                 homeLineRows={homeLineRows}
                 moveTaskToLine={moveTaskToLine}
                 renderTaskLine={renderTaskLine}
+                mergeTaskIntoParallel={mergeTaskIntoParallel}
                 setDragOverLineTaskId={setDragOverLineTaskId}
                 setDragOverLineZone={setDragOverLineZone}
                 energyMapTasks={energyMapTasks}

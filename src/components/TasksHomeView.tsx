@@ -82,8 +82,10 @@ type TasksHomeViewProps = {
       laneMode?: TaskExecutionMode;
       taskIds?: string[];
       rowTaskCount?: number;
+      surface?: 'line' | 'primary';
     }
   ) => React.ReactNode;
+  mergeTaskIntoParallel: (taskId: string, targetTaskId: string, taskIds: string[]) => void;
   setDragOverLineTaskId: React.Dispatch<React.SetStateAction<string | null>>;
   setDragOverLineZone: React.Dispatch<React.SetStateAction<DragZone>>;
   energyMapTasks: Task[];
@@ -118,11 +120,11 @@ function TaskLineSurface({
   draggedLineTaskId,
   setPrimaryTaskId,
   clearTaskDragState,
-  renderTaskCard,
   homeLineTasks,
   homeLineRows,
   moveTaskToLine,
   renderTaskLine,
+  mergeTaskIntoParallel,
   setDragOverLineTaskId,
   setDragOverLineZone,
 }: Omit<
@@ -202,7 +204,13 @@ function TaskLineSurface({
                 event.preventDefault();
                 const droppedTaskId = draggedLineTaskId || event.dataTransfer.getData('text/plain');
                 if (!droppedTaskId) return;
-                setPrimaryTaskId(droppedTaskId);
+                const primaryAnchorTaskId = currentPrimaryTasks[0]?.id;
+                if (primaryAnchorTaskId && droppedTaskId !== primaryAnchorTaskId) {
+                  mergeTaskIntoParallel(droppedTaskId, primaryAnchorTaskId, homeLineTaskIds);
+                  setPrimaryTaskId(primaryAnchorTaskId);
+                } else {
+                  setPrimaryTaskId(droppedTaskId);
+                }
                 clearTaskDragState();
               }}
             >
@@ -219,17 +227,21 @@ function TaskLineSurface({
                     )}>
                       {currentPrimaryTasks.map((task) => (
                         <React.Fragment key={task.id}>
-                          {renderTaskCard(task, {
-                            laneLabel: '',
-                            tone: 'focus',
+                          {renderTaskLine(task, {
+                            laneMode: 'parallel',
+                            taskIds: homeLineTaskIds,
+                            rowTaskCount: currentPrimaryTasks.length,
+                            surface: 'primary',
                           })}
                         </React.Fragment>
                       ))}
                     </div>
                   </div>
-                ) : renderTaskCard(currentPrimaryTasks[0], {
-                    laneLabel: '',
-                    tone: 'focus',
+                ) : renderTaskLine(currentPrimaryTasks[0], {
+                    laneMode: 'serial',
+                    taskIds: homeLineTaskIds,
+                    rowTaskCount: 1,
+                    surface: 'primary',
                   })
               ) : (
                 <div className="flex h-full min-h-[220px] items-center justify-center rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
@@ -340,6 +352,7 @@ function TaskMapSurface({
   | 'homeLineRows'
   | 'moveTaskToLine'
   | 'renderTaskLine'
+  | 'mergeTaskIntoParallel'
   | 'setDragOverLineZone'
 >) {
   return (
