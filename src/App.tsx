@@ -167,6 +167,12 @@ const LIVE2D_MODEL_OPTIONS: Live2dModelConfig[] = [
 
 const LIVE2D_WIDGET_OFFSET_RIGHT = 12;
 const LIVE2D_WIDGET_OFFSET_BOTTOM = 12;
+const LIVE2D_MOBILE_BREAKPOINT_PX = 640;
+const LIVE2D_MOBILE_WIDGET_MIN_PX = 76;
+const LIVE2D_MOBILE_WIDGET_MAX_PX = 88;
+const LIVE2D_MOBILE_WIDGET_VIEWPORT_RATIO = 0.2;
+const LIVE2D_MOBILE_WIDGET_OFFSET_RIGHT = 56;
+const LIVE2D_MOBILE_WIDGET_OFFSET_BOTTOM = 8;
 const LIVE2D_BOOT_DELAY_MS = 1200;
 const GLOBAL_CLOCK_INTERVAL_MS = 30000;
 
@@ -181,6 +187,36 @@ type Live2dActionConfig = {
 
 const createLive2dTransform = (x = 0, y = 0, rotate = 0, scale = 1) =>
   `translate3d(${x}px, ${y}px, 0) rotate(${rotate}deg) scale(${scale})`;
+
+function isCompactLive2dViewport() {
+  return typeof window !== 'undefined'
+    && window.matchMedia(`(max-width: ${LIVE2D_MOBILE_BREAKPOINT_PX}px)`).matches;
+}
+
+function getLive2dDisplayFrame(frameWidth?: number, frameHeight?: number) {
+  const isCompact = isCompactLive2dViewport();
+  if (typeof frameWidth !== 'number' || typeof frameHeight !== 'number' || frameWidth <= 0 || frameHeight <= 0) {
+    return { width: frameWidth, height: frameHeight, isCompact };
+  }
+
+  if (!isCompact) {
+    return { width: frameWidth, height: frameHeight, isCompact };
+  }
+
+  const viewportWidth = Math.max(320, window.innerWidth || LIVE2D_MOBILE_BREAKPOINT_PX);
+  const targetWidth = Math.min(
+    frameWidth,
+    Math.min(
+      LIVE2D_MOBILE_WIDGET_MAX_PX,
+      Math.max(LIVE2D_MOBILE_WIDGET_MIN_PX, Math.round(viewportWidth * LIVE2D_MOBILE_WIDGET_VIEWPORT_RATIO))
+    )
+  );
+  return {
+    width: targetWidth,
+    height: Math.round(targetWidth * (frameHeight / frameWidth)),
+    isCompact,
+  };
+}
 
 const LIVE2D_TAP_MOTION_GROUP = 'Tap';
 const LIVE2D_TAP_MOTION_INDEX = 0;
@@ -3230,18 +3266,20 @@ export default function App() {
       if (!container) return false;
       const frameWidth = activeLive2dModel.frameWidth || activeLive2dModel.width;
       const frameHeight = activeLive2dModel.frameHeight || activeLive2dModel.height;
+      const displayFrame = getLive2dDisplayFrame(frameWidth, frameHeight);
 
       container.style.cursor = 'grab';
-      if (typeof frameWidth === 'number' && typeof frameHeight === 'number') {
-        container.style.width = `${frameWidth}px`;
-        container.style.height = `${frameHeight}px`;
+      container.dataset.mobileDock = displayFrame.isCompact ? 'compact' : 'standard';
+      if (typeof displayFrame.width === 'number' && typeof displayFrame.height === 'number') {
+        container.style.width = `${displayFrame.width}px`;
+        container.style.height = `${displayFrame.height}px`;
       } else {
         container.style.removeProperty('width');
         container.style.removeProperty('height');
       }
       container.style.left = 'auto';
-      container.style.right = `${LIVE2D_WIDGET_OFFSET_RIGHT}px`;
-      container.style.bottom = `${LIVE2D_WIDGET_OFFSET_BOTTOM}px`;
+      container.style.right = `${displayFrame.isCompact ? LIVE2D_MOBILE_WIDGET_OFFSET_RIGHT : LIVE2D_WIDGET_OFFSET_RIGHT}px`;
+      container.style.bottom = `${displayFrame.isCompact ? LIVE2D_MOBILE_WIDGET_OFFSET_BOTTOM : LIVE2D_WIDGET_OFFSET_BOTTOM}px`;
       container.style.transformOrigin = 'right bottom';
       container.style.transform = 'none';
       syncLive2dUiAnchor(container);
@@ -3276,9 +3314,9 @@ export default function App() {
       const canvas = container.querySelector('canvas') as HTMLCanvasElement | null;
       if (canvas) {
         canvas.style.cursor = 'grab';
-        if (typeof frameWidth === 'number' && typeof frameHeight === 'number') {
-          canvas.style.width = `${frameWidth}px`;
-          canvas.style.height = `${frameHeight}px`;
+        if (typeof displayFrame.width === 'number' && typeof displayFrame.height === 'number') {
+          canvas.style.width = `${displayFrame.width}px`;
+          canvas.style.height = `${displayFrame.height}px`;
         } else {
           canvas.style.removeProperty('width');
           canvas.style.removeProperty('height');
@@ -3388,7 +3426,9 @@ export default function App() {
 
     void bootLive2d();
 
-    const handleResize = () => syncLive2dUiAnchor();
+    const handleResize = () => {
+      if (!bindWidgetClick()) syncLive2dUiAnchor();
+    };
     window.addEventListener('resize', handleResize);
 
     return () => {
@@ -5549,6 +5589,7 @@ export default function App() {
         onDrop={(event) => handleTaskLineDrop(event, task, taskIds, laneMode)}
         className={cn(
           "task-line-shell cursor-pointer rounded-[1rem] border transition-colors hover:border-white/20",
+          laneMode === 'parallel' ? "task-line-shell-parallel" : "task-line-shell-serial",
           toneClasses,
           emphasis === 'standby' && "task-line-shell-standby",
           isDragged && "task-line-shell-dragging",
@@ -5678,7 +5719,7 @@ export default function App() {
                 style={{ color: getDimensionColor(task), backgroundColor: getDimensionColor(task) }}
               />
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="task-line-main min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -5694,7 +5735,7 @@ export default function App() {
                 <span>{getTaskEnergyBurnRate(task, behaviorBurnRateModifier, Math.max(1, runningTasks.length || 1)).toFixed(1)}/h</span>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="task-line-actions flex shrink-0 items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => toggleTaskTracking(task)}

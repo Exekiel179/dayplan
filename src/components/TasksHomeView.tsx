@@ -287,7 +287,7 @@ function TaskLineSurface({
                 <span>{homeLineTasks.length} 项</span>
               </div>
             </div>
-            <div className="home-stack-body custom-scrollbar space-y-3">
+            <div className="home-stack-body home-stack-scroll-area custom-scrollbar">
               {homeLineRows.length === 0 ? (
                 <div className="rounded-[1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
                   空
