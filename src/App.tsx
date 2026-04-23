@@ -75,7 +75,6 @@ import {
   ExternalBehaviorEvent,
   FocusReminderSettings,
   LongTermCadence,
-  NewsPreferences,
   Task,
   TaskCollaborationLevel,
   TaskCategoryKey,
@@ -87,14 +86,14 @@ import {
   UserTaskData,
   WellbeingChatMessage,
   WellbeingSettings,
-  RSSFeed,
-  NewsItem,
-  IdeaNote,
-  SavedLink,
 } from './types';
 
 type AppTheme = 'night' | 'day' | 'stardew' | 'starlit';
 type TaskSizeBucket = 'big' | 'medium' | 'small';
+type ProjectedLineTask = Task & {
+  execution_mode: TaskExecutionMode;
+  line_order: number;
+};
 type Live2dModelId = 'fox' | 'classic';
 type Live2dActionId =
   | 'heart'
@@ -143,7 +142,7 @@ const LIVE2D_MODEL_OPTIONS: Live2dModelConfig[] = [
   {
     id: 'fox',
     label: '桃心狐狸',
-    description: '当前本地模型，动作和表情更完整。',
+    description: '本地看板默认款，动作和表情更完整，适合常驻陪伴。',
     path: encodeURI('/live2d/苹果小狐狸/苹果小狐狸.model3.json'),
     scale: 0.95,
     width: 311,
@@ -155,10 +154,14 @@ const LIVE2D_MODEL_OPTIONS: Live2dModelConfig[] = [
   {
     id: 'classic',
     label: '经典 2D',
-    description: '保留原来的 yiselin 模型，适合轻量陪伴。',
+    description: 'yiselin 经典款，显示尺寸与桃心狐狸一致，切换时保持同一看板占位。',
     path: 'https://fastly.jsdelivr.net/gh/Eikanya/Live2d-model/%E5%B4%A9%E5%9D%8F%E5%AD%A6%E5%9B%AD2/yiselin/model.json',
-    scale: 0.69,
-    position: { x: -22, y: 4 },
+    scale: 0.95,
+    width: 311,
+    height: 311,
+    frameWidth: 311,
+    frameHeight: 311,
+    position: { x: -8, y: 10 },
   },
 ];
 
@@ -1027,24 +1030,6 @@ type ExternalBehaviorPreset = {
   durationMinutes: number;
   reply: string;
 };
-type AIRssScoutSuggestion = {
-  id: string;
-  name: string;
-  url: string;
-  category: string;
-  keywords: string[];
-  reason: string;
-};
-type AIWorldNewsInsight = {
-  summary: string;
-  worth_reading: Array<{
-    id: string;
-    reason: string;
-  }>;
-  skip_summary: string;
-  ideas: string[];
-  next_actions: string[];
-};
 type AIFocusCheckin = {
   summary: string;
   suggested_action: 'continue' | 'rest' | 'pause';
@@ -1065,32 +1050,6 @@ type ElevatorDisplayGroup = {
   key: string;
   parallel: boolean;
   tasks: Task[];
-};
-type TrendradarSnapshotItem = {
-  platform_id: string;
-  platform_name: string;
-  title: string;
-  rank: number;
-  url: string;
-  mobile_url: string;
-  timestamp: string;
-};
-type TechnicalRssPreset = {
-  id: string;
-  name: string;
-  url: string;
-  homepage: string;
-  category: string;
-  keywords: string[];
-  reason: string;
-};
-type RssSyncPreviewItem = {
-  title: string;
-  url: string;
-  summary: string;
-  published_at: string;
-  source_title: string;
-  tags: string[];
 };
 
 const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
@@ -1122,7 +1081,6 @@ const SPECIAL_ABILITY_MODULES: AbilityModuleOption[] = [
 const DEFAULT_ABILITY_GAIN_PER_HOUR = 36;
 const BEHAVIOR_CHAT_PLACEHOLDER = '说说你的想法';
 const MAX_DAILY_CHAT_MESSAGES = 24;
-const RSS_SCOUT_COST = 88;
 const EXTERNAL_BEHAVIOR_PRESETS: ExternalBehaviorPreset[] = [
   {
     id: 'tea',
@@ -1199,13 +1157,6 @@ function createDefaultAbilityModuleSettings(): AbilityModuleSettings {
     active_module_id: 'special:mokugyo',
     special_totals: {},
     tracked_ms_baseline: 0,
-    updated_at: Date.now(),
-  };
-}
-
-function createDefaultNewsPreferences(): NewsPreferences {
-  return {
-    ignored_terms: [],
     updated_at: Date.now(),
   };
 }
@@ -1452,46 +1403,6 @@ function normalizeRecoveredEnergy(value: unknown) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return 0;
   return clamp(numeric, 0, 100);
-}
-
-function normalizeNewsPreferences(value: unknown): NewsPreferences {
-  if (!value || typeof value !== 'object') {
-    return createDefaultNewsPreferences();
-  }
-  const raw = value as Partial<NewsPreferences>;
-  const ignoredTerms = Array.isArray(raw.ignored_terms)
-    ? raw.ignored_terms
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => item.trim().toLowerCase())
-        .filter(Boolean)
-        .slice(0, 200)
-    : [];
-  return {
-    ignored_terms: Array.from(new Set(ignoredTerms)),
-    updated_at: Number.isFinite(Number(raw.updated_at)) ? Number(raw.updated_at) : Date.now(),
-  };
-}
-
-function normalizeSavedLinks(value: unknown): SavedLink[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item, index) => {
-      if (!item || typeof item !== 'object') return null;
-      const raw = item as Partial<SavedLink>;
-      const title = typeof raw.title === 'string' ? raw.title.trim() : '';
-      const url = typeof raw.url === 'string' ? raw.url.trim() : '';
-      if (!url) return null;
-      return {
-        id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : `link-${Date.now()}-${index}`,
-        title: title || url,
-        url,
-        pinned: Boolean(raw.pinned),
-        created_at: Number.isFinite(Number(raw.created_at)) ? Number(raw.created_at) : Date.now(),
-      } satisfies SavedLink;
-    })
-    .filter((item): item is SavedLink => Boolean(item))
-    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.created_at - a.created_at)
-    .slice(0, 120);
 }
 
 function normalizeSelfRating(value: unknown) {
@@ -2301,11 +2212,6 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
       ai_day_plan: createDefaultAIDayPlanWorkspace(),
       focus_reminders: createDefaultFocusReminderSettings(),
       calendar_subscription_token: '',
-      rss_feeds: [],
-      news_items: [],
-      idea_notes: [],
-      news_preferences: createDefaultNewsPreferences(),
-      saved_links: [],
     };
   }
   if (payload && typeof payload === 'object') {
@@ -2328,11 +2234,6 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
       ai_day_plan: normalizeAIDayPlanWorkspace(raw.ai_day_plan),
       focus_reminders: normalizeFocusReminderSettings(raw.focus_reminders),
       calendar_subscription_token: typeof raw.calendar_subscription_token === 'string' ? raw.calendar_subscription_token : '',
-      rss_feeds: Array.isArray(raw.rss_feeds) ? raw.rss_feeds : [],
-      news_items: Array.isArray(raw.news_items) ? raw.news_items : [],
-      idea_notes: Array.isArray(raw.idea_notes) ? raw.idea_notes : [],
-      news_preferences: normalizeNewsPreferences(raw.news_preferences),
-      saved_links: normalizeSavedLinks(raw.saved_links),
     };
   }
   return {
@@ -2343,11 +2244,6 @@ function normalizeTaskPayload(payload: unknown): UserTaskData {
     ai_day_plan: createDefaultAIDayPlanWorkspace(),
     focus_reminders: createDefaultFocusReminderSettings(),
     calendar_subscription_token: '',
-    rss_feeds: [],
-    news_items: [],
-    idea_notes: [],
-    news_preferences: createDefaultNewsPreferences(),
-    saved_links: [],
   };
 }
 
@@ -2510,77 +2406,36 @@ function withAuthHeaders(token: string, headers: Record<string, string> = {}) {
   };
 }
 
-function buildStableHash(text: string) {
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-
-function normalizeFeedUrl(url: string) {
-  return url.trim().toLowerCase();
-}
-
-function buildWorldNewsFingerprint(title: string, url: string, sourceKey: string) {
-  return buildStableHash(`${sourceKey}::${title.trim().toLowerCase()}::${url.trim().toLowerCase()}`);
-}
-
 async function requestAIPlan(task: Task, token: string) {
   const response = await fetch('/api/ai/plan', {
     method: 'POST',
-    headers: withAuthHeaders(token, {
-      'Content-Type': 'application/json',
-    }),
-    body: JSON.stringify({
-      title: task.title,
-      description: task.description || '',
-    })
+    headers: withAuthHeaders(token, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ title: task.title, description: task.description || '' }),
   });
-
   const payload = await response.json().catch(() => ({} as { error?: string; plan?: string; steps?: string[] }));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(payload?.error || `AI 请求失败 (${response.status})`);
-  }
-
-  const steps = Array.isArray(payload?.steps)
-    ? payload.steps.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-    : [];
-
+  if (response.status === 401) throw new Error('UNAUTHORIZED');
+  if (!response.ok) throw new Error(payload?.error || `AI 请求失败 (${response.status})`);
   return {
     plan: typeof payload?.plan === 'string' ? payload.plan : '',
-    steps,
+    steps: Array.isArray(payload?.steps)
+      ? payload.steps.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+      : [],
   };
 }
 
-async function requestAIDayPlan(
-  payload: {
-    input: string;
-    energy: number;
-    existingTasks: Array<Pick<Task, 'title' | 'estimated_minutes' | 'status'>>;
-  },
-  token: string
-) {
+async function requestAIDayPlan(payload: {
+  input: string;
+  energy: number;
+  existingTasks: Array<Pick<Task, 'title' | 'estimated_minutes' | 'status'>>;
+}, token: string) {
   const response = await fetch('/api/ai/day-plan', {
     method: 'POST',
-    headers: withAuthHeaders(token, {
-      'Content-Type': 'application/json',
-    }),
+    headers: withAuthHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
-
   const rawPayload = await response.json().catch(() => ({} as { error?: string } & Partial<AIDayPlanWorkspace>));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
-  }
-
+  if (response.status === 401) throw new Error('UNAUTHORIZED');
+  if (!response.ok) throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
   return normalizeAIDayPlanWorkspace(rawPayload);
 }
 
@@ -2590,12 +2445,8 @@ async function fetchCalendarSubscription(token: string) {
     headers: withAuthHeaders(token),
   });
   const payload = await response.json().catch(() => ({} as { error?: string; token?: string; url?: string; apple_url?: string }));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(payload?.error || `订阅链接获取失败 (${response.status})`);
-  }
+  if (response.status === 401) throw new Error('UNAUTHORIZED');
+  if (!response.ok) throw new Error(payload?.error || `订阅链接获取失败 (${response.status})`);
   return {
     token: typeof payload.token === 'string' ? payload.token : '',
     url: typeof payload.url === 'string' ? payload.url : '',
@@ -2609,12 +2460,8 @@ async function resetCalendarSubscription(token: string) {
     headers: withAuthHeaders(token),
   });
   const payload = await response.json().catch(() => ({} as { error?: string; token?: string; url?: string; apple_url?: string }));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(payload?.error || `订阅链接重置失败 (${response.status})`);
-  }
+  if (response.status === 401) throw new Error('UNAUTHORIZED');
+  if (!response.ok) throw new Error(payload?.error || `订阅链接重置失败 (${response.status})`);
   return {
     token: typeof payload.token === 'string' ? payload.token : '',
     url: typeof payload.url === 'string' ? payload.url : '',
@@ -2622,321 +2469,83 @@ async function resetCalendarSubscription(token: string) {
   } satisfies CalendarSubscriptionInfo;
 }
 
-async function requestAIRssScout(
-  payload: { topic: string; guidance: string },
-  token: string
-) {
-  const response = await fetch('/api/ai/rss-scout', {
-    method: 'POST',
-    headers: withAuthHeaders(token, {
-      'Content-Type': 'application/json',
-    }),
-    body: JSON.stringify(payload),
-  });
-
-  const rawPayload = await response.json().catch(() => ({} as {
-    error?: string;
-    summary?: string;
-    feeds?: Array<Record<string, unknown>>;
-  }));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
-  }
-
-  const createdAt = Date.now();
-  const feeds = Array.isArray(rawPayload?.feeds)
-    ? rawPayload.feeds
-      .map((feed, index) => {
-        if (!feed || typeof feed !== 'object') return null;
-        const name = typeof feed.name === 'string' ? feed.name.trim() : '';
-        const url = typeof feed.url === 'string' ? feed.url.trim() : '';
-        if (!name || !url) return null;
-        return {
-          id: `rss-scout-${createdAt}-${index}`,
-          name,
-          url,
-          category: typeof feed.category === 'string' && feed.category.trim()
-            ? feed.category.trim()
-            : 'AI 推荐',
-          keywords: Array.isArray(feed.keywords)
-            ? feed.keywords
-              .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-              .map((item) => item.trim())
-              .slice(0, 6)
-            : [],
-          reason: typeof feed.reason === 'string' ? feed.reason.trim() : '',
-        } satisfies AIRssScoutSuggestion;
-      })
-      .filter((feed): feed is AIRssScoutSuggestion => Boolean(feed))
-    : [];
-
-  return {
-    summary: typeof rawPayload?.summary === 'string' ? rawPayload.summary.trim() : '',
-    feeds,
-  };
-}
-
-async function requestAIWorldNewsInsight(
-  payload: {
-    focus: string;
-    tasks: Array<Pick<Task, 'title' | 'status' | 'category_key'>>;
-    focusCandidates: NewsItem[];
-    otherCandidates: NewsItem[];
-  },
-  token: string
-) {
-  const response = await fetch('/api/ai/world-news-insight', {
-    method: 'POST',
-    headers: withAuthHeaders(token, {
-      'Content-Type': 'application/json',
-    }),
-    body: JSON.stringify(payload),
-  });
-
-  const rawPayload = await response.json().catch(() => ({} as {
-    error?: string;
-    summary?: string;
-    worth_reading?: Array<Record<string, unknown>>;
-    skip_summary?: string;
-    ideas?: string[];
-    next_actions?: string[];
-  }));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
-  }
-
-  return {
-    summary: typeof rawPayload?.summary === 'string' ? rawPayload.summary.trim() : '',
-    worth_reading: Array.isArray(rawPayload?.worth_reading)
-      ? rawPayload.worth_reading
-          .map((item) => ({
-            id: typeof item?.id === 'string' ? item.id.trim() : '',
-            reason: typeof item?.reason === 'string' ? item.reason.trim() : '',
-          }))
-          .filter((item) => item.id)
-          .slice(0, 3)
-      : [],
-    skip_summary: typeof rawPayload?.skip_summary === 'string' ? rawPayload.skip_summary.trim() : '',
-    ideas: Array.isArray(rawPayload?.ideas)
-      ? rawPayload.ideas.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()).slice(0, 4)
-      : [],
-    next_actions: Array.isArray(rawPayload?.next_actions)
-      ? rawPayload.next_actions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()).slice(0, 4)
-      : [],
-  } satisfies AIWorldNewsInsight;
-}
-
-async function requestAIFocusCheckin(
-  payload: {
-    primaryTask: {
-      id: string;
-      title: string;
-      next_action: string;
-      cognitive_load: TaskCognitiveLoad;
-      collaboration_level: TaskCollaborationLevel;
-      execution_mode: TaskExecutionMode;
-      current_session_minutes: number;
-    } | null;
-    runningTasks: Array<{
-      id: string;
-      title: string;
-      execution_mode: TaskExecutionMode;
-      current_session_minutes: number;
-    }>;
-    energyScore: number;
-    pressureScore: number;
-    sleepHours: number;
-    selfRating: number;
-  },
-  token: string
-) {
+async function requestAIFocusCheckin(payload: {
+  primaryTask: {
+    id: string;
+    title: string;
+    next_action: string;
+    cognitive_load: TaskCognitiveLoad;
+    collaboration_level: TaskCollaborationLevel;
+    execution_mode: TaskExecutionMode;
+    current_session_minutes: number;
+  } | null;
+  runningTasks: Array<{
+    id: string;
+    title: string;
+    execution_mode: TaskExecutionMode;
+    current_session_minutes: number;
+  }>;
+  energyScore: number;
+  pressureScore: number;
+  sleepHours: number;
+  selfRating: number;
+}, token: string) {
   const response = await fetch('/api/ai/focus-checkin', {
     method: 'POST',
-    headers: withAuthHeaders(token, {
-      'Content-Type': 'application/json',
-    }),
+    headers: withAuthHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
-
   const rawPayload = await response.json().catch(() => ({} as {
-    error?: string;
-    summary?: string;
-    suggested_action?: string;
-    reason?: string;
-    reply_prompt?: string;
+    error?: string; summary?: string; suggested_action?: string; reason?: string; reply_prompt?: string;
   }));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
-  }
-
+  if (response.status === 401) throw new Error('UNAUTHORIZED');
+  if (!response.ok) throw new Error(rawPayload?.error || `AI 请求失败 (${response.status})`);
   return {
     summary: typeof rawPayload?.summary === 'string' ? rawPayload.summary.trim() : '',
-    suggested_action: rawPayload?.suggested_action === 'rest'
-      ? 'rest'
-      : rawPayload?.suggested_action === 'pause'
-        ? 'pause'
-        : 'continue',
+    suggested_action: rawPayload?.suggested_action === 'rest' ? 'rest' : rawPayload?.suggested_action === 'pause' ? 'pause' : 'continue',
     reason: typeof rawPayload?.reason === 'string' ? rawPayload.reason.trim() : '',
     reply_prompt: typeof rawPayload?.reply_prompt === 'string' ? rawPayload.reply_prompt.trim() : '',
   } as const;
 }
 
-async function requestTrendradarLatestNews(token: string, limit = 60) {
-  const response = await fetch(`/api/world-news/trendradar/latest?limit=${encodeURIComponent(String(limit))}`, {
-    cache: 'no-store',
-    headers: withAuthHeaders(token),
-  });
-
-  const payload = await response.json().catch(() => ({} as {
-    error?: string;
-    source?: string;
-    fetched_at?: string;
-    fallback_reason?: string;
-    items?: TrendradarSnapshotItem[];
-  }));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(payload?.error || `TrendRadar 请求失败 (${response.status})`);
-  }
-
-  const items = Array.isArray(payload?.items)
-    ? payload.items.filter((item): item is TrendradarSnapshotItem => Boolean(item && typeof item.title === 'string' && typeof item.platform_id === 'string'))
-    : [];
-
-  return {
-    source: typeof payload?.source === 'string' ? payload.source : 'trendradar-live',
-    fetched_at: typeof payload?.fetched_at === 'string' ? payload.fetched_at : '',
-    fallback_reason: typeof payload?.fallback_reason === 'string' ? payload.fallback_reason : '',
-    items,
-  };
-}
-
-async function requestAIBehaviorChat(
-  payload: {
-    message: string;
-    localInsight: string;
-    energyScore: number;
-    pressureScore: number;
-    primaryTask: {
-      title: string;
-      next_action: string;
-      cognitive_load: TaskCognitiveLoad;
-      collaboration_level: TaskCollaborationLevel;
-      execution_mode: TaskExecutionMode;
-      current_session_minutes: number;
-    } | null;
-    runningTasks: Array<{
-      title: string;
-      execution_mode: TaskExecutionMode;
-      current_session_minutes: number;
-    }>;
-    recentMessages: Array<Pick<WellbeingChatMessage, 'role' | 'text'>>;
-    behaviorEvent: {
-      type: string;
-      label: string;
-      instant_energy: number;
-      duration_minutes: number;
-      burn_rate_multiplier: number;
-    } | null;
-  },
-  token: string
-) {
+async function requestAIBehaviorChat(payload: {
+  message: string;
+  localInsight: string;
+  energyScore: number;
+  pressureScore: number;
+  primaryTask: {
+    title: string;
+    next_action: string;
+    cognitive_load: TaskCognitiveLoad;
+    collaboration_level: TaskCollaborationLevel;
+    execution_mode: TaskExecutionMode;
+    current_session_minutes: number;
+  } | null;
+  runningTasks: Array<{ title: string; execution_mode: TaskExecutionMode; current_session_minutes: number }>;
+  recentMessages: Array<Pick<WellbeingChatMessage, 'role' | 'text'>>;
+  behaviorEvent: {
+    type: string;
+    label: string;
+    instant_energy: number;
+    duration_minutes: number;
+    burn_rate_multiplier: number;
+  } | null;
+}, token: string) {
   const response = await fetch('/api/ai/behavior-chat', {
     method: 'POST',
-    headers: withAuthHeaders(token, {
-      'Content-Type': 'application/json',
-    }),
+    headers: withAuthHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
-
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || 'BEHAVIOR_CHAT_FAILED');
-  }
-
+  if (response.status === 401) throw new Error('UNAUTHORIZED');
+  if (!response.ok) throw new Error((await response.text()) || 'BEHAVIOR_CHAT_FAILED');
   const parsed = await response.json();
-  const suggestedMotion = typeof parsed?.suggested_motion === 'string'
-    ? parsed.suggested_motion.trim()
-    : '';
-
+  const suggestedMotion = typeof parsed?.suggested_motion === 'string' ? parsed.suggested_motion.trim() : '';
   return {
     reply: typeof parsed?.reply === 'string' ? parsed.reply.trim() : '',
     suggested_motion: (
-      ['heart', 'star', 'blush', 'cry', 'angry', 'money', 'pet', 'gesture', 'greet', 'listen', 'think', 'phone', 'idle']
-        .includes(suggestedMotion)
-      ? suggestedMotion
-      : 'idle') as Live2dActionId,
-  };
-}
-
-async function requestTechnicalRssPresets(token: string, limit = 90) {
-  const response = await fetch(`/api/rss/presets/technical?limit=${encodeURIComponent(String(limit))}`, {
-    cache: 'no-store',
-    headers: withAuthHeaders(token),
-  });
-
-  const payload = await response.json().catch(() => ({} as {
-    error?: string;
-    feeds?: TechnicalRssPreset[];
-  }));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(payload?.error || `技术种子读取失败 (${response.status})`);
-  }
-
-  return Array.isArray(payload?.feeds)
-    ? payload.feeds.filter((feed): feed is TechnicalRssPreset => Boolean(feed && typeof feed.name === 'string' && typeof feed.url === 'string'))
-    : [];
-}
-
-async function requestRssFeedSync(
-  payload: { name: string; url: string; category?: string; keywords?: string[]; limit?: number },
-  token: string
-) {
-  const response = await fetch('/api/world-news/rss/sync', {
-    method: 'POST',
-    headers: withAuthHeaders(token, {
-      'Content-Type': 'application/json',
-    }),
-    body: JSON.stringify(payload),
-  });
-
-  const rawPayload = await response.json().catch(() => ({} as {
-    error?: string;
-    fetched_at?: string;
-    feed_title?: string;
-    items?: RssSyncPreviewItem[];
-  }));
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(rawPayload?.error || `RSS 同步失败 (${response.status})`);
-  }
-
-  return {
-    fetched_at: typeof rawPayload?.fetched_at === 'string' ? rawPayload.fetched_at : '',
-    feed_title: typeof rawPayload?.feed_title === 'string' ? rawPayload.feed_title : payload.name,
-    items: Array.isArray(rawPayload?.items)
-      ? rawPayload.items.filter((item): item is RssSyncPreviewItem => Boolean(item && typeof item.title === 'string' && typeof item.url === 'string'))
-      : [],
+      ['heart', 'star', 'blush', 'cry', 'angry', 'money', 'pet', 'gesture', 'greet', 'listen', 'think', 'phone', 'idle'].includes(suggestedMotion)
+        ? suggestedMotion
+        : 'idle') as Live2dActionId,
   };
 }
 
@@ -2945,14 +2554,9 @@ async function loadTasksFromApi(token: string) {
     cache: 'no-store',
     headers: withAuthHeaders(token),
   });
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(`load tasks failed: ${response.status}`);
-  }
-  const data = await response.json();
-  return normalizeTaskPayload(data);
+  if (response.status === 401) throw new Error('UNAUTHORIZED');
+  if (!response.ok) throw new Error(`load tasks failed: ${response.status}`);
+  return normalizeTaskPayload(await response.json());
 }
 
 async function persistTasksToApi(payload: UserTaskData, token: string) {
@@ -2961,83 +2565,8 @@ async function persistTasksToApi(payload: UserTaskData, token: string) {
     headers: withAuthHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
-  if (response.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!response.ok) {
-    throw new Error(`persist tasks failed: ${response.status}`);
-  }
-}
-
-function formatCompactDateTime(value?: number | string | null) {
-  if (!value) return '未同步';
-  const date = typeof value === 'number' ? new Date(value) : new Date(String(value));
-  if (Number.isNaN(date.getTime())) return '未同步';
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function summarizePreviewText(text: string, maxLength = 140) {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
-}
-
-function collectNewsPreferenceTerms(news: NewsItem) {
-  const titleKeywords = extractMeaningfulKeywords(news.title).slice(0, 6);
-  const tagKeywords = news.tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean).slice(0, 6);
-  return Array.from(new Set([...tagKeywords, ...titleKeywords])).slice(0, 10);
-}
-
-function matchesIgnoredNews(news: NewsItem, ignoredTerms: string[]) {
-  if (ignoredTerms.length === 0) return false;
-  const haystack = `${news.title} ${news.content} ${news.url} ${news.tags.join(' ')}`.toLowerCase();
-  return ignoredTerms.some((term) => term && haystack.includes(term));
-}
-
-function normalizeWebUrl(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
-}
-
-function extractMeaningfulKeywords(text: string) {
-  return Array.from(
-    new Set(
-      String(text || '')
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-        .split(/\s+/)
-        .map((item) => item.trim())
-        .filter((item) => item.length >= 2)
-    )
-  );
-}
-
-function scoreNewsRelevance(news: NewsItem, focusText: string, tasks: Task[]) {
-  const focusKeywords = extractMeaningfulKeywords(focusText);
-  const taskKeywords = tasks.flatMap((task) => extractMeaningfulKeywords(`${task.title} ${task.description}`)).slice(0, 80);
-  const allKeywords = new Set([...focusKeywords, ...taskKeywords]);
-  const haystack = `${news.title} ${news.content} ${news.tags.join(' ')}`.toLowerCase();
-
-  let score = 0;
-  allKeywords.forEach((keyword) => {
-    if (haystack.includes(keyword)) score += focusKeywords.includes(keyword) ? 3 : 1;
-  });
-  if (news.is_important) score += 2;
-  if (!news.is_read) score += 1;
-  return score;
-}
-
-function explainNewsRelevance(score: number, focusText: string) {
-  if (score >= 6) return `这条消息和当前主线“${focusText}”相关，值得现在判断要不要转成动作。`;
-  if (score >= 3) return '这条消息可能会影响后续安排，但不一定需要现在打断手头工作。';
-  return '这条消息和今天主线关系较弱，先收起来就好。';
+  if (response.status === 401) throw new Error('UNAUTHORIZED');
+  if (!response.ok) throw new Error(`persist tasks failed: ${response.status}`);
 }
 
 function escapeIcsText(value: string) {
@@ -3400,1478 +2929,6 @@ function AdminResetView({
   );
 }
 
-function WorldNewsView({
-  rssFeeds,
-  setRssFeeds,
-  newsItems,
-  setNewsItems,
-  newsPreferences,
-  setNewsPreferences,
-  savedLinks,
-  setSavedLinks,
-  abilityModule,
-  spendSpecialReward,
-  authToken,
-  onUnauthorized,
-  ideaNotes,
-  setIdeaNotes,
-  tasks,
-  setTasks,
-  coreFocusTitle,
-}: {
-  rssFeeds: RSSFeed[];
-  setRssFeeds: React.Dispatch<React.SetStateAction<RSSFeed[]>>;
-  newsItems: NewsItem[];
-  setNewsItems: React.Dispatch<React.SetStateAction<NewsItem[]>>;
-  newsPreferences: NewsPreferences;
-  setNewsPreferences: React.Dispatch<React.SetStateAction<NewsPreferences>>;
-  savedLinks: SavedLink[];
-  setSavedLinks: React.Dispatch<React.SetStateAction<SavedLink[]>>;
-  abilityModule: AbilityModuleSettings;
-  spendSpecialReward: (moduleId: string, amount: number) => boolean;
-  authToken: string;
-  onUnauthorized: () => void;
-  ideaNotes: IdeaNote[];
-  setIdeaNotes: React.Dispatch<React.SetStateAction<IdeaNote[]>>;
-  tasks: Task[];
-  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
-  coreFocusTitle: string;
-}) {
-  const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
-  const [selectedNote, setSelectedNote] = useState<IdeaNote | null>(null);
-  const [detailMode, setDetailMode] = useState<'news' | 'note' | null>(null);
-  const [mainView, setMainView] = useState<'news' | 'notes'>('news');
-  const [noteFilter, setNoteFilter] = useState<'all' | IdeaNote['note_type']>('all');
-  const [isAddingFeed, setIsAddingFeed] = useState(false);
-  const [newFeedName, setNewFeedName] = useState('');
-  const [newFeedUrl, setNewFeedUrl] = useState('');
-  const [newFeedCategory, setNewFeedCategory] = useState('');
-  const [newSavedLinkTitle, setNewSavedLinkTitle] = useState('');
-  const [newSavedLinkUrl, setNewSavedLinkUrl] = useState('');
-  const [isLoadingNews, setIsLoadingNews] = useState(false);
-  const [isSyncingAllFeeds, setIsSyncingAllFeeds] = useState(false);
-  const [syncingFeedIds, setSyncingFeedIds] = useState<string[]>([]);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['默认']));
-  const [isCreatingNote, setIsCreatingNote] = useState(false);
-  const [newNoteTitle, setNewNoteTitle] = useState('');
-  const [newNoteContent, setNewNoteContent] = useState('');
-  const [newNoteType, setNewNoteType] = useState<'idea' | 'resume_tracking' | 'general'>('general');
-  const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
-  const [newNoteTagInput, setNewNoteTagInput] = useState('');
-  const [resumeCompany, setResumeCompany] = useState('');
-  const [resumePosition, setResumePosition] = useState('');
-  const [resumeStatus, setResumeStatus] = useState<'pending' | 'interview' | 'rejected' | 'accepted'>('pending');
-  const [resumeAppliedDate, setResumeAppliedDate] = useState('');
-  const [resumeDeadline, setResumeDeadline] = useState('');
-  const [rssScoutTopic, setRssScoutTopic] = useState('');
-  const [rssScoutGuidance, setRssScoutGuidance] = useState('');
-  const [rssScoutPayWith, setRssScoutPayWith] = useState<string>(SPECIAL_ABILITY_MODULES[0]?.id || 'special:mokugyo');
-  const [rssScoutSummary, setRssScoutSummary] = useState('');
-  const [rssScoutResults, setRssScoutResults] = useState<AIRssScoutSuggestion[]>([]);
-  const [rssScoutError, setRssScoutError] = useState('');
-  const [isRssScouting, setIsRssScouting] = useState(false);
-  const [newsInsight, setNewsInsight] = useState<AIWorldNewsInsight | null>(null);
-  const [newsInsightError, setNewsInsightError] = useState('');
-  const [isGeneratingNewsInsight, setIsGeneratingNewsInsight] = useState(false);
-  const [isImportingTechPresets, setIsImportingTechPresets] = useState(false);
-  const [techPresetMessage, setTechPresetMessage] = useState('');
-  const [rssActivityMessage, setRssActivityMessage] = useState('');
-  const [workspaceMessage, setWorkspaceMessage] = useState('');
-
-  const noteTypeOptions = [
-    { type: 'all', label: '全部', icon: BookOpen },
-    { type: 'idea', label: '想法', icon: Sparkles },
-    { type: 'resume_tracking', label: '简历', icon: Briefcase },
-    { type: 'general', label: '通用', icon: FileText },
-  ] as const;
-
-  const categories = Array.from(new Set(rssFeeds.map((item) => item.category || '默认'))).sort((a, b) => a.localeCompare(b, 'zh-CN'));
-  const enabledFeeds = rssFeeds.filter((feed) => feed.enabled);
-  const visibleNewsItems = newsItems.filter((item) => !matchesIgnoredNews(item, newsPreferences.ignored_terms));
-  const unreadCount = visibleNewsItems.filter((item) => !item.is_read).length;
-  const importantCount = visibleNewsItems.filter((item) => item.is_important).length;
-  const filteredNotes = [...ideaNotes]
-    .filter((note) => noteFilter === 'all' ? true : note.note_type === noteFilter)
-    .sort((a, b) => b.updated_at - a.updated_at);
-  const sortedNews = [...visibleNewsItems].sort((a, b) => b.published_at - a.published_at);
-  const triagedNews = sortedNews
-    .map((news) => {
-      const relevanceScore = scoreNewsRelevance(news, coreFocusTitle, tasks);
-      const bucket = relevanceScore >= 6 ? 'focus' : relevanceScore >= 3 ? 'later' : 'ignore';
-      return {
-        news,
-        relevanceScore,
-        bucket,
-        reason: explainNewsRelevance(relevanceScore, coreFocusTitle),
-      };
-    });
-  const focusNews = triagedNews.filter((item) => item.bucket === 'focus');
-  const laterNews = triagedNews.filter((item) => item.bucket === 'later');
-  const ignoreNews = triagedNews.filter((item) => item.bucket === 'ignore');
-  const aiWorthReading = (newsInsight?.worth_reading || [])
-    .map((item) => {
-      const matched = [...laterNews, ...ignoreNews, ...focusNews].find((entry) => entry.news.id === item.id);
-      if (!matched) return null;
-      return {
-        news: matched.news,
-        reason: item.reason || matched.reason,
-      };
-    })
-    .filter((item): item is { news: NewsItem; reason: string } => Boolean(item));
-  const detailVisible = Boolean(detailMode === 'news' ? selectedNews : detailMode === 'note' ? selectedNote : null);
-
-  const closeDetail = () => {
-    setDetailMode(null);
-    setSelectedNews(null);
-    setSelectedNote(null);
-  };
-
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && detailVisible) {
-        closeDetail();
-      }
-    };
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
-  }, [detailVisible]);
-
-  useEffect(() => {
-    if (detailVisible) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [detailVisible]);
-
-  useEffect(() => {
-    setNewsInsight(null);
-    setNewsInsightError('');
-  }, [coreFocusTitle, newsItems.length]);
-
-  const openNewsDetail = (news: NewsItem) => {
-    const nextNews = news.is_read ? newsItems : newsItems.map((item) => item.id === news.id ? { ...item, is_read: true } : item);
-    if (!news.is_read) {
-      setNewsItems(nextNews);
-    }
-    setSelectedNote(null);
-    setSelectedNews(nextNews.find((item) => item.id === news.id) || { ...news, is_read: true });
-    setDetailMode('news');
-  };
-
-  const openNoteDetail = (note: IdeaNote) => {
-    setSelectedNews(null);
-    setSelectedNote(note);
-    setDetailMode('note');
-  };
-
-  const toggleCategory = (category: string) => {
-    setExpandedCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(category)) next.delete(category);
-      else next.add(category);
-      return next;
-    });
-  };
-
-  const addRssFeed = () => {
-    if (!newFeedName.trim() || !newFeedUrl.trim()) return;
-    const newFeed: RSSFeed = {
-      id: `feed-${Date.now()}`,
-      name: newFeedName.trim(),
-      url: newFeedUrl.trim(),
-      category: newFeedCategory.trim() || '默认',
-      keywords: [],
-      enabled: true,
-      created_at: Date.now(),
-    };
-    setRssFeeds((prev) => [newFeed, ...prev]);
-    setExpandedCategories((prev) => new Set(prev).add(newFeed.category));
-    setNewFeedName('');
-    setNewFeedUrl('');
-    setNewFeedCategory('');
-    setIsAddingFeed(false);
-    setRssActivityMessage(`已添加订阅源：${newFeed.name}`);
-  };
-
-  const toggleFeed = (feedId: string) => {
-    setRssFeeds((prev) => prev.map((feed) => feed.id === feedId ? { ...feed, enabled: !feed.enabled } : feed));
-  };
-
-  const deleteFeed = (feedId: string) => {
-    const target = rssFeeds.find((feed) => feed.id === feedId);
-    setRssFeeds((prev) => prev.filter((feed) => feed.id !== feedId));
-    setRssActivityMessage(target ? `已删除订阅源：${target.name}` : '已删除订阅源。');
-  };
-
-  const toggleNewsImportant = (newsId: string) => {
-    setNewsItems((prev) => prev.map((item) => item.id === newsId ? { ...item, is_important: !item.is_important } : item));
-    setSelectedNews((prev) => prev?.id === newsId ? { ...prev, is_important: !prev.is_important } : prev);
-  };
-
-  const toggleNewsRead = (newsId: string) => {
-    setNewsItems((prev) => prev.map((item) => item.id === newsId ? { ...item, is_read: !item.is_read } : item));
-    setSelectedNews((prev) => prev?.id === newsId ? { ...prev, is_read: !prev.is_read } : prev);
-  };
-
-  const markNewsNotInterested = (news: NewsItem) => {
-    const ignoredTerms = collectNewsPreferenceTerms(news);
-    setNewsPreferences((prev) => ({
-      ignored_terms: Array.from(new Set([...prev.ignored_terms, ...ignoredTerms])).slice(0, 200),
-      updated_at: Date.now(),
-    }));
-    setNewsItems((prev) => prev.filter((item) => item.id !== news.id));
-    setIdeaNotes((prev) => prev.map((note) => ({
-      ...note,
-      related_news_ids: note.related_news_ids.filter((id) => id !== news.id),
-    })));
-    if (selectedNews?.id === news.id) closeDetail();
-    setWorkspaceMessage(`已忽略“${news.title}”的相关主题。`);
-  };
-
-  const deleteNewsItem = (newsId: string) => {
-    setNewsItems((prev) => prev.filter((item) => item.id !== newsId));
-    setIdeaNotes((prev) => prev.map((note) => ({ ...note, related_news_ids: note.related_news_ids.filter((id) => id !== newsId) })));
-    if (selectedNews?.id === newsId) closeDetail();
-    setWorkspaceMessage('已删除新闻。');
-  };
-
-  const deleteNote = (noteId: string) => {
-    const target = ideaNotes.find((note) => note.id === noteId);
-    setIdeaNotes((prev) => prev.filter((note) => note.id !== noteId));
-    setNewsItems((prev) => prev.map((item) => item.note_ids.includes(noteId) ? { ...item, note_ids: item.note_ids.filter((id) => id !== noteId) } : item));
-    if (selectedNote?.id === noteId) closeDetail();
-    setWorkspaceMessage(target ? `已删除笔记：${target.title}` : '已删除笔记。');
-  };
-
-  const clearAllNews = () => {
-    if (newsItems.length === 0) return;
-    setNewsItems([]);
-    setIdeaNotes((prev) => prev.map((note) => note.related_news_ids.length > 0 ? { ...note, related_news_ids: [] } : note));
-    closeDetail();
-    setWorkspaceMessage('新闻列表已清空。');
-  };
-
-  const addSavedLink = () => {
-    const normalizedUrl = normalizeWebUrl(newSavedLinkUrl);
-    if (!normalizedUrl) return;
-    const title = newSavedLinkTitle.trim() || normalizedUrl;
-    const nextLink: SavedLink = {
-      id: `saved-link-${Date.now()}`,
-      title,
-      url: normalizedUrl,
-      pinned: savedLinks.length === 0,
-      created_at: Date.now(),
-    };
-    setSavedLinks((prev) => [nextLink, ...prev].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.created_at - a.created_at));
-    setNewSavedLinkTitle('');
-    setNewSavedLinkUrl('');
-    setWorkspaceMessage(`已收藏：${title}`);
-  };
-
-  const toggleSavedLinkPin = (linkId: string) => {
-    setSavedLinks((prev) => prev
-      .map((item) => item.id === linkId ? { ...item, pinned: !item.pinned } : item)
-      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.created_at - a.created_at));
-  };
-
-  const deleteSavedLink = (linkId: string) => {
-    setSavedLinks((prev) => prev.filter((item) => item.id !== linkId));
-  };
-
-  const importFeeds = (feedsToImport: Array<{ name: string; url: string; category?: string; keywords?: string[] }>) => {
-    const existingUrls = new Set(rssFeeds.map((item) => normalizeFeedUrl(item.url)));
-    const createdAt = Date.now();
-    const nextCategories = new Set<string>();
-    const additions: RSSFeed[] = [];
-    feedsToImport.forEach((feed, index) => {
-      const normalizedUrl = normalizeFeedUrl(feed.url);
-      if (!normalizedUrl || existingUrls.has(normalizedUrl)) return;
-      existingUrls.add(normalizedUrl);
-      const category = feed.category?.trim() || '默认';
-      nextCategories.add(category);
-      additions.push({
-        id: `feed-${createdAt}-${index}-${Math.random().toString(36).slice(2, 6)}`,
-        name: feed.name.trim(),
-        url: feed.url.trim(),
-        category,
-        keywords: (feed.keywords || []).filter((keyword) => keyword.trim().length > 0),
-        enabled: true,
-        created_at: createdAt,
-      });
-    });
-    if (additions.length > 0) {
-      setRssFeeds((prev) => [...additions, ...prev]);
-      setExpandedCategories((prev) => {
-        const next = new Set(prev);
-        nextCategories.forEach((category) => next.add(category));
-        return next;
-      });
-    }
-    return additions.length;
-  };
-
-  const addSuggestedFeed = (feed: AIRssScoutSuggestion) => {
-    const addedCount = importFeeds([feed]);
-    if (addedCount > 0) setRssActivityMessage(`已采纳订阅源：${feed.name}`);
-  };
-
-  const runWorldNewsInsight = async () => {
-    const focusCandidates = focusNews.slice(0, 4).map((item) => item.news);
-    const otherCandidates = [...laterNews, ...ignoreNews].slice(0, 10).map((item) => item.news);
-    if (focusCandidates.length === 0 && otherCandidates.length === 0) return;
-
-    setIsGeneratingNewsInsight(true);
-    setNewsInsightError('');
-    try {
-      const result = await requestAIWorldNewsInsight({
-        focus: coreFocusTitle,
-        tasks: tasks.slice(0, 8).map((task) => ({
-          title: task.title,
-          status: task.status,
-          category_key: task.category_key,
-        })),
-        focusCandidates,
-        otherCandidates,
-      }, authToken);
-      setNewsInsight(result);
-    } catch (error) {
-      if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-        onUnauthorized();
-        return;
-      }
-      setNewsInsightError(error instanceof Error ? error.message : 'AI 总结失败');
-    } finally {
-      setIsGeneratingNewsInsight(false);
-    }
-  };
-
-  const importTechnicalPresets = async (limit: number) => {
-    setIsImportingTechPresets(true);
-    setTechPresetMessage('');
-    try {
-      const presets = await requestTechnicalRssPresets(authToken, limit);
-      const addedCount = importFeeds(presets);
-      setTechPresetMessage(addedCount > 0 ? `已导入 ${addedCount} 个技术 RSS 种子。` : '这些技术 RSS 已经都在当前订阅列表里了。');
-    } catch (err) {
-      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
-        onUnauthorized();
-        return;
-      }
-      setTechPresetMessage(err instanceof Error ? err.message : '技术 RSS 导入失败。');
-    } finally {
-      setIsImportingTechPresets(false);
-    }
-  };
-
-  const runRssScout = async () => {
-    const topic = rssScoutTopic.trim();
-    const guidance = rssScoutGuidance.trim();
-    if (!topic) {
-      setRssScoutError('先输入要找的主题。');
-      return;
-    }
-    const paymentModule = SPECIAL_ABILITY_MODULES.find((item) => item.id === rssScoutPayWith) || SPECIAL_ABILITY_MODULES[0];
-    if (!paymentModule) {
-      setRssScoutError('当前没有可用的激励方式。');
-      return;
-    }
-    const balance = Number(abilityModule.special_totals[paymentModule.id] || 0);
-    if (balance < RSS_SCOUT_COST) {
-      setRssScoutError(`${paymentModule.label}余额不足，至少需要 ${RSS_SCOUT_COST} ${paymentModule.unit}。`);
-      return;
-    }
-    setIsRssScouting(true);
-    setRssScoutError('');
-    setRssScoutSummary('');
-    setRssScoutResults([]);
-    try {
-      const result = await requestAIRssScout({ topic, guidance }, authToken);
-      const charged = spendSpecialReward(paymentModule.id, RSS_SCOUT_COST);
-      if (!charged) {
-        setRssScoutError('激励余额刚发生变化，请重试。');
-        return;
-      }
-      setRssScoutSummary(result.summary || `已按“${topic}”筛出 ${result.feeds.length} 个 RSS 候选。`);
-      setRssScoutResults(result.feeds);
-      if (result.feeds.length === 0) {
-        setRssScoutError('这次没有筛到足够可靠的订阅源，换一个方向词再试。');
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
-        onUnauthorized();
-        return;
-      }
-      setRssScoutError(err instanceof Error ? err.message : 'AI 找订阅源失败，请稍后重试。');
-    } finally {
-      setIsRssScouting(false);
-    }
-  };
-
-  const applyIncomingNews = (incomingItems: NewsItem[], replacedSourceKeys: Set<string>) => {
-    const relatedNewsIds = new Set(ideaNotes.flatMap((note) => note.related_news_ids));
-    let nextNewsItems: NewsItem[] = [];
-    setNewsItems((prev) => {
-      const currentItemsByFingerprint = new Map(prev.map((item) => {
-        const sourceKey = item.feed_id || item.tags[0] || 'world';
-        return [buildWorldNewsFingerprint(item.title, item.url, sourceKey), item] as const;
-      }));
-      const normalizedIncoming = incomingItems.map((item, index) => {
-        const sourceKey = item.feed_id || item.tags[0] || 'world';
-        const fingerprint = buildWorldNewsFingerprint(item.title, item.url, sourceKey);
-        const existing = currentItemsByFingerprint.get(fingerprint);
-        const fallbackTs = Date.now() - index * 1000;
-        return {
-          ...item,
-          id: existing?.id || item.id || `news-${sourceKey}-${fingerprint}`,
-          is_important: existing?.is_important || item.is_important,
-          is_read: existing?.is_read || item.is_read,
-          note_ids: existing?.note_ids || item.note_ids || [],
-          published_at: item.published_at || existing?.published_at || fallbackTs,
-          created_at: existing?.created_at || item.created_at || fallbackTs,
-        };
-      }).filter((item) => !matchesIgnoredNews(item, newsPreferences.ignored_terms));
-      const nextFingerprints = new Set(normalizedIncoming.map((item) => {
-        const sourceKey = item.feed_id || item.tags[0] || 'world';
-        return buildWorldNewsFingerprint(item.title, item.url, sourceKey);
-      }));
-      const preservedItems = prev.filter((item) => {
-        const sourceKey = item.feed_id || item.tags[0] || 'world';
-        if (!replacedSourceKeys.has(sourceKey)) return true;
-        const fingerprint = buildWorldNewsFingerprint(item.title, item.url, sourceKey);
-        if (nextFingerprints.has(fingerprint)) return false;
-        return item.is_important || relatedNewsIds.has(item.id);
-      });
-      nextNewsItems = [...normalizedIncoming, ...preservedItems].sort((a, b) => b.published_at - a.published_at);
-      return nextNewsItems;
-    });
-    setSelectedNews((prev) => prev ? nextNewsItems.find((item) => item.id === prev.id) || null : null);
-    return nextNewsItems;
-  };
-
-  const syncSingleFeed = async (feed: RSSFeed, silent = false) => {
-    setSyncingFeedIds((prev) => prev.includes(feed.id) ? prev : [...prev, feed.id]);
-    try {
-      const result = await requestRssFeedSync({
-        name: feed.name,
-        url: feed.url,
-        category: feed.category,
-        keywords: feed.keywords,
-        limit: 8,
-      }, authToken);
-      const sourceKey = `rss:${feed.id}`;
-      const createdAt = Date.now();
-      const incomingItems: NewsItem[] = result.items.map((item, index) => {
-        const publishedAt = Date.parse(item.published_at);
-        return {
-          id: `news-${sourceKey}-${index}`,
-          feed_id: sourceKey,
-          title: item.title,
-          content: summarizePreviewText(item.summary || item.source_title || item.title, 180),
-          url: item.url,
-          published_at: Number.isNaN(publishedAt) ? createdAt - index * 1000 : publishedAt,
-          is_important: false,
-          is_read: false,
-          tags: Array.from(new Set(['RSS', feed.category, feed.name, ...feed.keywords.slice(0, 2)].filter(Boolean))),
-          note_ids: [],
-          created_at: createdAt - index * 1000,
-        };
-      });
-      applyIncomingNews(incomingItems, new Set([sourceKey]));
-      setRssFeeds((prev) => prev.map((item) => item.id === feed.id ? { ...item, last_fetched_at: Date.now() } : item));
-      if (!silent) setRssActivityMessage(`已从 ${result.feed_title || feed.name} 同步 ${incomingItems.length} 条内容。`);
-      return incomingItems.length;
-    } catch (error) {
-      if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-        onUnauthorized();
-        return 0;
-      }
-      if (!silent) setRssActivityMessage(error instanceof Error ? error.message : 'RSS 同步失败。');
-      throw error;
-    } finally {
-      setSyncingFeedIds((prev) => prev.filter((id) => id !== feed.id));
-    }
-  };
-
-  const syncEnabledFeeds = async () => {
-    if (enabledFeeds.length === 0) {
-      setRssActivityMessage('先启用至少一个订阅源。');
-      return;
-    }
-    setIsSyncingAllFeeds(true);
-    setRssActivityMessage('');
-    let successCount = 0;
-    let syncedItems = 0;
-    const failedFeeds: string[] = [];
-    for (const feed of enabledFeeds) {
-      try {
-        syncedItems += await syncSingleFeed(feed, true);
-        successCount += 1;
-      } catch {
-        failedFeeds.push(feed.name);
-      }
-    }
-    setIsSyncingAllFeeds(false);
-    setRssActivityMessage(failedFeeds.length === 0 ? `已同步 ${successCount} 个订阅源，共导入 ${syncedItems} 条新闻。` : `已同步 ${successCount} 个订阅源，共导入 ${syncedItems} 条新闻；失败：${failedFeeds.join('、')}`);
-  };
-
-  const createNoteFromNews = (news: NewsItem) => {
-    const timestamp = Date.now();
-    const newNote: IdeaNote = {
-      id: `note-${timestamp}`,
-      title: news.title,
-      content: `# ${news.title}\n\n${news.content}\n\n${news.url ? `[原文链接](${news.url})` : ''}`.trim(),
-      tags: news.tags,
-      related_news_ids: [news.id],
-      note_type: 'general',
-      created_at: timestamp,
-      updated_at: timestamp,
-    };
-    setIdeaNotes((prev) => [newNote, ...prev]);
-    setNewsItems((prev) => prev.map((item) => item.id === news.id ? { ...item, note_ids: Array.from(new Set([...item.note_ids, newNote.id])) } : item));
-    setMainView('notes');
-    setNoteFilter('all');
-    setSelectedNews(null);
-    setSelectedNote(newNote);
-    setDetailMode('note');
-    setWorkspaceMessage('已从新闻生成笔记。');
-  };
-
-  const createTaskFromNews = (news: NewsItem) => {
-    const timestamp = Date.now();
-    const relevanceScore = scoreNewsRelevance(news, coreFocusTitle, tasks);
-    const newTask = normalizeTask({
-      id: `task-news-${timestamp}`,
-      title: news.title,
-      description: `${news.content}${news.url ? `\n\n来源：${news.url}` : ''}`,
-      x: relevanceScore >= 6 ? 74 : 56,
-      y: relevanceScore >= 6 ? 24 : 46,
-      status: 'pending',
-      timeline: 'temporary',
-      dependency_ids: [],
-      estimated_minutes: relevanceScore >= 6 ? 45 : 25,
-      actual_minutes: 0,
-      deadline_at: null,
-      use_countdown_urgency: false,
-      long_term_cadence: 'daily',
-      long_term_interval_days: 3,
-      last_completed_at: null,
-      next_due_at: null,
-      archived_at: null,
-      completion_count: 0,
-      ability_gains: {},
-      stress_score: relevanceScore >= 6 ? 4 : 2,
-      energy_delta: -1,
-      cognitive_load: relevanceScore >= 6 ? 'high' : 'low',
-      collaboration_level: 'low',
-      tracking_started_at: null,
-      tracking_accumulated_ms: 0,
-      ai_plan: '',
-      steps: [],
-      created_at: timestamp,
-    } satisfies Partial<Task>);
-    setTasks((prev) => [newTask, ...prev]);
-    setWorkspaceMessage(`已把消息转成任务：${newTask.title}`);
-  };
-
-  const resetNoteComposer = () => {
-    setIsCreatingNote(false);
-    setNewNoteTitle('');
-    setNewNoteContent('');
-    setNewNoteTags([]);
-    setNewNoteTagInput('');
-    setResumeCompany('');
-    setResumePosition('');
-    setResumeStatus('pending');
-    setResumeAppliedDate('');
-    setResumeDeadline('');
-  };
-
-  const createNewNote = () => {
-    if (!newNoteTitle.trim()) return;
-    const timestamp = Date.now();
-    const newNote: IdeaNote = {
-      id: `note-${timestamp}`,
-      title: newNoteTitle.trim(),
-      content: newNoteContent.trim(),
-      tags: newNoteTags,
-      related_news_ids: [],
-      note_type: newNoteType,
-      created_at: timestamp,
-      updated_at: timestamp,
-    };
-    if (newNoteType === 'resume_tracking') {
-      newNote.metadata = {
-        company: resumeCompany.trim(),
-        position: resumePosition.trim(),
-        status: resumeStatus,
-        applied_at: resumeAppliedDate ? new Date(resumeAppliedDate).getTime() : timestamp,
-        deadline: resumeDeadline ? new Date(resumeDeadline).getTime() : undefined,
-      };
-    }
-    setIdeaNotes((prev) => [newNote, ...prev]);
-    setNoteFilter(newNote.note_type);
-    setSelectedNote(newNote);
-    setSelectedNews(null);
-    setDetailMode('note');
-    resetNoteComposer();
-    setWorkspaceMessage('笔记已保存。');
-  };
-
-  const addNoteTag = () => {
-    const nextTag = newNoteTagInput.trim();
-    if (!nextTag || newNoteTags.includes(nextTag)) return;
-    setNewNoteTags((prev) => [...prev, nextTag]);
-    setNewNoteTagInput('');
-  };
-
-  const removeNoteTag = (tag: string) => {
-    setNewNoteTags((prev) => prev.filter((item) => item !== tag));
-  };
-
-  const convertNoteToTask = (note: IdeaNote) => {
-    const lines = note.content.split('\n').filter((line) => line.trim());
-    const description = lines.slice(0, 3).join('\n');
-    let deadline: number | null = null;
-    const dateMatch = note.content.match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2})|(\d{1,2}[-/]\d{1,2})/);
-    if (dateMatch) {
-      const parsed = new Date(dateMatch[0]);
-      if (!Number.isNaN(parsed.getTime())) deadline = parsed.getTime();
-    }
-    const timestamp = Date.now();
-    const newTask: Task = {
-      id: `task-${timestamp}`,
-      title: note.title,
-      description,
-      x: 50,
-      y: deadline ? 70 : 30,
-      status: 'pending',
-      timeline: deadline ? 'temporary' : 'long_term',
-      dependency_ids: [],
-      estimated_minutes: 60,
-      actual_minutes: 0,
-      deadline_at: deadline,
-      steps: [],
-      created_at: timestamp,
-    };
-    if (note.note_type === 'resume_tracking' && note.metadata) {
-      newTask.title = `${note.metadata.company} - ${note.metadata.position}`;
-      newTask.description = `公司：${note.metadata.company}\n职位：${note.metadata.position}\n状态：${note.metadata.status || 'pending'}`;
-      if (note.metadata.deadline) {
-        newTask.deadline_at = note.metadata.deadline;
-        newTask.y = 80;
-      }
-    }
-    setTasks((prev) => [...prev, newTask]);
-    const updatedNote = { ...note, related_task_id: newTask.id, updated_at: Date.now() };
-    setIdeaNotes((prev) => prev.map((item) => item.id === note.id ? updatedNote : item));
-    setSelectedNote(updatedNote);
-    setDetailMode('note');
-    setWorkspaceMessage(`已创建任务：${newTask.title}`);
-  };
-
-  const fetchTrendradarNews = async () => {
-    setIsLoadingNews(true);
-    setWorkspaceMessage('');
-    try {
-      const result = await requestTrendradarLatestNews(authToken, 60);
-      const createdAt = Date.now();
-      const incomingItems: NewsItem[] = result.items.map((item, index) => {
-        const sourceKey = `trendradar:${item.platform_id}`;
-        const freshnessTag = result.source === 'trendradar-local' ? '本地快照' : '实时热点';
-        const url = item.mobile_url || item.url || '';
-        return {
-          id: `news-${sourceKey}-${index}`,
-          feed_id: sourceKey,
-          title: item.title,
-          content: `${item.platform_name} 热榜第 ${item.rank} 位 · ${item.timestamp}`,
-          url,
-          published_at: createdAt - index * 1000,
-          is_important: false,
-          is_read: false,
-          tags: Array.from(new Set([item.platform_name, 'TrendRadar', freshnessTag])),
-          note_ids: [],
-          created_at: createdAt - index * 1000,
-        };
-      });
-      const sourceKeys = new Set(incomingItems.map((item) => item.feed_id || 'world'));
-      applyIncomingNews(incomingItems, sourceKeys);
-      setWorkspaceMessage(result.source === 'trendradar-local' ? `已同步 ${incomingItems.length} 条 TrendRadar 热榜，本次使用本地快照回退。` : `已同步 ${incomingItems.length} 条 TrendRadar 实时热榜。`);
-    } catch (error) {
-      if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-        onUnauthorized();
-        return;
-      }
-      setWorkspaceMessage(error instanceof Error ? error.message : 'TrendRadar 获取失败');
-    } finally {
-      setIsLoadingNews(false);
-    }
-  };
-
-  return (
-    <div className="world-news-shell flex h-full min-h-0 flex-1 overflow-hidden">
-      <div className="grid h-full w-full min-h-0 gap-4 p-4 xl:grid-cols-[19rem_minmax(0,1fr)] xl:p-5">
-        <motion.aside
-          initial={{ opacity: 0, x: -18 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.28, ease: 'easeOut' }}
-          className="world-news-panel min-h-0 overflow-hidden rounded-[2rem]"
-        >
-          <div className="world-news-scroll h-full overflow-y-auto px-4 py-4">
-            <div className="grid gap-4">
-              <div className="border-b border-white/8 pb-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="world-news-kicker">订阅控制台</p>
-                    <h2 className="mt-1 text-lg font-semibold text-[color:var(--text-strong)]">RSS 订阅源</h2>
-                    <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">手动同步、导入种子、按需展开详情。</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingFeed((prev) => !prev)}
-                    className="world-news-icon-button"
-                    title="添加订阅源"
-                  >
-                    {isAddingFeed ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                  </button>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <span className="world-news-pill">{rssFeeds.length} 个源</span>
-                  <span className="world-news-pill">{enabledFeeds.length} 个启用中</span>
-                  <span className="world-news-pill">{newsItems.length} 条消息</span>
-                </div>
-              </div>
-
-              <AnimatePresence initial={false}>
-                {isAddingFeed && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.2, ease: 'easeOut' }}
-                    className="world-news-section"
-                  >
-                    <div className="grid gap-3">
-                      <input type="text" placeholder="订阅源名称" value={newFeedName} onChange={(event) => setNewFeedName(event.target.value)} className="world-news-input" />
-                      <input type="text" placeholder="RSS / Atom URL" value={newFeedUrl} onChange={(event) => setNewFeedUrl(event.target.value)} className="world-news-input" />
-                      <input type="text" placeholder="分类（可选）" value={newFeedCategory} onChange={(event) => setNewFeedCategory(event.target.value)} className="world-news-input" />
-                      <div className="flex gap-2">
-                        <button type="button" onClick={addRssFeed} className="world-news-button world-news-button-accent flex-1">保存订阅源</button>
-                        <button type="button" onClick={() => setIsAddingFeed(false)} className="world-news-button flex-1">取消</button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <div className="world-news-section">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="world-news-kicker">手动同步</p>
-                    <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">消息详情默认关闭</h3>
-                    <p className="mt-1 text-[11px] leading-5 text-[color:var(--text-secondary)]">按需拉 RSS 或 TrendRadar，详情只在点击时从右侧抽出。</p>
-                  </div>
-                  <RefreshCw className="mt-1 h-4 w-4 text-[color:var(--accent)]" />
-                </div>
-                <div className="mt-3 grid gap-2">
-                  <button type="button" onClick={syncEnabledFeeds} disabled={isSyncingAllFeeds || enabledFeeds.length === 0} className="world-news-button world-news-button-accent justify-center">
-                    {isSyncingAllFeeds ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    同步已启用 RSS
-                  </button>
-                  <button type="button" onClick={fetchTrendradarNews} disabled={isLoadingNews} className="world-news-button justify-center">
-                    {isLoadingNews ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
-                    同步 TrendRadar
-                  </button>
-                </div>
-                {rssActivityMessage && <div className="world-news-inline-message mt-3">{rssActivityMessage}</div>}
-              </div>
-
-              <div className="world-news-section">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="world-news-kicker">网页收藏夹</p>
-                    <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">置顶你反复会开的链接</h3>
-                  </div>
-                  <span className="world-news-pill">{savedLinks.length} 条</span>
-                </div>
-                <div className="mt-3 grid gap-2">
-                  <input type="text" value={newSavedLinkTitle} onChange={(event) => setNewSavedLinkTitle(event.target.value)} placeholder="标题（可选）" className="world-news-input" />
-                  <div className="flex gap-2">
-                    <input type="text" value={newSavedLinkUrl} onChange={(event) => setNewSavedLinkUrl(event.target.value)} placeholder="网页链接" className="world-news-input flex-1" />
-                    <button type="button" onClick={addSavedLink} className="world-news-button world-news-button-accent">收藏</button>
-                  </div>
-                </div>
-                <div className="world-news-scroll mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
-                  {savedLinks.length === 0 ? (
-                    <div className="world-news-subcard text-[11px] leading-5 text-[color:var(--text-secondary)]">把常看的网页放在这里，后面就不用再翻标签页了。</div>
-                  ) : savedLinks.map((link) => (
-                    <div key={link.id} className="world-news-feed-row items-center gap-2">
-                      <a href={link.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-[color:var(--text-strong)]">{link.title}</p>
-                        <p className="truncate text-[11px] text-[color:var(--text-secondary)]">{link.url}</p>
-                      </a>
-                      <button type="button" onClick={() => toggleSavedLinkPin(link.id)} className="world-news-icon-button" title={link.pinned ? '取消置顶' : '置顶'}>
-                        <Star className={cn('h-4 w-4', link.pinned && 'fill-current')} />
-                      </button>
-                      <button type="button" onClick={() => deleteSavedLink(link.id)} className="world-news-icon-button" title="删除收藏">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {newsPreferences.ignored_terms.length > 0 && (
-                <div className="world-news-section">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="world-news-kicker">忽略偏好</p>
-                      <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">这些主题以后不再优先推</h3>
-                    </div>
-                    <span className="world-news-pill">{newsPreferences.ignored_terms.length}</span>
-                  </div>
-                  <div className="mt-3 flex max-h-28 flex-wrap gap-2 overflow-y-auto pr-1">
-                    {newsPreferences.ignored_terms.slice(0, 24).map((term) => (
-                      <span key={`ignored-${term}`} className="world-news-chip">{term}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="world-news-section">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="world-news-kicker">AI 订阅侦察</p>
-                    <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">按主题找 RSS</h3>
-                  </div>
-                  <span className="world-news-pill">{RSS_SCOUT_COST} 点 / 次</span>
-                </div>
-                <div className="mt-3 grid gap-3">
-                  <input type="text" value={rssScoutTopic} onChange={(event) => setRssScoutTopic(event.target.value)} placeholder="主题，例如：独立游戏 / AI 安全 / 开发博客" className="world-news-input" />
-                  <textarea value={rssScoutGuidance} onChange={(event) => setRssScoutGuidance(event.target.value)} rows={3} placeholder="提示方向，例如：优先中文、长期更新、少营销号" className="world-news-input min-h-24 resize-none" />
-                  <div className="grid grid-cols-2 gap-2">
-                    {SPECIAL_ABILITY_MODULES.map((module) => {
-                      const balance = Number((abilityModule.special_totals[module.id] || 0).toFixed(1));
-                      const active = rssScoutPayWith === module.id;
-                      return (
-                        <button key={module.id} type="button" onClick={() => setRssScoutPayWith(module.id)} data-active={active ? 'true' : 'false'} className="world-news-choice">
-                          <span className="text-xs font-semibold">{module.label}</span>
-                          <span className="text-[10px] text-[color:var(--text-secondary)]">{balance} {module.unit}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <button type="button" onClick={runRssScout} disabled={isRssScouting || !rssScoutTopic.trim()} className="world-news-button world-news-button-accent justify-center">
-                    {isRssScouting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                    调用 AI 侦察
-                  </button>
-                  {rssScoutError && <div className="world-news-inline-message world-news-inline-message-warn">{rssScoutError}</div>}
-                  {(rssScoutSummary || rssScoutResults.length > 0) && (
-                    <div className="grid gap-2">
-                      {rssScoutSummary && <p className="text-[11px] leading-5 text-[color:var(--text-secondary)]">{rssScoutSummary}</p>}
-                      {rssScoutResults.map((feed) => {
-                        const exists = rssFeeds.some((item) => normalizeFeedUrl(item.url) === normalizeFeedUrl(feed.url));
-                        return (
-                          <div key={feed.id} className="world-news-subcard">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-sm font-semibold text-[color:var(--text-strong)]">{feed.name}</span>
-                                  <span className="world-news-pill">{feed.category}</span>
-                                </div>
-                                <a href={feed.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex max-w-full items-center gap-1 text-[11px] text-[color:var(--accent)]">
-                                  <Link2 className="h-3 w-3 shrink-0" />
-                                  <span className="truncate">{feed.url}</span>
-                                </a>
-                                {feed.reason && <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)]">{feed.reason}</p>}
-                              </div>
-                              <button type="button" disabled={exists} onClick={() => addSuggestedFeed(feed)} className="world-news-button shrink-0">
-                                {exists ? '已添加' : '采纳'}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="world-news-section">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="world-news-kicker">技术种子库</p>
-                    <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">项目内置可直接导入</h3>
-                  </div>
-                  <Rss className="mt-1 h-4 w-4 text-[color:var(--accent)]" />
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <button type="button" onClick={() => importTechnicalPresets(20)} disabled={isImportingTechPresets} className="world-news-button flex-1">
-                    {isImportingTechPresets ? '导入中...' : '导入前 20 个'}
-                  </button>
-                  <button type="button" onClick={() => importTechnicalPresets(90)} disabled={isImportingTechPresets} className="world-news-button world-news-button-accent flex-1">
-                    {isImportingTechPresets ? '导入中...' : '导入全部'}
-                  </button>
-                </div>
-                {techPresetMessage && <div className="world-news-inline-message mt-3">{techPresetMessage}</div>}
-              </div>
-
-              <div>
-                <p className="world-news-kicker">源列表</p>
-                {categories.length === 0 ? (
-                  <div className="world-news-empty mt-3">
-                    <Rss className="h-8 w-8 text-[color:var(--text-muted)]" />
-                    <p className="mt-3 text-sm font-semibold text-[color:var(--text-strong)]">还没有订阅源</p>
-                    <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">先添加一个 RSS，再手动同步进消息列表。</p>
-                  </div>
-                ) : (
-                  <div className="mt-3 space-y-2">
-                    {categories.map((category) => (
-                      <div key={category} className="world-news-category">
-                        <button type="button" onClick={() => toggleCategory(category)} className="world-news-category-toggle">
-                          <span className="flex items-center gap-2"><span className="world-news-category-dot" />{category}</span>
-                          <ChevronDown className={cn('h-4 w-4 transition-transform', expandedCategories.has(category) && 'rotate-180')} />
-                        </button>
-                        <AnimatePresence initial={false}>
-                          {expandedCategories.has(category) && (
-                            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="mt-2 space-y-2">
-                              {rssFeeds.filter((feed) => feed.category === category).map((feed) => {
-                                const syncing = syncingFeedIds.includes(feed.id);
-                                return (
-                                  <div key={feed.id} className="world-news-feed-row">
-                                    <label className="flex min-w-0 flex-1 items-start gap-3">
-                                      <input type="checkbox" checked={feed.enabled} onChange={() => toggleFeed(feed.id)} className="mt-1 h-4 w-4 rounded border-white/20 bg-transparent" />
-                                      <span className="min-w-0 flex-1">
-                                        <span className="block truncate text-sm font-medium text-[color:var(--text-strong)]">{feed.name}</span>
-                                        <span className="mt-1 block truncate text-[11px] text-[color:var(--text-secondary)]">{formatCompactDateTime(feed.last_fetched_at)}</span>
-                                      </span>
-                                    </label>
-                                    <div className="flex shrink-0 gap-1">
-                                      <button type="button" onClick={() => syncSingleFeed(feed)} disabled={syncing} className="world-news-icon-button" title="同步订阅源">
-                                        {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                                      </button>
-                                      <button type="button" onClick={() => deleteFeed(feed.id)} className="world-news-icon-button" title="删除订阅源">
-                                        <Trash2 className="h-4 w-4" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-white/8 pt-4">
-                <p className="world-news-kicker">笔记筛选</p>
-                <div className="mt-3 grid gap-2">
-                  {noteTypeOptions.map((option) => {
-                    const Icon = option.icon;
-                    const count = option.type === 'all' ? ideaNotes.length : ideaNotes.filter((note) => note.note_type === option.type).length;
-                    return (
-                      <button
-                        key={option.type}
-                        type="button"
-                        onClick={() => {
-                          setNoteFilter(option.type as 'all' | IdeaNote['note_type']);
-                          setMainView('notes');
-                          closeDetail();
-                        }}
-                        data-active={noteFilter === option.type ? 'true' : 'false'}
-                        className="world-news-filter-row"
-                      >
-                        <span className="flex items-center gap-3"><Icon className="h-4 w-4" />{option.label}</span>
-                        <span>{count}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        </motion.aside>
-
-        <motion.section
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.28, delay: 0.06, ease: 'easeOut' }}
-          className="world-news-panel relative min-h-0 overflow-hidden rounded-[2rem]"
-        >
-          <div className="flex h-full min-h-0 flex-col">
-            <div className="border-b border-white/8 px-4 py-4 lg:px-5">
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="world-news-kicker">世界消息工作台</p>
-                    <h2 className="mt-1 text-xl font-semibold text-[color:var(--text-strong)]">{mainView === 'news' ? '消息流' : '笔记流'}</h2>
-                    <p className="mt-1 text-[11px] text-[color:var(--text-secondary)]">列表固定在当前视口内滚动，详情按需抽出，不再常驻占位。</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => { closeDetail(); setMainView('news'); }} data-active={mainView === 'news' ? 'true' : 'false'} className="world-news-tab">
-                      <Globe className="h-4 w-4" />
-                      新闻 {newsItems.length}
-                    </button>
-                    <button type="button" onClick={() => { closeDetail(); setMainView('notes'); }} data-active={mainView === 'notes' ? 'true' : 'false'} className="world-news-tab">
-                      <FileText className="h-4 w-4" />
-                      笔记 {ideaNotes.length}
-                    </button>
-                    {mainView === 'news' ? (
-                      <>
-                        <button type="button" onClick={fetchTrendradarNews} disabled={isLoadingNews} className="world-news-button">
-                          {isLoadingNews ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
-                          TrendRadar
-                        </button>
-                        <button type="button" onClick={clearAllNews} disabled={newsItems.length === 0} className="world-news-button world-news-button-danger">
-                          <Trash2 className="h-4 w-4" />
-                          清空新闻
-                        </button>
-                      </>
-                    ) : (
-                      <button type="button" onClick={() => setIsCreatingNote((prev) => !prev)} className="world-news-button world-news-button-accent">
-                        <Plus className="h-4 w-4" />
-                        {isCreatingNote ? '收起编辑器' : '新建笔记'}
-                      </button>
-                    )}
-                    {detailVisible && (
-                      <button type="button" onClick={closeDetail} className="world-news-button">
-                        <EyeOff className="h-4 w-4" />
-                        关闭详情
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <span className="world-news-pill">{enabledFeeds.length} 个订阅源启用中</span>
-                  <span className="world-news-pill">{unreadCount} 条未读</span>
-                  <span className="world-news-pill">{importantCount} 条重点</span>
-                  {mainView === 'notes' && <span className="world-news-pill">{filteredNotes.length} 条已显示</span>}
-                </div>
-
-                {mainView === 'news' && (
-                  <div className="grid gap-3 xl:grid-cols-3">
-                    <div className="rounded-[1.25rem] border border-rose-300/20 bg-rose-500/10 p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-rose-100/75">和主线相关</p>
-                      <p className="mt-2 text-lg font-semibold text-white">{focusNews.length} 条</p>
-                      <p className="mt-2 text-[11px] leading-5 text-rose-100/80 text-safe-wrap">优先处理和“{coreFocusTitle}”相关的消息。</p>
-                    </div>
-                    <div className="rounded-[1.25rem] border border-slate-300/20 bg-slate-500/10 p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-100">晚点再看</p>
-                      <p className="mt-2 text-lg font-semibold text-white">{laterNews.length} 条</p>
-                      <p className="mt-2 text-[12px] leading-6 text-slate-100">可能相关，但不值得现在打断主线。</p>
-                    </div>
-                    <div className="rounded-[1.25rem] border border-zinc-300/20 bg-zinc-500/10 p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-100">可忽略</p>
-                      <p className="mt-2 text-lg font-semibold text-white">{ignoreNews.length} 条</p>
-                      <p className="mt-2 text-[12px] leading-6 text-zinc-100">先不让这些信息抢走注意力。</p>
-                    </div>
-                  </div>
-                )}
-
-                {workspaceMessage && <div className="world-news-inline-message">{workspaceMessage}</div>}
-              </div>
-            </div>
-            <div className="flex-1 min-h-0 overflow-hidden px-4 pb-4 pt-4 lg:px-5">
-              <div className="h-full">
-                {mainView === 'news' ? (
-                  sortedNews.length === 0 ? (
-                    <div className="world-news-empty h-full">
-                      <Globe className="h-10 w-10 text-[color:var(--text-muted)]" />
-                      <p className="mt-3 text-base font-semibold text-[color:var(--text-strong)]">消息列表还是空的</p>
-                      <p className="mt-2 max-w-md text-center text-[11px] leading-5 text-[color:var(--text-secondary)]">你可以同步 TrendRadar，也可以同步左侧 RSS 订阅源。详情页不会常驻，点卡片时才会从右侧抽出。</p>
-                    </div>
-                  ) : (
-                    <div className="world-news-scroll h-full overflow-y-auto pr-1">
-                      <div className="mb-4 rounded-[1.4rem] border border-white/10 bg-white/[0.04] p-4">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <p className="world-news-kicker">AI 洞察</p>
-                            <h3 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">从未优先项里捞重点，顺手压缩噪音</h3>
-                            <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)]">
-                              {newsInsight?.summary || (focusNews.length === 0
-                                ? '当前“值得看”为空，主要因为现在还是本地规则先做匹配。这里可以再让 AI 从剩余消息里捞一遍。'
-                                : '本地规则已经先分过层，AI 会继续对没排到前面的消息做归纳和提炼。')}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={runWorldNewsInsight}
-                            disabled={isGeneratingNewsInsight || (focusNews.length === 0 && laterNews.length === 0 && ignoreNews.length === 0)}
-                            className="world-news-button world-news-button-accent shrink-0"
-                          >
-                            {isGeneratingNewsInsight ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                            {newsInsight ? '重新生成洞察' : 'AI 总结未优先项'}
-                          </button>
-                        </div>
-                        {newsInsightError && <div className="world-news-inline-message world-news-inline-message-warn mt-3">{newsInsightError}</div>}
-                        {(aiWorthReading.length > 0 || newsInsight?.skip_summary || (newsInsight?.ideas?.length || 0) > 0 || (newsInsight?.next_actions?.length || 0) > 0) && (
-                          <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-                            <div className="grid gap-3">
-                              <div className="world-news-subcard">
-                                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--accent)]">AI 认为值得看</p>
-                                <div className="mt-3 grid gap-2">
-                                  {aiWorthReading.length === 0 ? (
-                                    <p className="text-[11px] leading-5 text-[color:var(--text-secondary)]">这一轮没有从未优先项里捞出必须马上读的内容。</p>
-                                  ) : aiWorthReading.map(({ news, reason }) => (
-                                    <button
-                                      key={`ai-worth-${news.id}`}
-                                      type="button"
-                                      onClick={() => openNewsDetail(news)}
-                                      className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition-colors hover:bg-white/[0.08]"
-                                    >
-                                      <p className="text-sm font-semibold text-[color:var(--text-strong)] line-clamp-2">{news.title}</p>
-                                      <p className="mt-1 text-[11px] leading-5 text-[color:var(--text-secondary)] line-clamp-3">{reason}</p>
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              {newsInsight?.skip_summary && (
-                                <div className="world-news-subcard">
-                                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--accent)]">先不看的原因</p>
-                                  <p className="mt-3 text-[12px] leading-6 text-[color:var(--text-secondary)] text-safe-wrap">{newsInsight.skip_summary}</p>
-                                </div>
-                              )}
-                            </div>
-                            <div className="grid gap-3">
-                              {(newsInsight?.ideas?.length || 0) > 0 && (
-                                <div className="world-news-subcard">
-                                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--accent)]">AI 的想法</p>
-                                  <div className="mt-3 grid gap-2">
-                                    {newsInsight?.ideas.map((idea, index) => (
-                                      <div key={`insight-idea-${index}`} className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-[12px] leading-6 text-[color:var(--text-secondary)] text-safe-wrap">
-                                        {idea}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              {(newsInsight?.next_actions?.length || 0) > 0 && (
-                                <div className="world-news-subcard">
-                                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--accent)]">下一步</p>
-                                  <div className="mt-3 flex flex-wrap gap-2">
-                                    {newsInsight?.next_actions.map((action, index) => (
-                                      <span key={`insight-action-${index}`} className="world-news-pill text-safe-wrap">
-                                        {action}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      <div className="world-news-news-summary mb-4 grid gap-3 lg:grid-cols-3">
-                        {[
-                          { title: '当前值得看', items: focusNews, tone: 'border-rose-300/20 bg-rose-500/10 text-rose-100' },
-                          { title: '稍后处理', items: laterNews, tone: 'border-slate-300/20 bg-slate-500/10 text-slate-100' },
-                          { title: '先忽略', items: ignoreNews, tone: 'border-zinc-300/20 bg-zinc-500/10 text-zinc-100' },
-                        ].map((section) => (
-                          <div key={section.title} className={cn("rounded-[1.2rem] border p-4", section.tone)}>
-                            <p className="text-[10px] font-bold uppercase tracking-[0.18em]">{section.title}</p>
-                            <div className="mt-3 grid gap-2">
-                              {section.items.length === 0 ? (
-                                <p className="text-[11px] leading-5 opacity-80">
-                                  {section.title === '当前值得看'
-                                    ? '本地规则暂时没有命中，可以用上面的 AI 洞察再捞一轮。'
-                                    : '当前没有这一类消息。'}
-                                </p>
-                              ) : section.items.slice(0, 2).map(({ news, reason }) => (
-                                <button
-                                  key={`triage-${section.title}-${news.id}`}
-                                  type="button"
-                                  onClick={() => openNewsDetail(news)}
-                                  className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition-colors hover:bg-white/[0.08]"
-                                >
-                                  <p className="text-sm font-semibold text-white line-clamp-2">{news.title}</p>
-                                  <p className="mt-1 text-[11px] leading-5 text-current/75 line-clamp-2">{reason}</p>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="world-news-news-list grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-                        {triagedNews.map(({ news, reason, bucket }) => (
-                          <motion.article
-                            key={news.id}
-                            layout
-                            transition={{ duration: 0.22, ease: 'easeOut' }}
-                            data-active={detailMode === 'news' && selectedNews?.id === news.id ? 'true' : 'false'}
-                            data-muted={news.is_read ? 'true' : 'false'}
-                            className="world-news-card group cursor-pointer"
-                            onClick={() => openNewsDetail(news)}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap gap-2">
-                                  <span className="world-news-pill">{formatCompactDateTime(news.published_at)}</span>
-                                  <span className="world-news-pill">{bucket === 'focus' ? '和主线相关' : bucket === 'later' ? '晚点再看' : '先忽略'}</span>
-                                  {news.is_important && <span className="world-news-pill">重点</span>}
-                                  {news.note_ids.length > 0 && <span className="world-news-pill">{news.note_ids.length} 条关联笔记</span>}
-                                </div>
-                                <h3 className="mt-3 text-sm font-semibold leading-6 text-[color:var(--text-strong)] line-clamp-2">{news.title}</h3>
-                                <p className="mt-2 text-[12px] leading-6 text-[color:var(--text-secondary)] line-clamp-3">{news.content}</p>
-                                <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)] line-clamp-2">{reason}</p>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                  {news.tags.slice(0, 4).map((tag) => (
-                                    <span key={`${news.id}-${tag}`} className="world-news-chip">{tag}</span>
-                                  ))}
-                                </div>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                <button type="button" onClick={(event) => { event.stopPropagation(); createTaskFromNews(news); }} className="world-news-button world-news-button-accent">
-                                  <ListTodo className="h-4 w-4" />
-                                  转任务
-                                </button>
-                                <button type="button" onClick={(event) => { event.stopPropagation(); createNoteFromNews(news); }} className="world-news-button">
-                                  <Edit3 className="h-4 w-4" />
-                                  转笔记
-                                </button>
-                                <button type="button" onClick={(event) => { event.stopPropagation(); markNewsNotInterested(news); }} className="world-news-button">
-                                  <EyeOff className="h-4 w-4" />
-                                  不感兴趣
-                                </button>
-                              </div>
-                              </div>
-                              <div className="flex shrink-0 flex-col gap-2 opacity-85 transition-opacity group-hover:opacity-100">
-                                <button type="button" onClick={(event) => { event.stopPropagation(); toggleNewsImportant(news.id); }} className="world-news-icon-button" title="标记重点">
-                                  <Star className={cn('h-4 w-4', news.is_important && 'fill-current')} />
-                                </button>
-                                <button type="button" onClick={(event) => { event.stopPropagation(); toggleNewsRead(news.id); }} className="world-news-icon-button" title="切换已读">
-                                  {news.is_read ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </button>
-                                <button type="button" onClick={(event) => { event.stopPropagation(); deleteNewsItem(news.id); }} className="world-news-icon-button" title="删除新闻">
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            </div>
-                          </motion.article>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                ) : (
-                  <div className="world-news-scroll h-full overflow-y-auto pr-1">
-                    <AnimatePresence initial={false}>
-                      {isCreatingNote && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -12 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          transition={{ duration: 0.22, ease: 'easeOut' }}
-                          className="world-news-section mb-4"
-                        >
-                          <div className="grid gap-3">
-                            <div className="grid gap-2 sm:grid-cols-3">
-                              {noteTypeOptions.filter((option) => option.type !== 'all').map((option) => (
-                                <button
-                                  key={option.type}
-                                  type="button"
-                                  data-active={newNoteType === option.type ? 'true' : 'false'}
-                                  onClick={() => setNewNoteType(option.type as IdeaNote['note_type'])}
-                                  className="world-news-choice justify-center"
-                                >
-                                  <span className="text-xs font-semibold">{option.label}</span>
-                                </button>
-                              ))}
-                            </div>
-                            <input type="text" placeholder="笔记标题" value={newNoteTitle} onChange={(event) => setNewNoteTitle(event.target.value)} className="world-news-input" />
-                            {newNoteType === 'resume_tracking' && (
-                              <div className="grid gap-3 md:grid-cols-2">
-                                <input type="text" value={resumeCompany} onChange={(event) => setResumeCompany(event.target.value)} placeholder="公司名称" className="world-news-input" />
-                                <input type="text" value={resumePosition} onChange={(event) => setResumePosition(event.target.value)} placeholder="职位名称" className="world-news-input" />
-                                <select value={resumeStatus} onChange={(event) => setResumeStatus(event.target.value as 'pending' | 'interview' | 'rejected' | 'accepted')} className="world-news-input">
-                                  <option value="pending">待定</option>
-                                  <option value="interview">面试中</option>
-                                  <option value="rejected">已拒绝</option>
-                                  <option value="accepted">已通过</option>
-                                </select>
-                                <input type="date" value={resumeAppliedDate} onChange={(event) => setResumeAppliedDate(event.target.value)} className="world-news-input" />
-                                <input type="date" value={resumeDeadline} onChange={(event) => setResumeDeadline(event.target.value)} className="world-news-input md:col-span-2" />
-                              </div>
-                            )}
-                            <textarea rows={7} placeholder="记录你的想法、摘要或下一步。" value={newNoteContent} onChange={(event) => setNewNoteContent(event.target.value)} className="world-news-input min-h-40 resize-y" />
-                            <div className="flex flex-wrap gap-2">
-                              <input
-                                type="text"
-                                placeholder="输入标签后回车"
-                                value={newNoteTagInput}
-                                onChange={(event) => setNewNoteTagInput(event.target.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter') {
-                                    event.preventDefault();
-                                    addNoteTag();
-                                  }
-                                }}
-                                className="world-news-input flex-1"
-                              />
-                              <button type="button" onClick={addNoteTag} className="world-news-button">添加标签</button>
-                            </div>
-                            {newNoteTags.length > 0 && (
-                              <div className="flex flex-wrap gap-2">
-                                {newNoteTags.map((tag) => (
-                                  <button key={tag} type="button" onClick={() => removeNoteTag(tag)} className="world-news-chip">
-                                    {tag} <X className="h-3 w-3" />
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                            <div className="flex flex-wrap gap-2">
-                              <button type="button" onClick={createNewNote} className="world-news-button world-news-button-accent"><Save className="h-4 w-4" />保存笔记</button>
-                              <button type="button" onClick={resetNoteComposer} className="world-news-button"><X className="h-4 w-4" />取消</button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                    {filteredNotes.length === 0 ? (
-                      <div className="world-news-empty min-h-[22rem]">
-                        <FileText className="h-10 w-10 text-[color:var(--text-muted)]" />
-                        <p className="mt-3 text-base font-semibold text-[color:var(--text-strong)]">这个筛选下还没有笔记</p>
-                        <p className="mt-2 max-w-md text-center text-[11px] leading-5 text-[color:var(--text-secondary)]">你可以手动新建，也可以从新闻详情里一键转成笔记。</p>
-                      </div>
-                    ) : (
-                      <div className="grid gap-3 xl:grid-cols-2">
-                        {filteredNotes.map((note) => (
-                          <motion.article
-                            key={note.id}
-                            layout
-                            transition={{ duration: 0.22, ease: 'easeOut' }}
-                            data-active={detailMode === 'note' && selectedNote?.id === note.id ? 'true' : 'false'}
-                            className="world-news-card group cursor-pointer"
-                            onClick={() => openNoteDetail(note)}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap gap-2">
-                                  <span className="world-news-pill">{formatCompactDateTime(note.updated_at)}</span>
-                                  <span className="world-news-pill">{note.note_type === 'idea' ? '想法' : note.note_type === 'resume_tracking' ? '简历' : '通用'}</span>
-                                  {note.related_task_id && <span className="world-news-pill">已转任务</span>}
-                                </div>
-                                <h3 className="mt-3 text-sm font-semibold leading-6 text-[color:var(--text-strong)] line-clamp-2">{note.title}</h3>
-                                <p className="mt-2 text-[12px] leading-6 text-[color:var(--text-secondary)] line-clamp-3">{note.content.replace(/[#*_`>\\[\\]\\(\\)]/g, ' ')}</p>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                  {note.tags.slice(0, 4).map((tag) => (
-                                    <span key={`${note.id}-${tag}`} className="world-news-chip">{tag}</span>
-                                  ))}
-                                </div>
-                              </div>
-                              <div className="flex shrink-0 flex-col gap-2 opacity-85 transition-opacity group-hover:opacity-100">
-                                <button type="button" onClick={(event) => { event.stopPropagation(); deleteNote(note.id); }} className="world-news-icon-button" title="删除笔记">
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            </div>
-                          </motion.article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-            <AnimatePresence>
-              {detailVisible && (
-                <>
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="world-news-modal-backdrop fixed inset-0 z-40 flex items-center justify-center p-4"
-                    onClick={closeDetail}
-                  >
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.92, y: 20 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.92, y: 20 }}
-                      transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
-                      className="world-news-modal-panel w-full max-w-3xl"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                    {detailMode === 'news' && selectedNews ? (
-                      <>
-                        <div className="border-b border-white/8 px-4 py-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="world-news-kicker">消息详情</p>
-                              <h3 className="mt-1 text-lg font-semibold leading-7 text-[color:var(--text-strong)]">{selectedNews.title}</h3>
-                            </div>
-                            <button type="button" onClick={closeDetail} className="world-news-icon-button"><X className="h-4 w-4" /></button>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <span className="world-news-pill">{formatCompactDateTime(selectedNews.published_at)}</span>
-                            {selectedNews.tags.map((tag) => <span key={`${selectedNews.id}-${tag}`} className="world-news-chip">{tag}</span>)}
-                          </div>
-                        </div>
-                        <div className="world-news-scroll flex-1 min-h-0 overflow-y-auto px-4 py-4">
-                          <div className="world-news-detail-copy"><p>{selectedNews.content}</p></div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {selectedNews.url && <a href={selectedNews.url} target="_blank" rel="noopener noreferrer" className="world-news-button"><ExternalLink className="h-4 w-4" />查看原文</a>}
-                            <button type="button" onClick={() => createTaskFromNews(selectedNews)} className="world-news-button world-news-button-accent"><ListTodo className="h-4 w-4" />转成任务</button>
-                            <button type="button" onClick={() => createNoteFromNews(selectedNews)} className="world-news-button world-news-button-accent"><Edit3 className="h-4 w-4" />转成笔记</button>
-                            <button type="button" onClick={() => deleteNewsItem(selectedNews.id)} className="world-news-button world-news-button-danger"><Trash2 className="h-4 w-4" />删除新闻</button>
-                          </div>
-                        </div>
-                      </>
-                    ) : detailMode === 'note' && selectedNote ? (
-                      <>
-                        <div className="border-b border-white/8 px-4 py-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="world-news-kicker">笔记详情</p>
-                              <h3 className="mt-1 text-lg font-semibold leading-7 text-[color:var(--text-strong)]">{selectedNote.title}</h3>
-                            </div>
-                            <button type="button" onClick={closeDetail} className="world-news-icon-button"><X className="h-4 w-4" /></button>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <span className="world-news-pill">{selectedNote.note_type === 'idea' ? '想法' : selectedNote.note_type === 'resume_tracking' ? '简历跟踪' : '通用'}</span>
-                            <span className="world-news-pill">{formatCompactDateTime(selectedNote.updated_at)}</span>
-                            {selectedNote.tags.map((tag) => <span key={`${selectedNote.id}-${tag}`} className="world-news-chip">{tag}</span>)}
-                          </div>
-                        </div>
-                        <div className="world-news-scroll flex-1 min-h-0 overflow-y-auto px-4 py-4">
-                          {selectedNote.note_type === 'resume_tracking' && selectedNote.metadata && (
-                            <div className="world-news-section mb-4">
-                              <div className="grid gap-3 sm:grid-cols-2">
-                                <div><p className="world-news-kicker">公司</p><p className="mt-1 text-sm text-[color:var(--text-strong)]">{selectedNote.metadata.company || '-'}</p></div>
-                                <div><p className="world-news-kicker">职位</p><p className="mt-1 text-sm text-[color:var(--text-strong)]">{selectedNote.metadata.position || '-'}</p></div>
-                                <div><p className="world-news-kicker">状态</p><p className="mt-1 text-sm text-[color:var(--text-strong)]">{selectedNote.metadata.status || 'pending'}</p></div>
-                                <div><p className="world-news-kicker">投递时间</p><p className="mt-1 text-sm text-[color:var(--text-strong)]">{formatCompactDateTime(selectedNote.metadata.applied_at)}</p></div>
-                              </div>
-                            </div>
-                          )}
-                          <div className="world-news-markdown rounded-[1.5rem] border border-white/8 px-4 py-4"><Markdown>{selectedNote.content}</Markdown></div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {selectedNote.related_task_id ? (
-                              <span className="world-news-pill flex items-center gap-2"><CheckCircle2 className="h-4 w-4" />已关联任务</span>
-                            ) : (
-                              <button type="button" onClick={() => convertNoteToTask(selectedNote)} className="world-news-button world-news-button-accent"><ListTodo className="h-4 w-4" />转为任务</button>
-                            )}
-                            <button type="button" onClick={() => deleteNote(selectedNote.id)} className="world-news-button world-news-button-danger"><Trash2 className="h-4 w-4" />删除笔记</button>
-                          </div>
-                        </div>
-                      </>
-                    ) : null}
-                    </motion.div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
-        </motion.section>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const [authToken, setAuthToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) || '' : ''));
   const [authUser, setAuthUser] = useState('');
@@ -4909,12 +2966,7 @@ export default function App() {
       : 'fox';
   });
   const [focusReminderSettings, setFocusReminderSettings] = useState<FocusReminderSettings>(createDefaultFocusReminderSettings());
-  const [rssFeeds, setRssFeeds] = useState<RSSFeed[]>([]);
-  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
-  const [ideaNotes, setIdeaNotes] = useState<IdeaNote[]>([]);
-  const [newsPreferences, setNewsPreferences] = useState<NewsPreferences>(createDefaultNewsPreferences());
-  const [savedLinks, setSavedLinks] = useState<SavedLink[]>([]);
-  const [currentView, setCurrentView] = useState<'tasks' | 'world_news' | 'admin'>('tasks');
+  const [currentView, setCurrentView] = useState<'tasks' | 'admin'>('tasks');
   const [newAbilityDimension, setNewAbilityDimension] = useState('');
   const [behaviorChatInput, setBehaviorChatInput] = useState('');
   const [behaviorChatError, setBehaviorChatError] = useState('');
@@ -5370,11 +3422,6 @@ export default function App() {
     setAbilityModule(createDefaultAbilityModuleSettings());
     setAiDayPlan(createDefaultAIDayPlanWorkspace());
     setFocusReminderSettings(createDefaultFocusReminderSettings());
-    setRssFeeds([]);
-    setNewsItems([]);
-    setIdeaNotes([]);
-    setNewsPreferences(createDefaultNewsPreferences());
-    setSavedLinks([]);
     setSelectedTask(null);
     setIsLoadingTasks(false);
     setStorageError('');
@@ -5384,7 +3431,7 @@ export default function App() {
     setCalendarSubscription(null);
   };
 
-  const activeTasks = tasks.filter((task) => task.status === 'pending');
+  const activeTasks = tasks.filter((task) => task.status === 'pending' && !task.archived_at);
   const archivedTasks = tasks.filter((task) => task.status === 'completed');
   const longTermTasks = activeTasks.filter((task) => task.timeline === 'long_term');
   const runningTasks = activeTasks.filter((task) => Boolean(task.tracking_started_at));
@@ -5613,18 +3660,7 @@ export default function App() {
     ? getTaskNextActionText(currentPrimaryTask)
     : (aiDayPlan.summary || focusHeadline);
   const focusFillCount = Math.max(0, FOCUS_WIP_LIMIT - runningTasks.length);
-  const simpleHomeTasks: Task[] = [];
-  [
-    ...currentPrimaryTasks,
-    ...focusDeck,
-    ...dailyMixTasks,
-    ...lowEnergyStandby,
-  ].forEach((task) => {
-    if (!simpleHomeTasks.some((item) => item.id === task.id) && simpleHomeTasks.length < 5) {
-      simpleHomeTasks.push(task);
-    }
-  });
-  const homeLineTasks = sortTasksForLine(simpleHomeTasks, energyScore, pressureScore, nowTs);
+  const homeLineTasks = sortTasksForLine(activeTasks, energyScore, pressureScore, nowTs);
   const serialLineTasks = homeLineTasks.filter((task) => task.execution_mode !== 'parallel');
   const parallelLineTasks = homeLineTasks.filter((task) => task.execution_mode === 'parallel');
   const homeLineRows = buildTaskLineRows(homeLineTasks);
@@ -5850,11 +3886,6 @@ export default function App() {
         setAbilityModule(loadedData.ability_module);
         setAiDayPlan(loadedData.ai_day_plan || createDefaultAIDayPlanWorkspace());
         setFocusReminderSettings(loadedData.focus_reminders || createDefaultFocusReminderSettings());
-        setRssFeeds(loadedData.rss_feeds || []);
-        setNewsItems(loadedData.news_items || []);
-        setIdeaNotes(loadedData.idea_notes || []);
-        setNewsPreferences(loadedData.news_preferences || createDefaultNewsPreferences());
-        setSavedLinks(loadedData.saved_links || []);
         setStorageError('');
       })
       .catch((e) => {
@@ -5894,11 +3925,6 @@ export default function App() {
         ability_module: abilityModule,
         ai_day_plan: aiDayPlan,
         focus_reminders: focusReminderSettings,
-        rss_feeds: rssFeeds,
-        news_items: newsItems,
-        idea_notes: ideaNotes,
-        news_preferences: newsPreferences,
-        saved_links: savedLinks,
       }, authToken)
         .then(() => setStorageError(''))
         .catch((e) => {
@@ -5913,7 +3939,7 @@ export default function App() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [tasks, abilityDimensions, wellbeing, abilityModule, aiDayPlan, focusReminderSettings, rssFeeds, newsItems, ideaNotes, newsPreferences, savedLinks, isLoadingTasks, authToken]);
+  }, [tasks, abilityDimensions, wellbeing, abilityModule, aiDayPlan, focusReminderSettings, isLoadingTasks, authToken]);
 
   useEffect(() => {
     if (abilityModule.tracked_ms_baseline <= totalTrackedMsAllTasks) return;
@@ -6327,7 +4353,7 @@ export default function App() {
     const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
     const taskById = new Map(tasks.map((task) => [task.id, task]));
     const projectedTasks = nextIds
-      .map((id, index) => {
+      .map((id, index): ProjectedLineTask | null => {
         const task = taskById.get(id);
         if (!task) return null;
         return {
@@ -6336,7 +4362,7 @@ export default function App() {
           line_order: index + 1,
         };
       })
-      .filter((task): task is Task => Boolean(task));
+      .filter((task): task is ProjectedLineTask => Boolean(task));
     const normalizedModeByTaskId = new Map<string, TaskExecutionMode>();
     buildTaskLineRows(projectedTasks).forEach((row) => {
       row.tasks.forEach((rowTask) => normalizedModeByTaskId.set(rowTask.id, row.mode));
@@ -6378,7 +4404,7 @@ export default function App() {
     const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
     const taskById = new Map(tasks.map((task) => [task.id, task]));
     const projectedTasks = nextIds
-      .map((id, index) => {
+      .map((id, index): ProjectedLineTask | null => {
         const task = taskById.get(id);
         if (!task) return null;
         return {
@@ -6387,7 +4413,7 @@ export default function App() {
           line_order: index + 1,
         };
       })
-      .filter((task): task is Task => Boolean(task));
+      .filter((task): task is ProjectedLineTask => Boolean(task));
     const normalizedModeByTaskId = new Map<string, TaskExecutionMode>();
     buildTaskLineRows(projectedTasks).forEach((row) => {
       row.tasks.forEach((rowTask) => normalizedModeByTaskId.set(rowTask.id, row.mode));
@@ -6539,7 +4565,7 @@ export default function App() {
     const rankMap = new Map(nextIds.map((id, index) => [id, index + 1]));
     const taskById = new Map(tasks.map((task) => [task.id, task]));
     const projectedTasks = nextIds
-      .map((id, index) => {
+      .map((id, index): ProjectedLineTask | null => {
         const task = taskById.get(id);
         if (!task) return null;
         return {
@@ -6548,7 +4574,7 @@ export default function App() {
           line_order: index + 1,
         };
       })
-      .filter((task): task is Task => Boolean(task));
+      .filter((task): task is ProjectedLineTask => Boolean(task));
     const normalizedModeByTaskId = new Map<string, TaskExecutionMode>();
     buildTaskLineRows(projectedTasks).forEach((row) => {
       row.tasks.forEach((rowTask) => normalizedModeByTaskId.set(rowTask.id, row.mode));
@@ -7120,7 +5146,7 @@ export default function App() {
           description: task.description || aiDayPlan.summary || currentCoreFocusDetail,
           minutes: task.estimated_minutes,
         }))
-      : simpleHomeTasks.slice(0, 5).map((task) => ({
+      : homeLineTasks.slice(0, 5).map((task) => ({
           title: task.title || '未命名任务',
           description: getTaskNextActionText(task),
           minutes: task.estimated_minutes || 30,
@@ -7366,7 +5392,7 @@ export default function App() {
       <article
         key={task.id}
         className={cn(
-          "rounded-[1.1rem] border px-4 py-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/25",
+          "task-focus-card rounded-[1.1rem] border px-4 py-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/25",
           toneClasses[tone],
           task.tracking_started_at && "ring-1 ring-cyan-400/30"
         )}
@@ -7915,18 +5941,6 @@ export default function App() {
               >
                 <LayoutGrid className="h-4 w-4" />
                 <span>任务</span>
-              </button>
-              <button
-                onClick={() => setCurrentView('world_news')}
-                className={cn(
-                  "flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition-all",
-                  currentView === 'world_news'
-                    ? "border-[color:var(--brand-border)] bg-[color:var(--theme-chip-bg)] text-[color:var(--text-strong)] shadow-[0_10px_24px_rgba(2,8,18,0.08)]"
-                    : "border-transparent bg-transparent text-[color:var(--text-secondary)] hover:bg-[color:var(--surface-muted)] hover:text-[color:var(--text-strong)]"
-                )}
-              >
-                <Globe className="h-4 w-4" />
-                <span>世界消息</span>
               </button>
               </div>
             </div>
@@ -8710,7 +6724,7 @@ export default function App() {
                       <h4 className="mt-2 text-base font-semibold text-white text-safe-wrap">{aiDayPlan.core_focus || currentCoreFocusTitle || '先给今天一句任务说明'}</h4>
                     </div>
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-slate-200">
-                      {aiDayPlan.tasks.length > 0 ? `${aiDayPlan.tasks.length} 项草案` : `${simpleHomeTasks.length} 项待办`}
+                      {aiDayPlan.tasks.length > 0 ? `${aiDayPlan.tasks.length} 项草案` : `${homeLineTasks.length} 项待办`}
                     </span>
                   </div>
                   <textarea
@@ -8748,7 +6762,7 @@ export default function App() {
                 {aiDayPlan.summary && (
                   <div className="rounded-[1.4rem] border border-white/10 bg-white/[0.03] p-4">
                     <p className="text-sm leading-6 text-slate-300 text-safe-wrap">{aiDayPlan.summary}</p>
-                    {(aiDayPlan.tasks.length > 0 || simpleHomeTasks.length > 0) && (
+                    {(aiDayPlan.tasks.length > 0 || homeLineTasks.length > 0) && (
                       <div className="mt-4 grid gap-2">
                         {(aiDayPlan.tasks.length > 0
                           ? aiDayPlan.tasks.slice(0, 4).map((task, index) => ({
@@ -8756,7 +6770,7 @@ export default function App() {
                               title: task.title,
                               detail: task.description || `${task.estimated_minutes} 分钟`,
                             }))
-                          : simpleHomeTasks.slice(0, 4).map((task) => ({
+                          : homeLineTasks.slice(0, 4).map((task) => ({
                               key: task.id,
                               title: task.title || '未命名任务',
                               detail: getTaskNextActionText(task),
@@ -10307,29 +8321,6 @@ export default function App() {
         )}
       </div>
         </>
-      ) : currentView === 'world_news' ? (
-        <WorldNewsView
-          rssFeeds={rssFeeds}
-          setRssFeeds={setRssFeeds}
-          newsItems={newsItems}
-          setNewsItems={setNewsItems}
-          newsPreferences={newsPreferences}
-          setNewsPreferences={setNewsPreferences}
-          savedLinks={savedLinks}
-          setSavedLinks={setSavedLinks}
-          abilityModule={abilityModule}
-          spendSpecialReward={spendSpecialReward}
-          authToken={authToken}
-          onUnauthorized={() => {
-            clearAuth();
-            setLoginError('登录已过期，请重新登录。');
-          }}
-          ideaNotes={ideaNotes}
-          setIdeaNotes={setIdeaNotes}
-          tasks={tasks}
-          setTasks={setTasks}
-          coreFocusTitle={currentCoreFocusTitle}
-        />
       ) : (
         <AdminResetView
           authToken={authToken}
@@ -10430,14 +8421,14 @@ function TaskPoint({
           }
         }}
         className={cn(
-          "relative group cursor-grab active:cursor-grabbing p-4",
+          "relative group cursor-grab active:cursor-grabbing p-1.5",
           isDragging && "scale-110 z-50"
         )}
       >
         {/* Rose block marker */}
         <div
           className={cn(
-            "task-point-shell task-point-shell-simple relative h-10 w-10 overflow-hidden rounded-[0.7rem] border transition-all duration-300"
+            "task-point-shell task-point-shell-simple relative h-7 w-7 overflow-hidden rounded-[0.55rem] border transition-all duration-300"
           )}
           data-zone={quadrantZone}
           style={{
@@ -10450,10 +8441,12 @@ function TaskPoint({
           <div className="task-point-block-progress" />
         </div>
 
-        {/* Always-visible label */}
-        <div className={cn("absolute pointer-events-none", labelPositionClass)}>
+        <div className={cn(
+          "absolute pointer-events-none transition-all duration-200 opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:scale-100",
+          labelPositionClass
+        )}>
           <div
-            className="task-point-label rounded-[1rem] border px-2.5 py-2 shadow-xl"
+            className="task-point-label rounded-[0.9rem] border px-2 py-1.5 shadow-xl"
             data-zone={quadrantZone}
             style={{
               ['--task-point-zone' as string]: quadrantMeta.tint,
@@ -10462,7 +8455,7 @@ function TaskPoint({
           >
             <div className="flex items-start gap-2">
               <span className="task-point-dot mt-1 shrink-0" />
-              <span className="task-point-title line-clamp-2 text-[11px] font-semibold leading-4">{task.title || '未命名'}</span>
+              <span className="task-point-title line-clamp-2 text-[10px] font-semibold leading-4">{task.title || '未命名'}</span>
             </div>
             <div className="mt-1.5 flex items-center gap-1">
               <span className="task-point-zone-badge">{quadrantMeta.badge}</span>
@@ -10487,6 +8480,3 @@ function TaskPoint({
     </motion.div>
   );
 }
-
-
-

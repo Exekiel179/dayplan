@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ListTodo, Plus, Sparkles } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import type { Task, TaskExecutionMode } from '../types';
@@ -147,11 +147,16 @@ function TaskLineSurface({
 >) {
   const homeLineTaskIds = homeLineTasks.map((item) => item.id);
   const compactPrimaryParallel = currentPrimaryIsParallel && currentPrimaryTasks.length >= 3;
+  const parallelTaskCount = homeLineRows
+    .filter((row) => row.mode === 'parallel')
+    .reduce((sum, row) => sum + row.tasks.length, 0);
+  const queuedTaskCount = Math.max(0, homeLineTasks.length - currentPrimaryTasks.length);
 
   return (
-    <section className="mx-4 mt-4 sm:mx-6 home-stage rounded-[1.9rem] border border-white/10 bg-[linear-gradient(160deg,rgba(6,17,29,0.96),rgba(9,25,37,0.88))] p-5 shadow-[0_26px_64px_rgba(2,8,18,0.34)] sm:p-6">
-      <div className="home-stage-header">
+    <section className="mx-4 mt-4 sm:mx-6 home-stage home-line-stage rounded-[1.9rem] border border-white/10 bg-[linear-gradient(160deg,rgba(6,17,29,0.96),rgba(9,25,37,0.88))] p-5 shadow-[0_26px_64px_rgba(2,8,18,0.34)] sm:p-6">
+      <div className="home-stage-header home-line-header">
         <div className="home-stage-title-wrap min-w-0">
+          <p className="home-line-eyebrow">今日轨道</p>
           <div className="home-line-title-row">
             <h3 className="text-[clamp(1.42rem,2.6vw,2.2rem)] font-semibold leading-tight text-white text-safe-wrap">
               任务线
@@ -159,6 +164,25 @@ function TaskLineSurface({
             {renderInlineEnergyBar('line-title')}
           </div>
         </div>
+        <div className="home-line-metrics" aria-label="任务线状态">
+          <div className="home-line-metric">
+            <span>主线</span>
+            <strong>{currentPrimaryTasks.length > 0 ? (currentPrimaryIsParallel ? `${currentPrimaryTasks.length} 并行` : '1 项') : '未定'}</strong>
+          </div>
+          <div className="home-line-metric">
+            <span>排布</span>
+            <strong>{queuedTaskCount} 项</strong>
+          </div>
+          <div className="home-line-metric">
+            <span>并行</span>
+            <strong>{parallelTaskCount} 项</strong>
+          </div>
+        </div>
+      </div>
+      <div className="home-line-track-strip" aria-hidden="true">
+        <span className="home-line-track-node home-line-track-node-active" />
+        <span className="home-line-track-fill" />
+        <span className="home-line-track-node" />
       </div>
 
       <div className="home-stage-body">
@@ -166,28 +190,32 @@ function TaskLineSurface({
           <div className="home-focus-shell">
             <div className="home-focus-meta">
               <div>
+                <p className="home-focus-kicker">主线任务</p>
                 <h4 className="text-[1.05rem] font-semibold leading-6 text-white text-safe-wrap">当前主线</h4>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setIsTaskListOpen(true)}
-                  className="home-open-list rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
+                  className="home-open-list home-line-action-button"
                 >
+                  <ListTodo className="h-3.5 w-3.5" />
                   打开清单
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsDesignPanelOpen(true)}
-                  className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
+                  className="home-line-action-button"
                 >
+                  <Sparkles className="h-3.5 w-3.5" />
                   AI设计
                 </button>
                 <button
                   type="button"
                   onClick={handleAddTask}
-                  className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.08]"
+                  className="home-line-action-button home-line-action-button-strong"
                 >
+                  <Plus className="h-3.5 w-3.5" />
                   新建任务
                 </button>
               </div>
@@ -240,7 +268,7 @@ function TaskLineSurface({
                     tone: 'focus',
                   })
               ) : (
-                <div className="flex h-full min-h-[220px] items-center justify-center rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
+                <div className="home-line-empty-drop flex min-h-[220px] items-center justify-center rounded-[1.1rem] border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-sm leading-6 text-slate-400">
                   拖一个任务到这里。
                 </div>
               )}
@@ -252,7 +280,8 @@ function TaskLineSurface({
           <section className="home-stack-card">
             <div className="home-stack-head">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">任务排布</p>
+                <p className="home-focus-kicker">等待队列</p>
+                <h4 className="mt-1 text-sm font-semibold text-[color:var(--text-strong)]">任务排布</h4>
               </div>
               <div className="flex items-center gap-2 text-[11px] text-slate-300">
                 <span>{homeLineTasks.length} 项</span>
@@ -287,12 +316,15 @@ function TaskLineSurface({
                       clearTaskDragState();
                     }}
                     className={cn(
-                      "rounded-[1rem] border px-3 py-3",
+                      "home-line-row-shell rounded-[1rem] border px-3 py-3",
                       row.mode === 'parallel'
                         ? "parallel-row-shell border-sky-200/40 bg-sky-500/[0.05]"
                         : "border-white/10 bg-white/[0.03]"
                     )}
                   >
+                    {row.mode === 'parallel' && (
+                      <div className="home-line-row-tag">并行 · {row.tasks.length}</div>
+                    )}
                     <div className={cn(
                       "grid gap-3",
                       row.mode === 'parallel'

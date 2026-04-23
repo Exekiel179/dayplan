@@ -130,66 +130,6 @@ export interface FocusReminderSettings {
   last_notified_at: number | null;
 }
 
-// RSS 订阅源
-export interface RSSFeed {
-  id: string;
-  name: string;
-  url: string;
-  category: string;
-  keywords: string[];
-  enabled: boolean;
-  last_fetched_at?: number;
-  created_at: number;
-}
-
-// 新闻条目
-export interface NewsItem {
-  id: string;
-  feed_id?: string;
-  title: string;
-  content: string;
-  url: string;
-  published_at: number;
-  is_important: boolean;
-  is_read: boolean;
-  tags: string[];
-  note_ids: string[];
-  created_at: number;
-}
-
-// 想法笔记
-export interface IdeaNote {
-  id: string;
-  title: string;
-  content: string;
-  tags: string[];
-  related_news_ids: string[];
-  related_task_id?: string;
-  note_type: 'idea' | 'resume_tracking' | 'general';
-  metadata?: {
-    company?: string;
-    position?: string;
-    status?: 'pending' | 'interview' | 'rejected' | 'accepted';
-    applied_at?: number;
-    deadline?: number;
-  };
-  created_at: number;
-  updated_at: number;
-}
-
-export interface NewsPreferences {
-  ignored_terms: string[];
-  updated_at: number;
-}
-
-export interface SavedLink {
-  id: string;
-  title: string;
-  url: string;
-  pinned: boolean;
-  created_at: number;
-}
-
 export interface UserTaskData {
   tasks: Task[];
   ability_dimensions: string[];
@@ -198,11 +138,6 @@ export interface UserTaskData {
   ai_day_plan?: AIDayPlanWorkspace;
   focus_reminders?: FocusReminderSettings;
   calendar_subscription_token?: string;
-  rss_feeds?: RSSFeed[];
-  news_items?: NewsItem[];
-  idea_notes?: IdeaNote[];
-  news_preferences?: NewsPreferences;
-  saved_links?: SavedLink[];
 }
 
 export interface AuthResult {
